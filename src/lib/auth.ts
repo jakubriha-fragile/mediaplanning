@@ -30,7 +30,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // a build nezávisí na dostupnosti databáze.
   session: { strategy: "jwt" },
   trustHost: true,
-  pages: { signIn: "/prihlaseni" },
+  // chyby posíláme na vlastní stránku, ať uživatel nevidí anglické "Server error"
+  pages: { signIn: "/prihlaseni", error: "/prihlaseni" },
   providers: [
     ...(process.env.AUTH_GOOGLE_ID
       ? [
