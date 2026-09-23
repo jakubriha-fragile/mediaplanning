@@ -46,7 +46,15 @@ export function PerfTable({
   rows, months, monthLabels,
 }: { rows: PerfRow[]; months: string[]; monthLabels: Record<string, string> }) {
   const [data, setData] = useState(rows);
-  const [sel, setSel] = useState<string>("all");
+  /**
+   * Otevíráme na aktuálním měsíci, ne na souhrnu — v souhrnu se nedá zadávat
+   * a uživatel skončil na stránce, kde nejde nic dělat. Když dnešek mimo
+   * kvartál nepadne, bereme první měsíc.
+   */
+  const [sel, setSel] = useState<string>(() => {
+    const now = new Date().toISOString().slice(0, 7);
+    return months.includes(now) ? now : months[0];
+  });
   const [onlyAlert, setOnlyAlert] = useState(false);
   const [asOf, setAsOf] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +95,7 @@ export function PerfTable({
     <div className="panel">
       <div className="toolbar">
         <span className="share">Měsíc</span>
-        {[{ k: "all", l: "Q4 celkem" }, ...months.map((m) => ({ k: m, l: monthLabels[m] ?? m }))].map((o) => (
+        {[...months.map((m) => ({ k: m, l: monthLabels[m] ?? m })), { k: "all", l: "Q4 souhrn" }].map((o) => (
           <button key={o.k} className="btn" aria-pressed={sel === o.k}
             style={{ borderRadius: 999, ...(sel === o.k ? { borderColor: "var(--brand)", color: "var(--brand-ink)", fontWeight: 500 } : { color: "var(--muted)" }) }}
             onClick={() => setSel(o.k)}>{o.l}</button>
@@ -127,7 +135,7 @@ export function PerfTable({
           <thead>
             <tr>
               <th>Taktika</th><th>Ukazatel</th><th className="r">Plán / cíl</th>
-              <th className="r">Skutečnost</th><th>Průběh</th><th>Stav</th><th>Poznámka accountu</th>
+              <th className="r realhead">Skutečnost</th><th>Průběh</th><th>Stav</th><th>Poznámka accountu</th>
             </tr>
           </thead>
           <tbody>
@@ -148,14 +156,16 @@ export function PerfTable({
                       <b>Rozpočet</b> <span className="share">(Kč, kumulativní)</span>
                     </td>
                     <td className="r num">{kc(bv.plan)}</td>
-                    <td style={{ width: 120 }}>
+                    <td className={`realcell ${canEdit ? "editable" : "locked"}`} style={{ width: 130 }}>
                       {single ? (
                         <input className="cell" inputMode="numeric" disabled={!canEdit}
                           title={!canEdit ? "K tomuto čerpání nemáte oprávnění" : undefined}
                           defaultValue={r.spend[single] ? kc(r.spend[single]) : ""}
                           placeholder="0"
+                          onFocus={(e) => { e.target.value = r.spend[single] ? String(r.spend[single]) : ""; e.target.select(); }}
                           onBlur={(e) => {
                             const v = parseInt_(e.target.value);
+                            e.target.value = v ? kc(v) : "";
                             const prev = r.spend[single];
                             if (v === prev) return;
                             save(
@@ -166,7 +176,7 @@ export function PerfTable({
                           }} />
                       ) : <span className="num">{kc(bv.actual)}</span>}
                     </td>
-                    <td style={{ width: 120 }}>
+                    <td className={`progress s-${bv.status}`} style={{ width: 130 }}>
                       <Meter v={bv} plan={bv.plan} />
                       <div className="share">
                         {bv.plan ? pct0(bv.actual / bv.plan) : "—"} plánu
@@ -203,12 +213,14 @@ export function PerfTable({
                           <div className="share">{KIND_LABEL[mt.kind]}</div>
                         </td>
                         <td className="r num">{v.plan ? num(Math.round(v.plan * 100) / 100) : "—"}</td>
-                        <td>
+                        <td className={`realcell ${canEdit ? "editable" : "locked"}`}>
                           {single ? (
                             <input className="cell" inputMode="decimal" disabled={!canEdit} placeholder="realita"
                               defaultValue={num(mt.actual[single])}
+                              onFocus={(e) => { e.target.value = mt.actual[single] ? String(mt.actual[single]) : ""; e.target.select(); }}
                               onBlur={(e) => {
                                 const val = parseF(e.target.value); const prev = mt.actual[single];
+                                e.target.value = num(val);
                                 if (val === prev) return;
                                 save(
                                   () => setData((d) => d.map((x) => x.id === r.id ? {
@@ -220,7 +232,7 @@ export function PerfTable({
                               }} />
                           ) : <span className="num">{v.actual ? num(Math.round(v.actual * 100) / 100) : "—"}</span>}
                         </td>
-                        <td><Meter v={v} plan={v.plan} />
+                        <td className={`progress s-${v.status}`}><Meter v={v} plan={v.plan} />
                           <div className="share">
                             {v.ratio === null ? "—"
                               : mt.kind === "cumulative" ? `${pct0(v.ratio)} očekávání`
@@ -245,7 +257,7 @@ export function PerfTable({
             <tr>
               <td colSpan={2}>CELKEM {sel === "all" ? "Q4" : monthLabels[sel]}</td>
               <td className="r num">{kc(planSum)}</td>
-              <td className="r num">{kc(actSum)}</td>
+              <td className="r num realhead">{kc(actSum)}</td>
               <td colSpan={3} className="share">
                 {expSum > 0 ? `očekáváno k datu ${kc(Math.round(expSum))} Kč` : "období ještě nezačalo"}
               </td>

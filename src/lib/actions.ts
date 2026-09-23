@@ -11,7 +11,7 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, asc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -21,7 +21,7 @@ import {
 } from "@/db/schema";
 import { currentPrincipal } from "@/lib/auth";
 import { assertCan, canManageUsers, PermissionError } from "@/lib/permissions";
-import { MONTH_LABEL, kc, num } from "@/lib/months";
+import { MONTH_LABEL, QUARTER, kc, num } from "@/lib/months";
 
 export type Result = { ok: true } | { ok: false; error: string };
 
@@ -353,4 +353,292 @@ export async function recentChanges(limit = 40) {
     .leftJoin(users, eq(changeLog.userId, users.id))
     .orderBy(desc(changeLog.ts))
     .limit(limit);
+}
+
+// ----------------------------------------------------------------- struktura plánu
+
+const tacticPatch = z.object({
+  tacticId: z.string().min(1),
+  channel: z.string().max(120).optional(),
+  mediaType: z.enum(["Paid", "Owned", "Earned"]).optional(),
+  messageLineId: z.string().min(1).optional(),
+});
+
+/** Kanál, typ média nebo přeřazení taktiky pod jinou linku sdělení. */
+export async function updateTactic(raw: z.input<typeof tacticPatch>): Promise<Result> {
+  try {
+    const data = tacticPatch.parse(raw);
+    const me = await currentPrincipal();
+    const before = await tacticCoords(data.tacticId);
+
+    // oprávnění se ptáme na PŮVODNÍ souřadnice…
+    assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: before.campaignId, month: null });
+    // …a pokud se mění typ média nebo kampaň, i na CÍLOVÉ, ať se přes úpravu neobchází grant
+    if (data.mediaType && data.mediaType !== before.mediaType) {
+      assertCan(me, "write", { area: "plan", mediaType: data.mediaType, campaignId: before.campaignId, month: null });
+    }
+    if (data.messageLineId) {
+      const [line] = await db.select().from(messageLines).where(eq(messageLines.id, data.messageLineId));
+      if (!line) throw new Error("Linka sdělení neexistuje");
+      if (line.campaignId !== before.campaignId) {
+        assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: line.campaignId, month: null });
+      }
+    }
+
+    const items: string[] = [];
+    if (data.channel !== undefined && data.channel !== before.channel) {
+      items.push(`Kanál: „${before.channel}" → „${data.channel}"`);
+    }
+    if (data.mediaType && data.mediaType !== before.mediaType) {
+      items.push(`Typ média ${before.channel}: ${before.mediaType} → ${data.mediaType}`);
+    }
+    if (!items.length && !data.messageLineId) return { ok: true };
+
+    await db
+      .update(tactics)
+      .set({
+        ...(data.channel !== undefined ? { channel: data.channel } : {}),
+        ...(data.mediaType ? { mediaType: data.mediaType } : {}),
+        ...(data.messageLineId ? { messageLineId: data.messageLineId } : {}),
+      })
+      .where(eq(tactics.id, data.tacticId));
+
+    await log(me!.id, "plan", items.length ? items : [`Přeřazena taktika ${before.channel}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const linePatch = z.object({
+  messageLineId: z.string().min(1),
+  message: z.string().max(200).optional(),
+  audience: z.string().max(120).optional(),
+  phase: z.enum(["Awareness", "Consideration", "Conversion"]).optional(),
+  code: z.string().max(60).optional(),
+});
+
+/** Sdělení, cílovka a fáze se mění na lince — projeví se u všech jejích taktik. */
+export async function updateMessageLine(raw: z.input<typeof linePatch>): Promise<Result> {
+  try {
+    const data = linePatch.parse(raw);
+    const me = await currentPrincipal();
+    const [line] = await db.select().from(messageLines).where(eq(messageLines.id, data.messageLineId));
+    if (!line) throw new Error("Linka sdělení neexistuje");
+
+    assertCan(me, "write", { area: "plan", mediaType: null, campaignId: line.campaignId, month: null });
+
+    const items: string[] = [];
+    const pairs: Array<[keyof typeof data, string, string | null]> = [
+      ["message", "Sdělení", line.message],
+      ["audience", "Cílová skupina", line.audience],
+      ["phase", "Fáze", line.phase],
+      ["code", "Kód", line.code],
+    ];
+    for (const [key, label, old] of pairs) {
+      const next = data[key];
+      if (next !== undefined && next !== old) items.push(`${label} ${line.code}: „${old}" → „${next}"`);
+    }
+    if (!items.length) return { ok: true };
+
+    await db
+      .update(messageLines)
+      .set({
+        ...(data.message !== undefined ? { message: data.message } : {}),
+        ...(data.audience !== undefined ? { audience: data.audience } : {}),
+        ...(data.phase ? { phase: data.phase } : {}),
+        ...(data.code !== undefined ? { code: data.code } : {}),
+      })
+      .where(eq(messageLines.id, data.messageLineId));
+
+    await log(me!.id, "plan", items);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Přetažení: přesun taktiky na jinou pozici, případně pod jinou linku sdělení. */
+export async function moveTactic(raw: {
+  tacticId: string;
+  targetTacticId?: string;
+  after?: boolean;
+  targetMessageLineId?: string;
+}): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    const before = await tacticCoords(raw.tacticId);
+    assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: before.campaignId, month: null });
+
+    const all = await db
+      .select({ id: tactics.id, position: tactics.position, messageLineId: tactics.messageLineId })
+      .from(tactics)
+      .orderBy(asc(tactics.position));
+
+    const moving = all.find((t) => t.id === raw.tacticId);
+    if (!moving) throw new Error("Taktika neexistuje");
+
+    let newLineId = moving.messageLineId;
+    if (raw.targetMessageLineId) newLineId = raw.targetMessageLineId;
+    else if (raw.targetTacticId) {
+      const target = all.find((t) => t.id === raw.targetTacticId);
+      if (target) newLineId = target.messageLineId;
+    }
+
+    // přesun do jiné kampaně musí projít kontrolou i na cílové straně
+    if (newLineId !== moving.messageLineId) {
+      const [line] = await db.select().from(messageLines).where(eq(messageLines.id, newLineId));
+      if (!line) throw new Error("Cílová linka neexistuje");
+      if (line.campaignId !== before.campaignId) {
+        assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: line.campaignId, month: null });
+      }
+    }
+
+    const rest = all.filter((t) => t.id !== raw.tacticId);
+    let index = rest.length;
+    if (raw.targetTacticId) {
+      const at = rest.findIndex((t) => t.id === raw.targetTacticId);
+      if (at >= 0) index = raw.after ? at + 1 : at;
+    } else if (raw.targetMessageLineId) {
+      const at = rest.findIndex((t) => t.messageLineId === raw.targetMessageLineId);
+      index = at >= 0 ? at : rest.length;
+    }
+    rest.splice(index, 0, { ...moving, messageLineId: newLineId });
+
+    for (const [i, t] of rest.entries()) {
+      await db
+        .update(tactics)
+        .set({ position: i, ...(t.id === raw.tacticId ? { messageLineId: newLineId } : {}) })
+        .where(eq(tactics.id, t.id));
+    }
+
+    await log(me!.id, "plan", [`Přesunuta taktika ${before.channel}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const newTactic = z.object({
+  messageLineId: z.string().min(1),
+  channel: z.string().max(120).default("Nový kanál"),
+  mediaType: z.enum(["Paid", "Owned", "Earned"]).default("Paid"),
+});
+
+/** Nová taktika pod danou linkou sdělení. Rozpočty začínají na nule. */
+export async function createTactic(raw: z.input<typeof newTactic>): Promise<Result> {
+  try {
+    const data = newTactic.parse(raw);
+    const me = await currentPrincipal();
+    const [line] = await db.select().from(messageLines).where(eq(messageLines.id, data.messageLineId));
+    if (!line) throw new Error("Linka sdělení neexistuje");
+
+    assertCan(me, "write", { area: "plan", mediaType: data.mediaType, campaignId: line.campaignId, month: null });
+
+    const [{ max }] = await db
+      .select({ max: sql<number>`coalesce(max(${tactics.position}), -1)` })
+      .from(tactics);
+
+    const [t] = await db
+      .insert(tactics)
+      .values({
+        messageLineId: data.messageLineId,
+        channel: data.channel,
+        mediaType: data.mediaType,
+        position: Number(max) + 1,
+      })
+      .returning();
+
+    await db.insert(tacticBudgets).values(
+      ["2026-10", "2026-11", "2026-12"].map((month) => ({ tacticId: t.id, month, planned: 0 })),
+    );
+    // sada metrik podle fáze linky — stejná logika jako v seedu
+    const brand = line.phase === "Awareness";
+    await db.insert(metrics).values([
+      { tacticId: t.id, name: brand ? "Reach" : "Konverze", kind: "cumulative" as const, unit: "", slot: 0 },
+      { tacticId: t.id, name: brand ? "CPM" : "CPA", kind: "rate_low" as const, unit: "Kč", slot: 1 },
+    ]);
+
+    await log(me!.id, "plan", [`Přidána taktika „${data.channel}" pod ${line.code}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function deleteTactic(tacticId: string): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    const before = await tacticCoords(tacticId);
+    assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: before.campaignId, month: null });
+    await db.delete(tactics).where(eq(tactics.id, tacticId));
+    await log(me!.id, "plan", [`Smazána taktika „${before.channel}"`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const newCampaign = z.object({
+  name: z.string().min(1).max(120),
+  message: z.string().max(200).default("Nové sdělení"),
+  phase: z.enum(["Awareness", "Consideration", "Conversion"]).default("Awareness"),
+  audience: z.string().max(120).default("—"),
+});
+
+/** Nová iniciativa: kampaň + první linka sdělení, aby pod ni šlo rovnou věšet taktiky. */
+export async function createCampaign(raw: z.input<typeof newCampaign>): Promise<Result> {
+  try {
+    const data = newCampaign.parse(raw);
+    const me = await currentPrincipal();
+    // zakládat kampaně smí jen ten, kdo smí měnit plán napříč
+    assertCan(me, "write", { area: "plan", mediaType: null, campaignId: null, month: null });
+
+    const [c] = await db
+      .insert(campaigns)
+      .values({ name: data.name, client: "BENU", quarter: QUARTER })
+      .returning();
+
+    const code = data.name.toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) + "-1";
+    await db.insert(messageLines).values({
+      campaignId: c.id,
+      code: code || "NOVA-1",
+      message: data.message,
+      phase: data.phase,
+      audience: data.audience,
+    });
+
+    await log(me!.id, "plan", [`Založena iniciativa „${data.name}"`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const newLine = z.object({
+  campaignId: z.string().min(1),
+  code: z.string().max(60),
+  message: z.string().max(200).default("Nové sdělení"),
+  phase: z.enum(["Awareness", "Consideration", "Conversion"]).default("Awareness"),
+  audience: z.string().max(120).default("—"),
+});
+
+export async function createMessageLine(raw: z.input<typeof newLine>): Promise<Result> {
+  try {
+    const data = newLine.parse(raw);
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, campaignId: data.campaignId, month: null });
+    await db.insert(messageLines).values(data);
+    await log(me!.id, "plan", [`Přidána linka sdělení ${data.code}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
 }

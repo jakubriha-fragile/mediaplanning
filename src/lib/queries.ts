@@ -20,6 +20,7 @@ async function loadQuarter() {
   const rows = await db
     .select({
       tacticId: tactics.id,
+      messageLineId: tactics.messageLineId,
       channel: tactics.channel,
       mediaType: tactics.mediaType,
       position: tactics.position,
@@ -56,6 +57,7 @@ export async function getPlanRows(me: Principal) {
     id: r.tacticId,
     campaign: r.campaign,
     campaignId: r.campaignId,
+    messageLineId: r.messageLineId,
     code: r.code,
     message: r.message,
     phase: r.phase as string,
@@ -71,6 +73,27 @@ export async function getPlanRows(me: Principal) {
       ]),
     ),
   }));
+}
+
+/** Kampaně a jejich linky — pro přiřazování taktik a zakládání nových. */
+export async function getCampaignTree() {
+  const rows = await db
+    .select({
+      id: campaigns.id, name: campaigns.name,
+      lineId: messageLines.id, code: messageLines.code,
+    })
+    .from(campaigns)
+    .leftJoin(messageLines, eq(messageLines.campaignId, campaigns.id))
+    .where(eq(campaigns.quarter, QUARTER))
+    .orderBy(asc(campaigns.name), asc(messageLines.code));
+
+  const out: Array<{ id: string; name: string; lines: Array<{ id: string; code: string }> }> = [];
+  for (const r of rows) {
+    let c = out.find((x) => x.id === r.id);
+    if (!c) out.push((c = { id: r.id, name: r.name, lines: [] }));
+    if (r.lineId) c.lines.push({ id: r.lineId, code: r.code! });
+  }
+  return out;
 }
 
 export async function getPerfRows(me: Principal) {

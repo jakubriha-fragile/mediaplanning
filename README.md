@@ -136,9 +136,8 @@ Poctivý seznam, aby nepřekvapil:
 - **Import z XLSX** — data se zatím nahrávají seedem, ne přes rozhraní.
 - **Export do XLSX** — zadání §9.
 - **Podklady a poznámky** — tabulky v databázi jsou, rozhraní chybí.
+- **Přidávání linek sdělení** — akce `createMessageLine` existuje, tlačítko v UI ne.
 - **Vrácení zpět** — historie se zapisuje, undo tlačítko zatím ne.
-- **Drag & drop řazení taktik** — sloupec `position` je připravený.
-- **Přidávání a mazání taktik a linek** — zatím jen editace existujících.
 - **Migrace** — projekt používá `db:push`. Před produkčním provozem přejděte
   na `drizzle-kit generate` a verzované migrace.
 

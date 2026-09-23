@@ -221,3 +221,57 @@ input:disabled, select:disabled, textarea:disabled {
 
 @media (max-width: 760px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------------------------------------------------- editovatelné buňky */
+
+/* Buňka rozpočtu v plánu */
+.cellbox {
+  position: relative; height: 26px; border-radius: 3px; overflow: hidden;
+  border: 1px solid transparent;
+}
+.cellbox.filled { background: var(--surface-2); }
+.cellbox.editable { border-color: var(--line-strong); cursor: text; }
+.cellbox.editable:not(.filled) { border-style: dashed; }
+.cellbox.editable:hover { border-color: var(--brand); }
+.cellbox.locked { cursor: not-allowed; opacity: .75; }
+.cellbox .cell { position: relative; z-index: 1; height: 100%; border: none; background: transparent; }
+.cellfill { position: absolute; inset: 0 auto 0 0; }
+.cellspent { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--bad-pure); border-radius: 0 1px 1px 0; }
+td.budgetcell { width: 150px; padding: 3px 6px; }
+
+/* Sloupec Skutečnost — ať je na první pohled jasné, kam se zapisuje */
+.realhead { background: var(--brand-soft) !important; color: var(--brand-ink) !important; }
+td.realcell { background: color-mix(in srgb, var(--brand-soft) 45%, transparent); }
+td.realcell.editable .cell {
+  border: 1px solid var(--line-strong); border-radius: 3px; background: var(--surface);
+}
+td.realcell.editable .cell:hover { border-color: var(--brand); }
+td.realcell.locked { background: transparent; }
+
+/* Buňka Průběh svítí podle toho, jak jsme na tom proti času */
+td.progress { transition: background .15s; }
+td.progress.s-ok { background: color-mix(in srgb, var(--ok-soft) 70%, transparent); }
+td.progress.s-warn { background: color-mix(in srgb, var(--warn-soft) 70%, transparent); }
+td.progress.s-bad { background: color-mix(in srgb, var(--bad-soft) 70%, transparent); }
+td.progress.s-idle { background: transparent; }
+
+/* Přetahování taktik */
+.grip { cursor: grab; color: var(--line-strong); font-size: 12px; letter-spacing: -1px; user-select: none; }
+.grip:hover { color: var(--brand); }
+.grip:active { cursor: grabbing; }
+tr.dragging { opacity: .35; }
+tr.dropBefore td { box-shadow: inset 0 2px 0 0 var(--brand); }
+tr.dropAfter td { box-shadow: inset 0 -2px 0 0 var(--brand); }
+tr.grp td { transition: background .1s; }
+
+.rowdel {
+  appearance: none; background: none; border: none; color: var(--muted);
+  cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 5px; border-radius: 3px; opacity: 0;
+}
+tr:hover .rowdel, .rowdel:focus { opacity: 1; }
+.rowdel:hover { color: var(--bad-pure); background: var(--bad-soft); }
+
+/* select stylovaný jako pill (typ média) */
+select.txt.pill { border: 1px solid transparent; font-weight: 500; }
+select.txt.pill:hover { border-color: var(--line-strong); }
+table.plan td { vertical-align: middle; }
