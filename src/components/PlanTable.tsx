@@ -268,8 +268,19 @@ function BudgetCell({
   value: number; actual: number; max: number;
   type: string; disabled: boolean; onCommit: (v: number) => void;
 }) {
+  /**
+   * Během psaní se hodnota NEFORMÁTUJE.
+   *
+   * Dřív se po každém znaku volalo kc(), což vložilo mezery mezi tisíce,
+   * React pole překreslil a kurzor skočil na konec. U prázdné buňky to nebylo
+   * poznat (kurzor tam už byl), u buňky s číslem se editovat nedalo.
+   *
+   * Teď: po kliknutí se ukáže holé číslo, píše se volně, mezery naskočí
+   * až po odkliknutí.
+   */
   const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? (value ? kc(value) : "0");
+  const editing = draft !== null;
+  const shown = editing ? draft : value ? kc(value) : "";
   const w = Math.min(100, (value / max) * 100);
   const aw = Math.min(100, (actual / max) * 100);
   return (
@@ -277,7 +288,12 @@ function BudgetCell({
       style={{
         position: "relative", height: 26, borderRadius: 3, overflow: "hidden",
         background: value ? "var(--surface-2)" : "transparent",
-        border: value ? "1px solid transparent" : "1px dashed var(--line-strong)",
+        border: disabled
+          ? "1px solid transparent"
+          : value
+            ? "1px solid var(--line)"
+            : "1px dashed var(--line-strong)",
+        cursor: disabled ? "not-allowed" : "text",
       }}
     >
       {value > 0 && (
@@ -298,10 +314,18 @@ function BudgetCell({
         disabled={disabled}
         title={disabled ? "K tomuto rozpočtu nemáte oprávnění" : undefined}
         value={shown}
-        onChange={(e) => setDraft(kc(parse(e.target.value)))}
+        placeholder="0"
+        onFocus={(e) => {
+          setDraft(value ? String(value) : "");
+          requestAnimationFrame(() => e.target.select());
+        }}
+        onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ""))}
         onBlur={() => { if (draft !== null) { onCommit(parse(draft)); setDraft(null); } }}
-        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-        style={{ position: "relative", height: "100%", border: "none", background: "transparent" }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); }
+        }}
+        style={{ position: "relative", zIndex: 1, height: "100%", border: "none", background: "transparent" }}
       />
     </div>
   );
