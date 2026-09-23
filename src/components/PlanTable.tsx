@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, updateTactic, updateMessageLine,
-  moveTactic, createTactic, createCampaign, deleteTactic, undoLast,
+  moveTactic, moveCampaign, createTactic, createCampaign, deleteTactic, deleteCampaign, undoLast,
 } from "@/lib/actions";
 import { Combo, type ComboOption } from "@/components/Combo";
 
@@ -54,7 +54,9 @@ export function PlanTable({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [dragCamp, setDragCamp] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ id: string; after: boolean } | null>(null);
+  const [dropCamp, setDropCamp] = useState<string | null>(null);
 
   // server je zdroj pravdy — po každé změně se sem vrátí čerstvá data
   useEffect(() => setData(rows), [rows]);
@@ -217,15 +219,31 @@ export function PlanTable({
               const lines = campaignLines(g.campaignId);
               return (
                 <GroupBlock key={g.campaignId}>
-                  <tr className="grp"
-                    onDragOver={(e) => { if (dragId) { e.preventDefault(); setDropHint(null); } }}
-                    onDrop={(e) => {
-                      if (!dragId || !lines[0]) return;
+                  <tr className={`grp ${dropCamp === g.campaignId ? "dropInto" : ""}`}
+                    onDragOver={(e) => {
+                      if (!dragId && !dragCamp) return;
                       e.preventDefault();
-                      const id = dragId; setDragId(null);
-                      run(() => {}, () => {}, () => moveTactic({ tacticId: id, targetMessageLineId: lines[0].id }));
+                      setDropHint(null);
+                      setDropCamp(g.campaignId);
+                    }}
+                    onDragLeave={() => setDropCamp((c) => (c === g.campaignId ? null : c))}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const t = dragId, c = dragCamp;
+                      setDragId(null); setDragCamp(null); setDropCamp(null);
+                      if (c && c !== g.campaignId) {
+                        run(() => {}, () => {}, () => moveCampaign({ campaignId: c, targetCampaignId: g.campaignId }));
+                      } else if (t) {
+                        run(() => {}, () => {}, () => moveTactic({ tacticId: t, targetCampaignId: g.campaignId }));
+                      }
                     }}>
                     <td colSpan={6} style={{ boxShadow: `inset 3px 0 0 0 ${campColor(g.campaign)}` }}>
+                      {canEditPlan && (
+                        <span className="grip" draggable title="Přetažením změníte pořadí bloků"
+                          onDragStart={() => setDragCamp(g.campaignId)}
+                          onDragEnd={() => { setDragCamp(null); setDropCamp(null); }}
+                          style={{ marginRight: 8 }}>⠿</span>
+                      )}
                       <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2,
                         background: campColor(g.campaign), marginRight: 7 }} />
                       {g.campaign} <span className="share" style={{ fontWeight: 300 }}>{g.rows.length} taktik</span>
@@ -234,6 +252,19 @@ export function PlanTable({
                           onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: lines[0].id }))}>
                           + Taktika
                         </button>
+                      )}
+                      {canEditPlan && (
+                        <button className="btn danger" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
+                          title="Smazat blok"
+                          onClick={() => {
+                            const n = g.rows.length;
+                            if (n > 0 && !confirm(
+                              `Blok „${g.campaign}" obsahuje ${n} taktik.\n\n` +
+                              `Smazáním zmizí i všechny jejich rozpočty, metriky a skutečnost. ` +
+                              `Tohle nejde vrátit zpět.\n\nOpravdu smazat celý blok včetně obsahu?`)) return;
+                            if (n === 0 && !confirm(`Smazat prázdný blok „${g.campaign}"?`)) return;
+                            run(() => {}, () => {}, () => deleteCampaign(g.campaignId, n > 0));
+                          }}>Smazat blok</button>
                       )}
                     </td>
                     {months.map((m) => (
@@ -260,6 +291,7 @@ export function PlanTable({
                       <tr key={r.id}
                         className={dragId === r.id ? "dragging" : dh ? (dh.after ? "dropAfter" : "dropBefore") : ""}
                         onDragOver={(e) => {
+                          if (dragCamp) return;
                           if (!dragId || dragId === r.id) return;
                           e.preventDefault();
                           const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -407,10 +439,13 @@ export function PlanTable({
       <div className="note">
         Délka pruhu = investice v měsíci na společném měřítku 0–{kc(axisMax)} Kč, oranžový proužek u dna =
         skutečné čerpání. Barevný proužek u levého okraje řádku = kampaň.
-        {canEditPlan && <> Úchyt ⠿ přetažením změní pořadí; přetažení na hlavičku kampaně taktiku přeřadí.</>}
+        {canEditPlan && <> Úchyt ⠿ u řádku přetáhne taktiku — mezi řádky změní pořadí, na jiný blok ji přesune;
+        úchyt u názvu bloku přetahuje celý blok.</>}
         <br />
         <b>Sdělení, fáze a cílová skupina patří lince sdělení</b>, ne jednotlivé taktice — změna se projeví
         u všech taktik téže linky. Kanál a typ média jsou vlastní každé taktice.
+        Při přesunu taktiky do jiného bloku si <b>své sdělení, fázi i cílovku nese s sebou</b> — v cílovém bloku
+        se použije shodná linka, a když tam žádná není, založí se její kopie.
       </div>
     </div>
   );

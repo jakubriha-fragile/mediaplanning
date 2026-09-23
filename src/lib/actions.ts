@@ -23,7 +23,7 @@ import { currentPrincipal } from "@/lib/auth";
 import { assertCan, canManageUsers, PermissionError } from "@/lib/permissions";
 import { MONTH_LABEL, QUARTER, kc, num } from "@/lib/months";
 import {
-  pushUndo, popUndo, listUndo, snapshotPositions,
+  pushUndo, popUndo, listUndo, snapshotPositions, snapshotCampaignOrder,
   undoCreatedTactic, undoCreatedCampaign, type UndoOp,
 } from "@/lib/undo";
 
@@ -473,12 +473,19 @@ export async function updateMessageLine(raw: z.input<typeof linePatch>): Promise
   }
 }
 
-/** Přetažení: přesun taktiky na jinou pozici, případně pod jinou linku sdělení. */
+/**
+ * Přetažení taktiky.
+ *
+ * Přesun do jiného bloku NESMÍ taktice přepsat sdělení, fázi ani cílovku —
+ * to byla chyba předchozí verze, kdy taktika převzala hodnoty cílové linky.
+ * Místo toho se v cílovém bloku najde linka se stejnými hodnotami, a když
+ * neexistuje, založí se její kopie. Taktika si tak nese své údaje s sebou.
+ */
 export async function moveTactic(raw: {
   tacticId: string;
   targetTacticId?: string;
   after?: boolean;
-  targetMessageLineId?: string;
+  targetCampaignId?: string;
 }): Promise<Result> {
   try {
     const me = await currentPrincipal();
@@ -489,33 +496,75 @@ export async function moveTactic(raw: {
       .select({ id: tactics.id, position: tactics.position, messageLineId: tactics.messageLineId })
       .from(tactics)
       .orderBy(asc(tactics.position));
-
     const moving = all.find((t) => t.id === raw.tacticId);
     if (!moving) throw new Error("Taktika neexistuje");
 
-    // Přetažení mezi řádky POUZE mění pořadí. Do jiné kampaně se taktika
-    // přesune jen upuštěním na hlavičku kampaně — jinak by řádek nečekaně
-    // zmizel do jiného bloku a uživatel by ho hledal.
-    const newLineId = raw.targetMessageLineId ?? moving.messageLineId;
+    const [currentLine] = await db.select().from(messageLines).where(eq(messageLines.id, moving.messageLineId));
 
-    // přesun do jiné kampaně musí projít kontrolou i na cílové straně
-    if (newLineId !== moving.messageLineId) {
-      const [line] = await db.select().from(messageLines).where(eq(messageLines.id, newLineId));
-      if (!line) throw new Error("Cílová linka neexistuje");
-      if (line.campaignId !== before.campaignId) {
-        assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: line.campaignId, month: null });
+    // do kterého bloku se přesouvá?
+    let targetCampaignId = raw.targetCampaignId ?? null;
+    if (!targetCampaignId && raw.targetTacticId) {
+      const [row] = await db
+        .select({ campaignId: messageLines.campaignId })
+        .from(tactics)
+        .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
+        .where(eq(tactics.id, raw.targetTacticId));
+      targetCampaignId = row?.campaignId ?? null;
+    }
+
+    let newLineId = moving.messageLineId;
+    if (targetCampaignId && targetCampaignId !== currentLine.campaignId) {
+      assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: targetCampaignId, month: null });
+
+      const existing = await db
+        .select()
+        .from(messageLines)
+        .where(and(eq(messageLines.campaignId, targetCampaignId), eq(messageLines.message, currentLine.message)));
+      const same = existing.find(
+        (l) => l.phase === currentLine.phase && l.audience === currentLine.audience,
+      );
+      if (same) {
+        newLineId = same.id;
+      } else {
+        // kopie linky i s jejími hodnotami; kód doplníme, ať je v bloku jedinečný
+        const taken = await db
+          .select({ code: messageLines.code })
+          .from(messageLines)
+          .where(eq(messageLines.campaignId, targetCampaignId));
+        let code = currentLine.code, n = 2;
+        while (taken.some((t) => t.code === code)) code = `${currentLine.code}-${n++}`;
+        const [copy] = await db
+          .insert(messageLines)
+          .values({
+            campaignId: targetCampaignId,
+            code,
+            message: currentLine.message,
+            phase: currentLine.phase,
+            audience: currentLine.audience,
+          })
+          .returning();
+        newLineId = copy.id;
       }
     }
 
-    await pushUndo(me!.id, `Přesun taktiky ${before.channel}`, [await snapshotPositions()]);
+    await pushUndo(me!.id, `Přesun taktiky ${before.channel}`, [
+      await snapshotPositions(),
+      { t: "tactic", tacticId: moving.id, channel: before.channel, mediaType: before.mediaType, messageLineId: moving.messageLineId },
+    ]);
 
     const rest = all.filter((t) => t.id !== raw.tacticId);
     let index = rest.length;
     if (raw.targetTacticId) {
       const at = rest.findIndex((t) => t.id === raw.targetTacticId);
       if (at >= 0) index = raw.after ? at + 1 : at;
-    } else if (raw.targetMessageLineId) {
-      const at = rest.findIndex((t) => t.messageLineId === raw.targetMessageLineId);
+    } else if (targetCampaignId) {
+      // na začátek cílového bloku
+      const lines = await db
+        .select({ id: messageLines.id })
+        .from(messageLines)
+        .where(eq(messageLines.campaignId, targetCampaignId));
+      const ids = new Set(lines.map((l) => l.id));
+      const at = rest.findIndex((t) => ids.has(t.messageLineId));
       index = at >= 0 ? at : rest.length;
     }
     rest.splice(index, 0, { ...moving, messageLineId: newLineId });
@@ -528,6 +577,75 @@ export async function moveTactic(raw: {
     }
 
     await log(me!.id, "plan", [`Přesunuta taktika ${before.channel}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Přetažení celého bloku — mění se jen pořadí kampaní. */
+export async function moveCampaign(raw: {
+  campaignId: string;
+  targetCampaignId: string;
+  after?: boolean;
+}): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, campaignId: null, month: null });
+
+    const all = await db
+      .select({ id: campaigns.id, name: campaigns.name, position: campaigns.position })
+      .from(campaigns)
+      .where(eq(campaigns.quarter, QUARTER))
+      .orderBy(asc(campaigns.position), asc(campaigns.name));
+
+    const moving = all.find((c) => c.id === raw.campaignId);
+    if (!moving || raw.campaignId === raw.targetCampaignId) return { ok: true };
+
+    await pushUndo(me!.id, `Přesun bloku ${moving.name}`, [await snapshotCampaignOrder()]);
+
+    const rest = all.filter((c) => c.id !== raw.campaignId);
+    const at = rest.findIndex((c) => c.id === raw.targetCampaignId);
+    rest.splice(at < 0 ? rest.length : raw.after ? at + 1 : at, 0, moving);
+
+    for (const [i, c] of rest.entries()) {
+      await db.update(campaigns).set({ position: i }).where(eq(campaigns.id, c.id));
+    }
+
+    await log(me!.id, "plan", [`Přesunut blok ${moving.name}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Smazání bloku. Prázdný jde rovnou, s taktikami až po potvrzení z UI. */
+export async function deleteCampaign(campaignId: string, confirmWithContent = false): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, campaignId, month: null });
+
+    const [c] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
+    if (!c) return { ok: true };
+
+    const inside = await db
+      .select({ id: tactics.id })
+      .from(tactics)
+      .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
+      .where(eq(messageLines.campaignId, campaignId));
+
+    if (inside.length && !confirmWithContent) {
+      return { ok: false, error: `Blok „${c.name}" obsahuje ${inside.length} taktik. Smazání je nutné potvrdit.` };
+    }
+
+    await db.delete(campaigns).where(eq(campaigns.id, campaignId));
+    await log(me!.id, "plan", [
+      inside.length
+        ? `Smazán blok „${c.name}" včetně ${inside.length} taktik (nelze vrátit zpět)`
+        : `Smazán prázdný blok „${c.name}"`,
+    ]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
@@ -615,9 +733,12 @@ export async function createCampaign(raw: z.input<typeof newCampaign>): Promise<
     // zakládat kampaně smí jen ten, kdo smí měnit plán napříč
     assertCan(me, "write", { area: "plan", mediaType: null, campaignId: null, month: null });
 
+    const [{ max }] = await db
+      .select({ max: sql<number>`coalesce(max(${campaigns.position}), -1)` })
+      .from(campaigns);
     const [c] = await db
       .insert(campaigns)
-      .values({ name: data.name, client: "BENU", quarter: QUARTER })
+      .values({ name: data.name, client: "BENU", quarter: QUARTER, position: Number(max) + 1 })
       .returning();
 
     const code = data.name.toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) + "-1";

@@ -35,7 +35,7 @@ async function loadQuarter() {
     .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
     .innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
     .where(eq(campaigns.quarter, QUARTER))
-    .orderBy(asc(campaigns.name), asc(tactics.position));
+    .orderBy(asc(campaigns.position), asc(campaigns.name), asc(tactics.position));
 
   const [budgets, spends, notes, mets] = await Promise.all([
     db.select().from(tacticBudgets),
@@ -85,7 +85,7 @@ export async function getCampaignTree() {
     .from(campaigns)
     .leftJoin(messageLines, eq(messageLines.campaignId, campaigns.id))
     .where(eq(campaigns.quarter, QUARTER))
-    .orderBy(asc(campaigns.name), asc(messageLines.code));
+    .orderBy(asc(campaigns.position), asc(campaigns.name), asc(messageLines.code));
 
   const out: Array<{ id: string; name: string; lines: Array<{ id: string; code: string }> }> = [];
   for (const r of rows) {

@@ -20,6 +20,7 @@ export type UndoOp =
   | { t: "line"; id: string; message: string; audience: string; phase: "Awareness" | "Consideration" | "Conversion"; code: string }
   | { t: "positions"; items: Array<{ id: string; position: number; messageLineId: string }> }
   | { t: "dropTactic"; id: string }
+  | { t: "campaignPositions"; items: Array<{ id: string; position: number }> }
   | { t: "dropCampaign"; id: string };
 
 const MAX_STEPS = 10;
@@ -91,6 +92,11 @@ export async function applyOps(ops: UndoOp[]) {
             .where(eq(tactics.id, it.id));
         }
         break;
+      case "campaignPositions":
+        for (const it of op.items) {
+          await db.update(campaigns).set({ position: it.position }).where(eq(campaigns.id, it.id));
+        }
+        break;
       case "dropTactic":
         await db.delete(tactics).where(eq(tactics.id, op.id));
         break;
@@ -120,6 +126,11 @@ export async function snapshotPositions(): Promise<UndoOp> {
     .select({ id: tactics.id, position: tactics.position, messageLineId: tactics.messageLineId })
     .from(tactics);
   return { t: "positions", items: rows };
+}
+
+export async function snapshotCampaignOrder(): Promise<UndoOp> {
+  const rows = await db.select({ id: campaigns.id, position: campaigns.position }).from(campaigns);
+  return { t: "campaignPositions", items: rows };
 }
 
 /** Metriky nové taktiky se smažou kaskádou, stačí smazat taktiku. */

@@ -136,7 +136,7 @@ Před každou změnou se uloží **původní hodnota**, ne opačná operace. Vr�
 pak stav prostě přepíše zpět, takže nezáleží na tom, co mezitím udělal někdo
 jiný. Drží se 10 posledních kroků na uživatele.
 
-Smazání taktiky vrátit nejde — kaskádou padnou i rozpočty a metriky. Proto
+Přesun taktiky, bloku i založení bloku vrátit lze. Smazání taktiky ani bloku ne — kaskádou padnou i rozpočty a metriky. Proto
 se u něj potvrzuje a v logu je to označené.
 
 ---

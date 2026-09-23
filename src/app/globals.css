@@ -306,3 +306,39 @@ table.plan td { vertical-align: middle; }
 
 /* prázdný blok bez taktik */
 tr.emptygrp td { color: var(--muted); font-style: italic; background: var(--surface); }
+
+/* ---------------------------------------------------- ukotvená horní část
+   Hlavička s navigací drží nahoře, pod ní lišta s filtry a pak záhlaví
+   tabulky. Souhrnné karty schválně NEkotvím — zabraly by třetinu obrazovky
+   a při scrollování v tabulce je člověk nepotřebuje. */
+:root { --top-h: 96px; --bar-h: 46px; }
+
+.top { position: sticky; top: 0; z-index: 60; }
+
+.panel > .toolbar {
+  position: sticky; top: var(--top-h); z-index: 45;
+  background: var(--surface);
+  box-shadow: 0 1px 0 0 var(--line);
+}
+thead th {
+  position: sticky; top: calc(var(--top-h) + var(--bar-h)); z-index: 40;
+  box-shadow: inset 0 -1px 0 0 var(--line-strong);
+}
+/* řádek bloku drží pod záhlavím, ať je při scrollu vidět, kde jsme */
+tr.grp td {
+  position: sticky; top: calc(var(--top-h) + var(--bar-h) + 27px); z-index: 25;
+}
+
+/* na užších obrazovkách se lišta zalomí a offsety by přestaly sedět */
+@media (max-width: 1100px) {
+  .panel > .toolbar { position: static; }
+  thead th { top: var(--top-h); }
+  tr.grp td { position: static; }
+}
+@media (max-width: 760px) {
+  .top { position: static; }
+  thead th { position: static; }
+}
+
+/* cíl pro upuštění bloku */
+tr.grp.dropInto td { background: var(--brand-soft); box-shadow: inset 0 0 0 2px var(--brand); }

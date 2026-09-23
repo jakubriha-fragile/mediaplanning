@@ -89,6 +89,7 @@ export const campaigns = pgTable(
     name: text("name").notNull(),
     client: text("client").notNull().default("BENU"),
     quarter: text("quarter").notNull(),
+    position: integer("position").notNull().default(0),
     archived: boolean("archived").notNull().default(false),
   },
   (t) => ({ uq: uniqueIndex("campaign_uq").on(t.name, t.quarter, t.client) }),
