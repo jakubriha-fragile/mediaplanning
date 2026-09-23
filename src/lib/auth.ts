@@ -11,10 +11,9 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
-import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { users, grants, accounts, sessions, verificationTokens } from "@/db/schema";
+import { users, grants } from "@/db/schema";
 import type { Principal } from "@/lib/permissions";
 
 const devLoginEnabled =
@@ -26,12 +25,9 @@ const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS ?? "")
   .filter(Boolean);
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: DrizzleAdapter(db, {
-    usersTable: users,
-    accountsTable: accounts,
-    sessionsTable: sessions,
-    verificationTokensTable: verificationTokens,
-  }),
+  // Bez databázového adaptéru záměrně: session drží JWT a uživatele si zakládáme
+  // sami v signIn callbacku. Díky tomu si řídíme roli i to, kdo vůbec smí dovnitř,
+  // a build nezávisí na dostupnosti databáze.
   session: { strategy: "jwt" },
   trustHost: true,
   pages: { signIn: "/prihlaseni" },
@@ -70,10 +66,30 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user }) {
       const email = user.email?.toLowerCase();
       if (!email) return false;
+
       const [existing] = await db.select().from(users).where(eq(users.email, email));
-      if (existing) return existing.active;
+      if (existing) {
+        if (!existing.active) return false;
+        // doplníme jméno a avatar, když je účet vytvořený pozvánkou
+        if ((!existing.name && user.name) || (!existing.image && user.image)) {
+          await db
+            .update(users)
+            .set({ name: existing.name ?? user.name ?? null, image: existing.image ?? user.image ?? null })
+            .where(eq(users.id, existing.id));
+        }
+        return true;
+      }
+
+      // nepozvaný účet projde jen z povolené domény, a to s rolí VIEWER
       const domain = email.split("@")[1] ?? "";
-      return allowedDomains.includes(domain);
+      if (!allowedDomains.includes(domain)) return false;
+      await db.insert(users).values({
+        email,
+        name: user.name ?? null,
+        image: user.image ?? null,
+        role: "VIEWER",
+      });
+      return true;
     },
     async jwt({ token, user }) {
       if (user?.email) token.email = user.email;

@@ -59,7 +59,8 @@ doplní do projektu sám.
 https://<vase-domena>.vercel.app/api/auth/callback/google
 ```
 
-**4. Tabulky.** Po prvním nasazení jednou lokálně proti produkční databázi:
+**4. Tabulky.** Po prvním nasazení jednou lokálně proti produkční databázi
+(použijte **nepoolovaný** connection string z Neonu — DDL přes pooler zlobí):
 
 ```bash
 DATABASE_URL="<produkční connection string>" npm run db:push
@@ -139,6 +140,9 @@ Poctivý seznam, aby nepřekvapil:
 ## Poznámky k bezpečnosti
 
 - **Žádná vlastní hesla.** Jen Google SSO. Důvody v zadání §4.
+- **Bez databázového adaptéru.** Session drží JWT, uživatele zakládá `signIn`
+  callback — díky tomu se řídí role i přístup na jednom místě a build nezávisí
+  na dostupnosti databáze.
 - `ENABLE_DEV_LOGIN` se v produkci sám vypne (`NODE_ENV === "production"`),
   ale nenastavujte ho na `true` ani tak.
 - Přihlásit se může jen ten, kdo už je pozvaný v databázi, nebo přichází

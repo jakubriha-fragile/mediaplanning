@@ -15,7 +15,7 @@ export function Chrome({
   user,
   children,
 }: {
-  active: "plan" | "plneni" | "sprava";
+  active: "plan" | "plneni" | "sprava" | "nastaveni";
   user: { name: string | null; email: string; role: string };
   children: React.ReactNode;
 }) {
@@ -48,7 +48,10 @@ export function Chrome({
             <Link href="/" aria-current={active === "plan" ? "page" : undefined}>Plán</Link>
             <Link href="/plneni" aria-current={active === "plneni" ? "page" : undefined}>Detail &amp; plnění</Link>
             {user.role === "ADMIN" && (
-              <Link href="/sprava" aria-current={active === "sprava" ? "page" : undefined}>Uživatelé &amp; oprávnění</Link>
+              <>
+                <Link href="/sprava" aria-current={active === "sprava" ? "page" : undefined}>Uživatelé &amp; oprávnění</Link>
+                <Link href="/nastaveni" aria-current={active === "nastaveni" ? "page" : undefined}>Nastavení</Link>
+              </>
             )}
           </nav>
         </div>

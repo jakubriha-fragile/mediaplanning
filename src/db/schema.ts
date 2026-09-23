@@ -43,7 +43,9 @@ export const users = pgTable("user", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-// Auth.js tabulky
+// Auth.js tabulky.
+// Aktuálně se nepoužívají — session drží JWT a uživatele zakládá signIn callback.
+// Necháváme je ve schématu pro případ přechodu na databázové session.
 export const accounts = pgTable(
   "account",
   {
