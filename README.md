@@ -42,7 +42,12 @@ Repozitář je propojený s Vercel projektem, takže stačí:
 region **Frankfurt (eu-central-1)** kvůli GDPR. Vercel proměnnou `DATABASE_URL`
 doplní do projektu sám.
 
-**2. Proměnné prostředí.** Ve Vercelu → *Settings* → *Environment Variables*:
+**2. Framework preset.** Ve Vercelu → *Settings* → *Build & Development Settings*
+musí být *Framework Preset* nastavený na **Next.js**. V repozitáři je kvůli tomu
+`vercel.json`, ale nastavení v dashboardu má přednost — když je tam `Other`,
+build skončí chybou „No Output Directory named public".
+
+**3. Proměnné prostředí.** Ve Vercelu → *Settings* → *Environment Variables*:
 
 | Proměnná | Hodnota |
 |---|---|
@@ -52,14 +57,14 @@ doplní do projektu sám.
 | `ALLOWED_EMAIL_DOMAINS` | `fragile.cz` (případně i doména klienta) |
 | `ENABLE_DEV_LOGIN` | **nenastavovat**, nebo `false` |
 
-**3. Google OAuth.** Google Cloud Console → *APIs & Services* → *Credentials* →
+**4. Google OAuth.** Google Cloud Console → *APIs & Services* → *Credentials* →
 *Create OAuth client ID* → Web application. Authorized redirect URI:
 
 ```
 https://<vase-domena>.vercel.app/api/auth/callback/google
 ```
 
-**4. Tabulky.** Po prvním nasazení jednou lokálně proti produkční databázi
+**5. Tabulky.** Po prvním nasazení jednou lokálně proti produkční databázi
 (použijte **nepoolovaný** connection string z Neonu — DDL přes pooler zlobí):
 
 ```bash
@@ -69,7 +74,7 @@ DATABASE_URL="<produkční connection string>" npm run db:seed
 
 `db:seed` smaže a znovu naplní data — v produkci ho pouštějte jen jednou na začátku.
 
-**5. První administrátor.** Seed založí `admin@fragile.cz`. Změňte e-mail
+**6. První administrátor.** Seed založí `admin@fragile.cz`. Změňte e-mail
 na svůj v `scripts/seed.ts`, nebo po nasazení v databázi.
 
 ---
@@ -84,6 +89,7 @@ src/
   lib/actions.ts        server actions — každý zápis prochází kontrolou oprávnění
   lib/queries.ts        čtení dat pro stránky
   lib/auth.ts           Google SSO + testovací přihlášení
+  middleware.ts         přesměrování nepřihlášených; běží na Edge, proto bez databáze
   app/page.tsx          plán: rozpočty, filtry, souhrny
   app/plneni/page.tsx   detail a plnění: pacing, metriky, poznámky
   app/sprava/page.tsx   uživatelé, oprávnění, historie změn
