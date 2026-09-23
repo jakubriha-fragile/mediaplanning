@@ -1,0 +1,682 @@
+{
+ "rows": [
+  {
+   "id": "t1",
+   "msgId": "BRAND-1",
+   "type": "Earned",
+   "channel": "SEZNAM spec. redakční spolupráce - Prozeny.cz",
+   "oct": 233021.0,
+   "nov": 233021.0,
+   "dec": 0.0,
+   "intensity": "Stredni",
+   "kpi": ""
+  },
+  {
+   "id": "t2",
+   "msgId": "BRAND-2",
+   "type": "Earned",
+   "channel": "SEZNAM spec. redakční spolupráce - Prozeny.cz",
+   "oct": 0.0,
+   "nov": 0.0,
+   "dec": 287445.0,
+   "intensity": "Stredni",
+   "kpi": ""
+  },
+  {
+   "id": "t3",
+   "msgId": "PROBIO-1",
+   "type": "Paid",
+   "channel": "RTB",
+   "oct": 70000.0,
+   "nov": 40000.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": "Engagement rate, dosah"
+  },
+  {
+   "id": "t4",
+   "msgId": "PROBIO-1",
+   "type": "Paid",
+   "channel": "DOOH - čekárny",
+   "oct": 20000.0,
+   "nov": 20000.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": "Pocet vystupu, dosah PR"
+  },
+  {
+   "id": "t5",
+   "msgId": "PROBIO-1",
+   "type": "Paid",
+   "channel": "nativní reklama",
+   "oct": 50000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t6",
+   "msgId": "PROBIO-1",
+   "type": "Paid",
+   "channel": "META",
+   "oct": 60000.0,
+   "nov": 50000.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": "ROAS, CPA"
+  },
+  {
+   "id": "t7",
+   "msgId": "PROBIO-2",
+   "type": "Paid",
+   "channel": "Testuj.cz - kooperace",
+   "oct": 45000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": "CPC, konverzni pomer"
+  },
+  {
+   "id": "t8",
+   "msgId": "PROBIO-3",
+   "type": "Owned",
+   "channel": "UGC",
+   "oct": 80000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": "Frekvence, retargeting"
+  },
+  {
+   "id": "t9",
+   "msgId": "SKINEFFECT-1",
+   "type": "Paid",
+   "channel": "META",
+   "oct": 50000.0,
+   "nov": 50000.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": "Reach & impact"
+  },
+  {
+   "id": "t10",
+   "msgId": "SKINEFFECT-1",
+   "type": "Paid",
+   "channel": "Teads",
+   "oct": 50000.0,
+   "nov": 0.0,
+   "dec": 60000.0,
+   "intensity": "Vysoka",
+   "kpi": "Video views, reach"
+  },
+  {
+   "id": "t11",
+   "msgId": "SKINEFFECT-1",
+   "type": "Paid",
+   "channel": "direct buy - novinky.cz",
+   "oct": 0.0,
+   "nov": 0.0,
+   "dec": 40000.0,
+   "intensity": "Vysoka",
+   "kpi": "Retargeting"
+  },
+  {
+   "id": "t12",
+   "msgId": "SKINEFFECT-1",
+   "type": "Paid",
+   "channel": "TikTok",
+   "oct": 0.0,
+   "nov": 50000.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t13",
+   "msgId": "SKINEFFECT-2",
+   "type": "Owned",
+   "channel": "META",
+   "oct": 50000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Stredni",
+   "kpi": "Engagement, UGC"
+  },
+  {
+   "id": "t14",
+   "msgId": "SKINEFFECT-2",
+   "type": "Owned",
+   "channel": "TikTok",
+   "oct": 50000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Stredni",
+   "kpi": "Organicka navstevnost"
+  },
+  {
+   "id": "t15",
+   "msgId": "SKINEFFECT-2",
+   "type": "Owned",
+   "channel": "UGC",
+   "oct": 50000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Stredni",
+   "kpi": "Pocet vystupu"
+  },
+  {
+   "id": "t16",
+   "msgId": "SKINEFFECT-3",
+   "type": "Owned",
+   "channel": "UGC",
+   "oct": 0.0,
+   "nov": 50000.0,
+   "dec": 0.0,
+   "intensity": "Stredni",
+   "kpi": ""
+  },
+  {
+   "id": "t17",
+   "msgId": "BRAND-1",
+   "type": "Paid",
+   "channel": "YT",
+   "oct": 113000.0,
+   "nov": 113000.0,
+   "dec": 113000.0,
+   "intensity": "Stredni",
+   "kpi": "PR fee za zajisteni earned umisteni (newsletter/podcast) - sledovat dosah a zminky, ne media spend"
+  },
+  {
+   "id": "t18",
+   "msgId": "BRAND-1",
+   "type": "Paid",
+   "channel": "RTB video",
+   "oct": 110000.0,
+   "nov": 110000.0,
+   "dec": 110000.0,
+   "intensity": "Stredni",
+   "kpi": ""
+  },
+  {
+   "id": "t19",
+   "msgId": "BRAND-1",
+   "type": "Paid",
+   "channel": "Teads statika",
+   "oct": 50000.0,
+   "nov": 50000.0,
+   "dec": 50000.0,
+   "intensity": "Stredni",
+   "kpi": ""
+  },
+  {
+   "id": "t20",
+   "msgId": "DERMOKATALOG-1",
+   "type": "Paid",
+   "channel": "RTB video",
+   "oct": 30000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t21",
+   "msgId": "DERMOKATALOG-1",
+   "type": "Paid",
+   "channel": "direct buy",
+   "oct": 50000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t22",
+   "msgId": "DERMOKATALOG-1",
+   "type": "Paid",
+   "channel": "RTB statika",
+   "oct": 50000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t23",
+   "msgId": "DERMOKATALOG-1",
+   "type": "Paid",
+   "channel": "Teads",
+   "oct": 41252.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t24",
+   "msgId": "DERMOKATALOG-1",
+   "type": "Paid",
+   "channel": "META",
+   "oct": 70000.0,
+   "nov": 0.0,
+   "dec": 0.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t25",
+   "msgId": "VANOCNIKATAL-1",
+   "type": "Paid",
+   "channel": "RTB video",
+   "oct": 0.0,
+   "nov": 30000.0,
+   "dec": 30000.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t26",
+   "msgId": "VANOCNIKATAL-1",
+   "type": "Paid",
+   "channel": "direct buy",
+   "oct": 0.0,
+   "nov": 50000.0,
+   "dec": 50000.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t27",
+   "msgId": "VANOCNIKATAL-1",
+   "type": "Paid",
+   "channel": "RTB statika",
+   "oct": 0.0,
+   "nov": 50000.0,
+   "dec": 50000.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t28",
+   "msgId": "VANOCNIKATAL-1",
+   "type": "Paid",
+   "channel": "Teads",
+   "oct": 0.0,
+   "nov": 41252.0,
+   "dec": 41252.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t29",
+   "msgId": "VANOCNIKATAL-1",
+   "type": "Paid",
+   "channel": "META",
+   "oct": 0.0,
+   "nov": 70000.0,
+   "dec": 70000.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t30",
+   "msgId": "VANOCNIEDICE-1",
+   "type": "Paid",
+   "channel": "RTB statika",
+   "oct": 0.0,
+   "nov": 50000.0,
+   "dec": 50000.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t31",
+   "msgId": "VANOCNIEDICE-1",
+   "type": "Paid",
+   "channel": "META",
+   "oct": 0.0,
+   "nov": 41252.0,
+   "dec": 41252.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  },
+  {
+   "id": "t32",
+   "msgId": "VANOCNIEDICE-1",
+   "type": "Paid",
+   "channel": "nativní reklama",
+   "oct": 0.0,
+   "nov": 70000.0,
+   "dec": 70000.0,
+   "intensity": "Vysoka",
+   "kpi": ""
+  }
+ ],
+ "messages": [
+  {
+   "id": "BRAND-1",
+   "campaign": "brand",
+   "message": "brand",
+   "phase": "Awareness",
+   "audience": "30+ ženy"
+  },
+  {
+   "id": "BRAND-2",
+   "campaign": "brand",
+   "message": "brand Vánoce",
+   "phase": "Awareness",
+   "audience": "30+ ženy"
+  },
+  {
+   "id": "PROBIO-1",
+   "campaign": "Probio",
+   "message": "probio pastylky & pastilky akut",
+   "phase": "Consideration",
+   "audience": "Rodiny s detmi 30-45"
+  },
+  {
+   "id": "PROBIO-2",
+   "campaign": "Probio",
+   "message": "nové tubusy",
+   "phase": "Conversion",
+   "audience": "Rodiny s detmi 30-45"
+  },
+  {
+   "id": "PROBIO-3",
+   "campaign": "Probio",
+   "message": "probio pastylky & pastilky akut",
+   "phase": "Consideration",
+   "audience": "Value shoppers 18-35"
+  },
+  {
+   "id": "SKINEFFECT-1",
+   "campaign": "Skineffect",
+   "message": "červená řada",
+   "phase": "Consideration",
+   "audience": "30+ ženy"
+  },
+  {
+   "id": "SKINEFFECT-2",
+   "campaign": "Skineffect",
+   "message": "modrá řada",
+   "phase": "Awareness",
+   "audience": "Value shoppers 18-35"
+  },
+  {
+   "id": "SKINEFFECT-3",
+   "campaign": "Skineffect",
+   "message": "tipy na dárky",
+   "phase": "Consideration",
+   "audience": "Siroka verejnost / darci 25-55"
+  },
+  {
+   "id": "DERMOKATALOG-1",
+   "campaign": "Dermokatalog",
+   "message": "dermokatalog",
+   "phase": "Consideration",
+   "audience": "30+ ženy"
+  },
+  {
+   "id": "VANOCNIKATAL-1",
+   "campaign": "Vánoční katalog",
+   "message": "Vánoce",
+   "phase": "Consideration",
+   "audience": "30+ ženy"
+  },
+  {
+   "id": "VANOCNIEDICE-1",
+   "campaign": "Vánoční edice",
+   "message": "Vánoce",
+   "phase": "Consideration",
+   "audience": "Siroka verejnost / darci 25-55"
+  }
+ ],
+ "kpis": [
+  {
+   "cat": "Paid media - vykon",
+   "name": "Reach / GRPs",
+   "desc": "Kolik lidi (nebo % cilove skupiny) bylo zasazeno - zaklad pro awareness kampane.",
+   "freq": "Tydne",
+   "src": "TV/AV panel, platformy"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "Frequency (OTS)",
+   "desc": "Prumerny pocet kontaktu na osobu - kontrola pre/under-exposure.",
+   "freq": "Tydne",
+   "src": "Ad servery, platformy"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "Impressions",
+   "desc": "Celkovy pocet zobrazeni napric kanaly.",
+   "freq": "Tydne",
+   "src": "Ad servery, platformy"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "CPM",
+   "desc": "Cena za 1000 zobrazeni - efektivita nakupu.",
+   "freq": "Tydne",
+   "src": "Media reporting"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "CTR",
+   "desc": "Prokliky / impressions - relevance kreativy a cileni.",
+   "freq": "Tydne",
+   "src": "Platformy (Meta, Google Ads...)"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "CPC",
+   "desc": "Cena za proklik.",
+   "freq": "Tydne",
+   "src": "Platformy"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "VTR / completion rate",
+   "desc": "Podil dokoukanych videi - kvalita video komunikace.",
+   "freq": "Tydne",
+   "src": "Video platformy, YouTube"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "CPA / CPL",
+   "desc": "Cena za akci / lead - efektivita performance casti mixu.",
+   "freq": "Tydne",
+   "src": "Ad servery, CRM"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "ROAS",
+   "desc": "Navratnost investice do reklamy (trzby / naklady).",
+   "freq": "Mesicne",
+   "src": "E-commerce platforma, Ads"
+  },
+  {
+   "cat": "Paid media - vykon",
+   "name": "Share of Voice (SOV) - paid",
+   "desc": "Podil placene media prezence vuci konkurenci v obdobi.",
+   "freq": "Mesicne",
+   "src": "Media monitoring (Nielsen, Kantar...)"
+  },
+  {
+   "cat": "Owned media",
+   "name": "Organicky dosah a imprese (SoMe)",
+   "desc": "Kolik lidi videlo organicky obsah na vlastnich profilech bez placene podpory.",
+   "freq": "Tydne",
+   "src": "Meta/IG/LinkedIn insights"
+  },
+  {
+   "cat": "Owned media",
+   "name": "Engagement rate (SoMe)",
+   "desc": "Interakce (like, komentar, sdileni) / dosah - relevance obsahu.",
+   "freq": "Tydne",
+   "src": "Socialni platformy"
+  },
+  {
+   "cat": "Owned media",
+   "name": "Rust followers / komunity",
+   "desc": "Vyvoj velikosti a kvality vlastni komunity v case.",
+   "freq": "Mesicne",
+   "src": "Socialni platformy"
+  },
+  {
+   "cat": "Owned media",
+   "name": "Organicka navstevnost webu",
+   "desc": "Provoz na web bez placene podpory - SEO a obsahovy efekt.",
+   "freq": "Tydne",
+   "src": "Google Analytics / GA4"
+  },
+  {
+   "cat": "Owned media",
+   "name": "Open rate / CTR e-mailu",
+   "desc": "Vykon vlastni owned databaze (newsletter).",
+   "freq": "Za kampan",
+   "src": "E-mail marketing nastroj"
+  },
+  {
+   "cat": "Owned media",
+   "name": "SEO pozice klicovych vyrazu",
+   "desc": "Vyvoj organickych pozic pro klicova temata kampani.",
+   "freq": "Mesicne",
+   "src": "SEO nastroje (Search Console...)"
+  },
+  {
+   "cat": "Earned media",
+   "name": "Pocet PR / earned vystupu",
+   "desc": "Pocet medialnich a earned umisteni (vc. napr. Mudrovani a podobnych kanalu).",
+   "freq": "Mesicne",
+   "src": "PR monitoring"
+  },
+  {
+   "cat": "Earned media",
+   "name": "Earned Media Value (AVE)",
+   "desc": "Odhadovana hodnota ziskaneho pokryti, jako by bylo koupene.",
+   "freq": "Mesicne",
+   "src": "PR monitoring / AVE kalkulace"
+  },
+  {
+   "cat": "Earned media",
+   "name": "Dosah earned zminek (odhad)",
+   "desc": "Kolik lidi mohlo byt zasazeno earned obsahem (mimo vlastni platformy).",
+   "freq": "Mesicne",
+   "src": "PR monitoring, media kity"
+  },
+  {
+   "cat": "Earned media",
+   "name": "UGC a zminky (mentions)",
+   "desc": "Objem uzivatelskeho obsahu a zminek o znacce napric webem.",
+   "freq": "Mesicne",
+   "src": "Social listening nastroje"
+  },
+  {
+   "cat": "Earned media",
+   "name": "Sentiment earned zminek",
+   "desc": "Pomer pozitivnich/negativnich zminek v ramci ziskaneho pokryti.",
+   "freq": "Mesicne",
+   "src": "Social listening nastroje"
+  },
+  {
+   "cat": "Earned media",
+   "name": "Pomer Earned : Paid (EMV/spend)",
+   "desc": "Kolik ziskane hodnoty pripada na 1 Kc placene investice - efektivita PR/earned aktivit.",
+   "freq": "Mesicne",
+   "src": "PR + media reporting"
+  },
+  {
+   "cat": "Byznys / cross-channel",
+   "name": "Brand awareness (aided/unaided)",
+   "desc": "Znalost znacky pred/po kampani - efekt na horni cast funnelu.",
+   "freq": "Pred/po kampani",
+   "src": "Brand tracking studie"
+  },
+  {
+   "cat": "Byznys / cross-channel",
+   "name": "Celkova navstevnost webu",
+   "desc": "Souhrnny efekt vsech typu media (Paid+Owned+Earned) na trafic.",
+   "freq": "Tydne",
+   "src": "GA4"
+  },
+  {
+   "cat": "Byznys / cross-channel",
+   "name": "Konverzni pomer",
+   "desc": "Podil navstevniku, kteri dokonci pozadovanou akci.",
+   "freq": "Tydne",
+   "src": "GA4 / e-commerce"
+  },
+  {
+   "cat": "Byznys / cross-channel",
+   "name": "Leady / prodeje",
+   "desc": "Realny byznysovy dopad kampane.",
+   "freq": "Tydne",
+   "src": "CRM / e-commerce"
+  },
+  {
+   "cat": "Byznys / cross-channel",
+   "name": "Budget pacing (plan vs. realita)",
+   "desc": "Cerpani rozpoctu oproti planu napric Paid/Owned/Earned.",
+   "freq": "Tydne",
+   "src": "Media reporting"
+  },
+  {
+   "cat": "Byznys / cross-channel",
+   "name": "Cost efficiency trend",
+   "desc": "Vyvoj klicovych cenovych ukazatelu (CPM/CPC/CPA) v case.",
+   "freq": "Mesicne",
+   "src": "Media reporting"
+  },
+  {
+   "cat": "Zahlceni online prostredi",
+   "name": "Aktivni touchpointy v mesici (z 3 typu)",
+   "desc": "Kolik ze 3 typu media (Paid/Owned/Earned) soucasne nese brand komunikaci - viz list 'Message a rozmelneni'.",
+   "freq": "Mesicne",
+   "src": "Interni vypocet (tento sesit)"
+  },
+  {
+   "cat": "Zahlceni online prostredi",
+   "name": "Index rozmelneni sdeleni",
+   "desc": "Jak moc jsou jednotliva sdeleni rozprostrena mezi Paid/Owned/Earned - viz list 'Message a rozmelneni'.",
+   "freq": "Mesicne",
+   "src": "Interni vypocet (tento sesit)"
+  },
+  {
+   "cat": "Zahlceni online prostredi",
+   "name": "Branded search volume",
+   "desc": "Kolik lidi aktivne vyhledava nazev znacky - proxy pro celkove 'zahlceni' povedomim.",
+   "freq": "Mesicne",
+   "src": "Google Trends, Search Console"
+  },
+  {
+   "cat": "Zahlceni online prostredi",
+   "name": "Objem zminek (social listening)",
+   "desc": "Kolik se o znacce mluvi napric webem a socialnimi sitemi - kvantita pritomnosti brandu online.",
+   "freq": "Tydne",
+   "src": "Social listening (Brand24, Mention, Talkwalker...)"
+  },
+  {
+   "cat": "Zahlceni online prostredi",
+   "name": "Share of Voice online (celkove)",
+   "desc": "Podil brandu na celkove online konverzaci/mediaprostoru vuci konkurenci (Paid+Owned+Earned dohromady).",
+   "freq": "Mesicne",
+   "src": "Media + social listening monitoring"
+  },
+  {
+   "cat": "Zahlceni online prostredi",
+   "name": "Odhad prumerne frekvence kontaktu",
+   "desc": "Kolikrat v prumeru cilova skupina 'potkala' brand za mesic napric vsemi typy media.",
+   "freq": "Mesicne",
+   "src": "Kombinace paid frequency + owned/earned reach odhadu"
+  },
+  {
+   "cat": "Zahlceni online prostredi",
+   "name": "Sentiment / kvalita zminek (celkove)",
+   "desc": "Zda je zahlceni online prostredi pozitivni, neutralni nebo rizikove (ne jen kvantita, ale i kvalita vnimani).",
+   "freq": "Mesicne",
+   "src": "Social listening nastroje"
+  }
+ ]
+}
