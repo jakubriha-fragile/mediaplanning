@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
 import { getPlanRows, getCampaignTree, getUser } from "@/lib/queries";
+import { myUndoStack } from "@/lib/actions";
 import { can } from "@/lib/permissions";
 import { MONTHS, MONTH_LABEL, kc, pct } from "@/lib/months";
 import { Chrome } from "@/components/Chrome";
@@ -14,7 +15,7 @@ export default async function PlanPage() {
 
   const user = await getUser(me.id);
   if (!user) redirect("/prihlaseni");
-  const [rows, campaigns] = await Promise.all([getPlanRows(me), getCampaignTree()]);
+  const [rows, campaigns, undo] = await Promise.all([getPlanRows(me), getCampaignTree(), myUndoStack()]);
   const canEditPlan = can(me, "write", { area: "plan", mediaType: null, campaignId: null, month: null });
 
   const total = rows.reduce((s, r) => s + MONTHS.reduce((a, m) => a + r.budgets[m], 0), 0);
@@ -55,7 +56,7 @@ export default async function PlanPage() {
         </div>
       )}
 
-      <PlanTable rows={rows} campaigns={campaigns} months={[...MONTHS]} monthLabels={MONTH_LABEL} canEditPlan={canEditPlan} />
+      <PlanTable rows={rows} campaigns={campaigns} months={[...MONTHS]} monthLabels={MONTH_LABEL} canEditPlan={canEditPlan} undoLabel={undo[0]?.label ?? null} />
 
       <div className="banner">
         <span>

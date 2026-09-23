@@ -275,3 +275,34 @@ tr:hover .rowdel, .rowdel:focus { opacity: 1; }
 select.txt.pill { border: 1px solid transparent; font-weight: 500; }
 select.txt.pill:hover { border-color: var(--line-strong); }
 table.plan td { vertical-align: middle; }
+
+/* ---------------------------------------------------- našeptávač */
+.combo { position: relative; }
+.combolist {
+  position: absolute; z-index: 70; top: calc(100% + 2px); left: 0; min-width: 240px; max-width: 340px;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.14); max-height: 260px; overflow: auto; padding: 3px;
+}
+.comboitem {
+  display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
+  appearance: none; border: none; background: none; font: inherit; font-size: 12px;
+  padding: 5px 8px; border-radius: 3px; cursor: pointer; color: var(--ink);
+}
+.comboitem span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comboitem i { font-style: normal; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.comboitem.hi { background: var(--brand-soft); }
+.comboitem.cur { font-weight: 500; }
+.comboitem.newv { border-top: 1px solid var(--line); color: var(--brand-ink); }
+
+/* indikátor ukládání */
+.saving { display: inline-flex; align-items: center; gap: 6px; color: var(--brand-ink); font-weight: 500; }
+.spinner {
+  width: 11px; height: 11px; border-radius: 50%; flex: none;
+  border: 2px solid var(--brand-soft); border-top-color: var(--brand);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
+/* prázdný blok bez taktik */
+tr.emptygrp td { color: var(--muted); font-style: italic; background: var(--surface); }

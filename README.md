@@ -89,6 +89,7 @@ src/
   lib/pacing.ts         výpočty plnění (§6) — převzato z odladěného prototypu
   lib/actions.ts        server actions — každý zápis prochází kontrolou oprávnění
   lib/queries.ts        čtení dat pro stránky
+  lib/undo.ts           zásobník pro vrácení zpět (10 kroků na uživatele)
   lib/auth.ts           Google SSO + testovací přihlášení
   middleware.ts         přesměrování nepřihlášených; běží na Edge, proto bez databáze
   app/page.tsx          plán: rozpočty, filtry, souhrny
@@ -129,6 +130,17 @@ npm run test:perms    # 17 testů včetně scénářů ze zadání
 
 ---
 
+## Vrácení zpět
+
+Před každou změnou se uloží **původní hodnota**, ne opačná operace. Vrácení
+pak stav prostě přepíše zpět, takže nezáleží na tom, co mezitím udělal někdo
+jiný. Drží se 10 posledních kroků na uživatele.
+
+Smazání taktiky vrátit nejde — kaskádou padnou i rozpočty a metriky. Proto
+se u něj potvrzuje a v logu je to označené.
+
+---
+
 ## Co ještě není hotové
 
 Poctivý seznam, aby nepřekvapil:
@@ -137,7 +149,6 @@ Poctivý seznam, aby nepřekvapil:
 - **Export do XLSX** — zadání §9.
 - **Podklady a poznámky** — tabulky v databázi jsou, rozhraní chybí.
 - **Přidávání linek sdělení** — akce `createMessageLine` existuje, tlačítko v UI ne.
-- **Vrácení zpět** — historie se zapisuje, undo tlačítko zatím ne.
 - **Migrace** — projekt používá `db:push`. Před produkčním provozem přejděte
   na `drizzle-kit generate` a verzované migrace.
 

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
 import { getPerfRows, getUser } from "@/lib/queries";
+import { myUndoStack } from "@/lib/actions";
 import { MONTHS, MONTH_LABEL } from "@/lib/months";
 import { Chrome } from "@/components/Chrome";
 import { PerfTable, type PerfRow } from "@/components/PerfTable";
@@ -12,7 +13,7 @@ export default async function PerfPage() {
   if (!me) redirect("/prihlaseni");
   const user = await getUser(me.id);
   if (!user) redirect("/prihlaseni");
-  const rows = await getPerfRows(me);
+  const [rows, undo] = await Promise.all([getPerfRows(me), myUndoStack()]);
 
   const canWriteAnything = rows.some((r) => MONTHS.some((m) => r.editable[m]));
 
@@ -26,7 +27,7 @@ export default async function PerfPage() {
           </span>
         </div>
       )}
-      <PerfTable rows={rows} months={[...MONTHS]} monthLabels={MONTH_LABEL} />
+      <PerfTable rows={rows} months={[...MONTHS]} monthLabels={MONTH_LABEL} undoLabel={undo[0]?.label ?? null} />
       <div className="banner">
         <span>
           <b>Pracovní podklad.</b> Vyhodnocení slouží jako interní přehled; před sdílením s klientem

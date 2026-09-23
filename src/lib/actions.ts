@@ -22,6 +22,10 @@ import {
 import { currentPrincipal } from "@/lib/auth";
 import { assertCan, canManageUsers, PermissionError } from "@/lib/permissions";
 import { MONTH_LABEL, QUARTER, kc, num } from "@/lib/months";
+import {
+  pushUndo, popUndo, listUndo, snapshotPositions,
+  undoCreatedTactic, undoCreatedCampaign, type UndoOp,
+} from "@/lib/undo";
 
 export type Result = { ok: true } | { ok: false; error: string };
 
@@ -81,9 +85,9 @@ export async function setPlannedBudget(raw: z.input<typeof budgetInput>): Promis
       .values({ tacticId, month, planned })
       .onConflictDoUpdate({ target: [tacticBudgets.tacticId, tacticBudgets.month], set: { planned } });
 
-    await log(me!.id, "plan", [
-      `Rozpočet ${channel} / ${MONTH_LABEL[month] ?? month}: ${kc(before?.planned ?? 0)} → ${kc(planned)}`,
-    ]);
+    const label = `Rozpočet ${channel} / ${MONTH_LABEL[month] ?? month}: ${kc(before?.planned ?? 0)} → ${kc(planned)}`;
+    await pushUndo(me!.id, label, [{ t: "budget", tacticId, month, planned: before?.planned ?? 0 }]);
+    await log(me!.id, "plan", [label]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
@@ -118,9 +122,9 @@ export async function setMetricTarget(raw: z.input<typeof metricTargetInput>): P
       .values({ metricId, month, target })
       .onConflictDoUpdate({ target: [metricTargets.metricId, metricTargets.month], set: { target } });
 
-    await log(me!.id, "plan", [
-      `Cíl ${metric.name} ${channel} / ${MONTH_LABEL[month] ?? month}: ${num(before?.target ?? 0) || "—"} → ${num(target) || "—"}`,
-    ]);
+    const label = `Cíl ${metric.name} ${channel} / ${MONTH_LABEL[month] ?? month}: ${num(before?.target ?? 0) || "—"} → ${num(target) || "—"}`;
+    await pushUndo(me!.id, label, [{ t: "metricTarget", metricId, month, target: before?.target ?? 0 }]);
+    await log(me!.id, "plan", [label]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
@@ -157,9 +161,9 @@ export async function setActualSpend(raw: z.input<typeof actualInput>): Promise<
       .values({ tacticId, month, amount })
       .onConflictDoUpdate({ target: [actualSpends.tacticId, actualSpends.month], set: { amount } });
 
-    await log(me!.id, "actuals", [
-      `Čerpání ${channel} / ${MONTH_LABEL[month] ?? month}: ${kc(before?.amount ?? 0)} → ${kc(amount)}`,
-    ]);
+    const label = `Čerpání ${channel} / ${MONTH_LABEL[month] ?? month}: ${kc(before?.amount ?? 0)} → ${kc(amount)}`;
+    await pushUndo(me!.id, label, [{ t: "actual", tacticId, month, amount: before?.amount ?? 0 }]);
+    await log(me!.id, "actuals", [label]);
     revalidatePath("/plneni");
     return { ok: true };
   } catch (e) {
@@ -194,9 +198,9 @@ export async function setMetricActual(raw: z.input<typeof metricActualInput>): P
       .values({ metricId, month, value })
       .onConflictDoUpdate({ target: [metricActuals.metricId, metricActuals.month], set: { value } });
 
-    await log(me!.id, "actuals", [
-      `Realita ${metric.name} ${channel} / ${MONTH_LABEL[month] ?? month}: ${num(before?.value ?? 0) || "—"} → ${num(value) || "—"}`,
-    ]);
+    const label = `Realita ${metric.name} ${channel} / ${MONTH_LABEL[month] ?? month}: ${num(before?.value ?? 0) || "—"} → ${num(value) || "—"}`;
+    await pushUndo(me!.id, label, [{ t: "metricActual", metricId, month, value: before?.value ?? 0 }]);
+    await log(me!.id, "actuals", [label]);
     revalidatePath("/plneni");
     return { ok: true };
   } catch (e) {
@@ -234,9 +238,9 @@ export async function setAccountNote(raw: z.input<typeof noteInput>): Promise<Re
         .onConflictDoUpdate({ target: [accountNotes.tacticId, accountNotes.month], set: { text } });
     }
 
-    await log(me!.id, "actuals", [
-      `Poznámka accountu ${channel} / ${MONTH_LABEL[month] ?? month}: „${text || "—"}“`,
-    ]);
+    const label = `Poznámka accountu ${channel} / ${MONTH_LABEL[month] ?? month}: „${text || "—"}“`;
+    await pushUndo(me!.id, label, [{ t: "note", tacticId, month, text: before?.text ?? "" }]);
+    await log(me!.id, "actuals", [label]);
     revalidatePath("/plneni");
     return { ok: true };
   } catch (e) {
@@ -394,6 +398,11 @@ export async function updateTactic(raw: z.input<typeof tacticPatch>): Promise<Re
     }
     if (!items.length && !data.messageLineId) return { ok: true };
 
+    const [full] = await db.select().from(tactics).where(eq(tactics.id, data.tacticId));
+    await pushUndo(me!.id, items[0] ?? `Přeřazena taktika ${before.channel}`, [
+      { t: "tactic", tacticId: full.id, channel: full.channel, mediaType: full.mediaType, messageLineId: full.messageLineId },
+    ]);
+
     await db
       .update(tactics)
       .set({
@@ -442,6 +451,10 @@ export async function updateMessageLine(raw: z.input<typeof linePatch>): Promise
     }
     if (!items.length) return { ok: true };
 
+    await pushUndo(me!.id, items[0], [
+      { t: "line", id: line.id, message: line.message, audience: line.audience, phase: line.phase, code: line.code },
+    ]);
+
     await db
       .update(messageLines)
       .set({
@@ -480,12 +493,10 @@ export async function moveTactic(raw: {
     const moving = all.find((t) => t.id === raw.tacticId);
     if (!moving) throw new Error("Taktika neexistuje");
 
-    let newLineId = moving.messageLineId;
-    if (raw.targetMessageLineId) newLineId = raw.targetMessageLineId;
-    else if (raw.targetTacticId) {
-      const target = all.find((t) => t.id === raw.targetTacticId);
-      if (target) newLineId = target.messageLineId;
-    }
+    // Přetažení mezi řádky POUZE mění pořadí. Do jiné kampaně se taktika
+    // přesune jen upuštěním na hlavičku kampaně — jinak by řádek nečekaně
+    // zmizel do jiného bloku a uživatel by ho hledal.
+    const newLineId = raw.targetMessageLineId ?? moving.messageLineId;
 
     // přesun do jiné kampaně musí projít kontrolou i na cílové straně
     if (newLineId !== moving.messageLineId) {
@@ -495,6 +506,8 @@ export async function moveTactic(raw: {
         assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: line.campaignId, month: null });
       }
     }
+
+    await pushUndo(me!.id, `Přesun taktiky ${before.channel}`, [await snapshotPositions()]);
 
     const rest = all.filter((t) => t.id !== raw.tacticId);
     let index = rest.length;
@@ -562,6 +575,7 @@ export async function createTactic(raw: z.input<typeof newTactic>): Promise<Resu
       { tacticId: t.id, name: brand ? "CPM" : "CPA", kind: "rate_low" as const, unit: "Kč", slot: 1 },
     ]);
 
+    await pushUndo(me!.id, `Přidána taktika „${data.channel}"`, [undoCreatedTactic(t.id)]);
     await log(me!.id, "plan", [`Přidána taktika „${data.channel}" pod ${line.code}`]);
     revalidatePath("/");
     return { ok: true };
@@ -575,8 +589,10 @@ export async function deleteTactic(tacticId: string): Promise<Result> {
     const me = await currentPrincipal();
     const before = await tacticCoords(tacticId);
     assertCan(me, "write", { area: "plan", mediaType: before.mediaType, campaignId: before.campaignId, month: null });
+    // smazání zpět vrátit neumíme (kaskádou padnou i rozpočty a metriky),
+    // proto zásobník raději vyprázdníme, ať se uživatel nespoléhá
     await db.delete(tactics).where(eq(tactics.id, tacticId));
-    await log(me!.id, "plan", [`Smazána taktika „${before.channel}"`]);
+    await log(me!.id, "plan", [`Smazána taktika „${before.channel}" (nelze vrátit zpět)`]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
@@ -613,7 +629,8 @@ export async function createCampaign(raw: z.input<typeof newCampaign>): Promise<
       audience: data.audience,
     });
 
-    await log(me!.id, "plan", [`Založena iniciativa „${data.name}"`]);
+    await pushUndo(me!.id, `Založen blok „${data.name}"`, [undoCreatedCampaign(c.id)]);
+    await log(me!.id, "plan", [`Založen blok „${data.name}"`]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
@@ -638,6 +655,32 @@ export async function createMessageLine(raw: z.input<typeof newLine>): Promise<R
     await log(me!.id, "plan", [`Přidána linka sdělení ${data.code}`]);
     revalidatePath("/");
     return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ----------------------------------------------------------------- vrácení zpět
+
+/** Posledních 10 kroků aktuálního uživatele, nejnovější první. */
+export async function myUndoStack() {
+  const me = await currentPrincipal();
+  if (!me) return [];
+  return listUndo(me.id);
+}
+
+/** Vrátí poslední krok. Zapisuje původní hodnoty, takže nezáleží na tom,
+ *  co se mezitím stalo jinde — nevrací se „opačná akce", ale stav. */
+export async function undoLast(): Promise<Result & { label?: string }> {
+  try {
+    const me = await currentPrincipal();
+    if (!me) throw new PermissionError("Nejste přihlášen.");
+    const label = await popUndo(me.id);
+    if (!label) return { ok: false, error: "Není co vrátit." };
+    await log(me.id, "plan", [`Vráceno zpět: ${label}`]);
+    revalidatePath("/");
+    revalidatePath("/plneni");
+    return { ok: true, label };
   } catch (e) {
     return fail(e);
   }

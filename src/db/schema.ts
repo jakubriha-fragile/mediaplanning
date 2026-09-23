@@ -280,3 +280,20 @@ export const grantRelations = relations(grants, ({ one }) => ({
 export const changeLogRelations = relations(changeLog, ({ one }) => ({
   user: one(users, { fields: [changeLog.userId], references: [users.id] }),
 }));
+
+/**
+ * Zásobník pro vrácení zpět. Před každou změnou se sem uloží, co by ji vrátilo.
+ * Držíme posledních 10 kroků na uživatele — víc by svádělo k „rozbalování"
+ * cizích změn, které mezitím proběhly.
+ */
+export const undoEntries = pgTable(
+  "undo_entry",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    ts: timestamp("ts").notNull().defaultNow(),
+    label: text("label").notNull(),
+    ops: text("ops").notNull(), // JSON: seznam operací, které stav vrátí
+  },
+  (t) => ({ idx: index("undo_user_idx").on(t.userId, t.ts) }),
+);

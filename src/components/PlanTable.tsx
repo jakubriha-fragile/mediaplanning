@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, updateTactic, updateMessageLine,
-  moveTactic, createTactic, createCampaign, deleteTactic,
+  moveTactic, createTactic, createCampaign, deleteTactic, undoLast,
 } from "@/lib/actions";
+import { Combo, type ComboOption } from "@/components/Combo";
 
 export type PlanRow = {
   id: string;
@@ -40,13 +41,14 @@ const CAMP_COLORS = [
 const PHASES = ["Awareness", "Consideration", "Conversion"] as const;
 
 export function PlanTable({
-  rows, campaigns, months, monthLabels, canEditPlan,
+  rows, campaigns, months, monthLabels, canEditPlan, undoLabel,
 }: {
   rows: PlanRow[];
   campaigns: CampaignInfo[];
   months: string[];
   monthLabels: Record<string, string>;
   canEditPlan: boolean;
+  undoLabel: string | null;
 }) {
   const [data, setData] = useState(rows);
   const [pending, startTransition] = useTransition();
@@ -111,15 +113,44 @@ export function PlanTable({
   const patchLine = (lineId: string, patch: Partial<PlanRow>) =>
     setData((d) => d.map((r) => (r.messageLineId === lineId ? { ...r, ...patch } : r)));
 
+  /**
+   * Bloky se skládají ze SEZNAMU KAMPANÍ, ne z řádků. Dřív se braly z taktik,
+   * takže nově založený blok bez taktik nebyl vidět a vypadalo to, že se
+   * zakládání nepovedlo.
+   */
   const groups = useMemo(() => {
-    const out: Array<{ campaign: string; campaignId: string; rows: PlanRow[] }> = [];
+    const byId = new Map<string, PlanRow[]>();
     for (const r of visible) {
-      let g = out.find((x) => x.campaign === r.campaign);
-      if (!g) out.push((g = { campaign: r.campaign, campaignId: r.campaignId, rows: [] }));
-      g.rows.push(r);
+      if (!byId.has(r.campaignId)) byId.set(r.campaignId, []);
+      byId.get(r.campaignId)!.push(r);
     }
-    return out;
-  }, [visible]);
+    const known = campaigns.map((c) => ({ campaign: c.name, campaignId: c.id, rows: byId.get(c.id) ?? [] }));
+    // kdyby se v datech objevila kampaň mimo seznam, ať se neztratí
+    for (const r of visible) {
+      if (!known.some((g) => g.campaignId === r.campaignId)) {
+        known.push({ campaign: r.campaign, campaignId: r.campaignId, rows: byId.get(r.campaignId) ?? [] });
+      }
+    }
+    return anyFilter ? known.filter((g) => g.rows.length) : known;
+  }, [visible, campaigns, anyFilter]);
+
+  const channelOptions: ComboOption[] = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of rows) counts.set(r.channel, (counts.get(r.channel) ?? 0) + 1);
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "cs"))
+      .map(([label, n]) => ({ value: label, label, hint: `${n}×` }));
+  }, [rows]);
+
+  const lineOptions: ComboOption[] = useMemo(() => {
+    const seen = new Map<string, ComboOption>();
+    for (const r of rows) {
+      if (!seen.has(r.messageLineId)) {
+        seen.set(r.messageLineId, { value: r.messageLineId, label: r.message, hint: `${r.code} · ${r.campaign}` });
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "cs"));
+  }, [rows]);
 
   const campaignLines = (campaignId: string) =>
     campaigns.find((c) => c.id === campaignId)?.lines ?? [];
@@ -147,10 +178,14 @@ export function PlanTable({
           }}>✕ Zrušit filtry</button>
         ) : null}
         <span className="spacer" />
+        {canEditPlan && <UndoButton undoLabel={undoLabel} pending={pending} onUndo={() => run(() => {}, () => {}, undoLast)} />}
         {canEditPlan && <NewCampaignButton onCreate={(name) => run(() => {}, () => {}, () => createCampaign({ name }))} />}
         <span className="share">
-          {anyFilter ? `${visible.length} z ${data.length} taktik · ` : `${data.length} taktik · `}
-          {kc(selTotal)} Kč{pending ? " · ukládám…" : ""}
+          {pending ? (
+            <span className="saving"><span className="spinner" />ukládám…</span>
+          ) : (
+            <>{anyFilter ? `${visible.length} z ${data.length} taktik · ` : `${data.length} taktik · `}{kc(selTotal)} Kč</>
+          )}
         </span>
       </div>
 
@@ -211,6 +246,14 @@ export function PlanTable({
                     <td />
                   </tr>
 
+                  {!g.rows.length && (
+                    <tr className="emptygrp">
+                      <td />
+                      <td colSpan={10}>
+                        Blok zatím nemá žádnou taktiku — přidejte ji tlačítkem „+ Taktika" výše.
+                      </td>
+                    </tr>
+                  )}
                   {g.rows.map((r) => {
                     const dh = dropHint?.id === r.id ? dropHint : null;
                     return (
@@ -238,15 +281,24 @@ export function PlanTable({
                           )}
                         </td>
 
-                        <td style={{ maxWidth: 210 }}>
-                          <input className="txt" defaultValue={r.message} disabled={!canEditPlan}
-                            key={`msg-${r.messageLineId}-${r.message}`}
-                            onBlur={(e) => {
-                              const v = e.target.value, prev = r.message;
-                              if (v === prev) return;
-                              run(() => patchLine(r.messageLineId, { message: v }),
-                                  () => patchLine(r.messageLineId, { message: prev }),
-                                  () => updateMessageLine({ messageLineId: r.messageLineId, message: v }));
+                        <td style={{ maxWidth: 230, minWidth: 190 }}>
+                          <Combo
+                            value={r.message}
+                            options={lineOptions}
+                            disabled={!canEditPlan}
+                            placeholder="sdělení"
+                            onCommit={(text, opt) => {
+                              // výběr z nabídky = přeřazení pod existující linku,
+                              // vlastní text = přejmenování té současné
+                              if (opt && opt.value !== r.messageLineId) {
+                                run(() => patchRow(r.id, { messageLineId: opt.value, message: opt.label }),
+                                    () => patchRow(r.id, { messageLineId: r.messageLineId, message: r.message }),
+                                    () => updateTactic({ tacticId: r.id, messageLineId: opt.value }));
+                              } else if (text !== r.message) {
+                                run(() => patchLine(r.messageLineId, { message: text }),
+                                    () => patchLine(r.messageLineId, { message: r.message }),
+                                    () => updateMessageLine({ messageLineId: r.messageLineId, message: text }));
+                              }
                             }} />
                           <div className="share" style={{ paddingLeft: 6 }}>{r.code}</div>
                         </td>
@@ -288,13 +340,15 @@ export function PlanTable({
                           </select>
                         </td>
 
-                        <td style={{ minWidth: 150 }}>
-                          <input className="txt" defaultValue={r.channel} disabled={!canEditPlan}
-                            key={`ch-${r.id}-${r.channel}`} title={r.channel}
-                            onBlur={(e) => {
-                              const v = e.target.value, prev = r.channel;
-                              if (v === prev) return;
-                              run(() => patchRow(r.id, { channel: v }), () => patchRow(r.id, { channel: prev }),
+                        <td style={{ minWidth: 170 }}>
+                          <Combo
+                            value={r.channel}
+                            options={channelOptions}
+                            disabled={!canEditPlan}
+                            placeholder="kanál"
+                            onCommit={(v) => {
+                              if (v === r.channel) return;
+                              run(() => patchRow(r.id, { channel: v }), () => patchRow(r.id, { channel: r.channel }),
                                   () => updateTactic({ tacticId: r.id, channel: v }));
                             }} />
                         </td>
@@ -414,10 +468,21 @@ function BudgetCell({
   );
 }
 
+function UndoButton({
+  undoLabel, pending, onUndo,
+}: { undoLabel: string | null; pending: boolean; onUndo: () => void }) {
+  return (
+    <button className="btn" disabled={!undoLabel || pending} onClick={onUndo}
+      title={undoLabel ? `Zpět: ${undoLabel}` : "Není co vrátit"}>
+      ↶ Zpět
+    </button>
+  );
+}
+
 function NewCampaignButton({ onCreate }: { onCreate: (name: string) => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  if (!open) return <button className="btn primary" onClick={() => setOpen(true)}>+ Nová iniciativa</button>;
+  if (!open) return <button className="btn primary" onClick={() => setOpen(true)}>+ Přidat blok</button>;
   return (
     <form
       style={{ display: "flex", gap: 6 }}
@@ -428,7 +493,7 @@ function NewCampaignButton({ onCreate }: { onCreate: (name: string) => void }) {
         setName(""); setOpen(false);
       }}
     >
-      <input autoFocus placeholder="Název iniciativy" value={name} onChange={(e) => setName(e.target.value)}
+      <input autoFocus placeholder="Název bloku" value={name} onChange={(e) => setName(e.target.value)}
         style={{ font: "inherit", fontSize: 12, padding: "5px 10px", border: "1px solid var(--brand)",
           borderRadius: 4, background: "var(--surface)", color: "var(--ink)", minWidth: 170 }} />
       <button className="btn primary" type="submit">Založit</button>

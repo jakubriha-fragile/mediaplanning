@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { setActualSpend, setMetricActual, setAccountNote } from "@/lib/actions";
+import { setActualSpend, setMetricActual, setAccountNote, undoLast } from "@/lib/actions";
 import { verdictFor, monthState, elapsed, type Verdict } from "@/lib/pacing";
 
 export type PerfMetric = {
@@ -43,8 +43,8 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export function PerfTable({
-  rows, months, monthLabels,
-}: { rows: PerfRow[]; months: string[]; monthLabels: Record<string, string> }) {
+  rows, months, monthLabels, undoLabel,
+}: { rows: PerfRow[]; months: string[]; monthLabels: Record<string, string>; undoLabel: string | null }) {
   const [data, setData] = useState(rows);
   /**
    * Otevíráme na aktuálním měsíci, ne na souhrnu — v souhrnu se nedá zadávat
@@ -114,10 +114,15 @@ export function PerfTable({
         <button className="btn" aria-pressed={onlyAlert} style={{ borderRadius: 999, ...(onlyAlert ? { borderColor: "var(--bad)", color: "var(--bad)" } : {}) }}
           onClick={() => setOnlyAlert((v) => !v)}>jen ve skluzu</button>
         <span className="spacer" />
+        <button className="btn" disabled={!undoLabel || pending}
+          title={undoLabel ? `Zpět: ${undoLabel}` : "Není co vrátit"}
+          onClick={() => save(() => {}, () => {}, undoLast)}>↶ Zpět</button>
         <span className="share">
-          plán {kc(planSum)} · čerpáno {kc(actSum)}
-          {expSum > 0 ? ` · ${pct0(actSum / expSum)} očekávání` : ""}
-          {pending ? " · ukládám…" : ""}
+          {pending ? (
+            <span className="saving"><span className="spinner" />ukládám…</span>
+          ) : (
+            <>plán {kc(planSum)} · čerpáno {kc(actSum)}{expSum > 0 ? ` · ${pct0(actSum / expSum)} očekávání` : ""}</>
+          )}
         </span>
       </div>
 
