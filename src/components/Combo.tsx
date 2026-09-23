@@ -24,6 +24,9 @@ export function Combo({
   const [draft, setDraft] = useState<string | null>(null);
   const [hi, setHi] = useState(0);
   const box = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+  /** Seznam kreslíme napevno k oknu — tabulka má vlastní scroll a ořízla by ho. */
+  const [anchor, setAnchor] = useState<{ left: number; top: number; up: boolean } | null>(null);
   const shown = draft ?? value;
 
   const matches = useMemo(() => {
@@ -31,6 +34,24 @@ export function Combo({
     if (!q) return options;
     return options.filter((o) => (o.label + " " + (o.hint ?? "")).toLowerCase().includes(q));
   }, [draft, options]);
+
+  useEffect(() => {
+    if (!open) { setAnchor(null); return; }
+    const place = () => {
+      const r = field.current?.getBoundingClientRect();
+      if (!r) return;
+      const below = window.innerHeight - r.bottom;
+      const up = below < 200 && r.top > below;
+      setAnchor({ left: r.left, top: up ? window.innerHeight - r.top + 2 : r.bottom + 2, up });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -57,6 +78,7 @@ export function Combo({
   return (
     <div className="combo" ref={box}>
       <input
+        ref={field}
         className="txt"
         disabled={disabled}
         title={title ?? value}
@@ -76,8 +98,15 @@ export function Combo({
           else if (e.key === "Tab") commitFree();
         }}
       />
-      {open && matches.length > 0 && (
-        <div className="combolist">
+      {open && anchor && matches.length > 0 && (
+        <div
+          className="combolist"
+          style={
+            anchor.up
+              ? { left: anchor.left, bottom: anchor.top, top: "auto" }
+              : { left: anchor.left, top: anchor.top }
+          }
+        >
           {matches.slice(0, 40).map((o, i) => (
             <button
               key={o.value}

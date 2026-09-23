@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Mark } from "./Mark";
+import { Sticky } from "./Sticky";
 import { signOut, adminDomains, adminDomainsActive } from "@/lib/auth";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -21,6 +22,7 @@ export function Chrome({
 }) {
   return (
     <>
+      <Sticky />
       <div className="top">
         <div className="topin">
           <div className="brandline">

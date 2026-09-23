@@ -158,7 +158,7 @@ export function PlanTable({
     campaigns.find((c) => c.id === campaignId)?.lines ?? [];
 
   return (
-    <div className="panel">
+    <div className="panel sticky">
       <div className="toolbar">
         {(["Paid", "Owned", "Earned"] as const).map((ty) => (
           <button key={ty} className="btn" aria-pressed={types[ty]}
@@ -197,7 +197,7 @@ export function PlanTable({
         </div>
       )}
 
-      <div className="scroll">
+      <div className="scroll stick">
         <table className="plan">
           <thead>
             <tr>

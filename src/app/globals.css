@@ -82,7 +82,7 @@ b, strong { font-weight: 500; }
 a { color: var(--brand-ink); }
 .num { font-variant-numeric: tabular-nums; }
 
-.shell { max-width: 1560px; margin: 0 auto; padding-inline: 16px; padding-block: 0 48px; }
+.shell { max-width: 1560px; margin: 0 auto; padding-inline: 16px; padding-block: 0 16px; }
 
 /* hlavička */
 .top {
@@ -279,7 +279,7 @@ table.plan td { vertical-align: middle; }
 /* ---------------------------------------------------- našeptávač */
 .combo { position: relative; }
 .combolist {
-  position: absolute; z-index: 70; top: calc(100% + 2px); left: 0; min-width: 240px; max-width: 340px;
+  position: fixed; z-index: 70; min-width: 240px; max-width: 340px;
   background: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px;
   box-shadow: 0 6px 20px rgba(0,0,0,.14); max-height: 260px; overflow: auto; padding: 3px;
 }
@@ -308,36 +308,47 @@ table.plan td { vertical-align: middle; }
 tr.emptygrp td { color: var(--muted); font-style: italic; background: var(--surface); }
 
 /* ---------------------------------------------------- ukotvená horní část
-   Hlavička s navigací drží nahoře, pod ní lišta s filtry a pak záhlaví
-   tabulky. Souhrnné karty schválně NEkotvím — zabraly by třetinu obrazovky
-   a při scrollování v tabulce je člověk nepotřebuje. */
-:root { --top-h: 96px; --bar-h: 46px; }
+   Pozor na past: .scroll má overflow-x, takže je to vlastní scrollovací
+   kontejner — sticky uvnitř tabulky se kotví k němu, ne k oknu. Proto má
+   tabulka vlastní výšku a scrolluje se v ní; záhlaví i řádek bloku pak
+   drží spolehlivě nahoře. Výšky hlavičky měří Sticky.tsx za běhu.
+
+   Souhrnné karty schválně NEkotvím — zabraly by třetinu obrazovky. */
+:root { --top-h: 96px; --bar-h: 46px; --head-h: 27px; }
 
 .top { position: sticky; top: 0; z-index: 60; }
 
-.panel > .toolbar {
-  position: sticky; top: var(--top-h); z-index: 45;
-  background: var(--surface);
-  box-shadow: 0 1px 0 0 var(--line);
+/* Panel se kotví celý, lišta i rám tabulky tak drží pohromadě. Kdyby se
+   kotvila jen lišta, rám by jí podjel a zalezl pod ni kus záhlaví. */
+.panel.sticky {
+  position: sticky; top: var(--top-h); z-index: 30;
+  margin-bottom: 8px;   /* rezerva pro kotvení, ať sedí i při zoomu */
 }
-thead th {
-  position: sticky; top: calc(var(--top-h) + var(--bar-h)); z-index: 40;
+
+.scroll.stick {
+  overflow: auto;
+  max-height: var(--scroll-max, calc(100vh - var(--top-h) - var(--bar-h) - 72px));
+  overscroll-behavior: contain;
+}
+.scroll.stick thead th {
+  position: sticky; top: 0; z-index: 40;
   box-shadow: inset 0 -1px 0 0 var(--line-strong);
 }
 /* řádek bloku drží pod záhlavím, ať je při scrollu vidět, kde jsme */
-tr.grp td {
-  position: sticky; top: calc(var(--top-h) + var(--bar-h) + 27px); z-index: 25;
+.scroll.stick tr.grp td {
+  position: sticky; top: var(--head-h); z-index: 25;
+  box-shadow: inset 0 -1px 0 0 var(--line);
 }
+.scroll.stick tfoot td { position: sticky; bottom: 0; z-index: 30; }
 
-/* na užších obrazovkách se lišta zalomí a offsety by přestaly sedět */
-@media (max-width: 1100px) {
-  .panel > .toolbar { position: static; }
-  thead th { top: var(--top-h); }
-  tr.grp td { position: static; }
-}
+/* na malých displejích se scrolluje celá stránka, tabulka se nekrátí */
 @media (max-width: 760px) {
   .top { position: static; }
-  thead th { position: static; }
+  .panel.sticky { position: static; }
+  .scroll.stick { max-height: none !important; overflow-x: auto; overflow-y: visible; }
+  .scroll.stick thead th,
+  .scroll.stick tr.grp td,
+  .scroll.stick tfoot td { position: static; }
 }
 
 /* cíl pro upuštění bloku */

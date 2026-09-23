@@ -92,7 +92,7 @@ export function PerfTable({
   const single = active.length === 1 ? active[0] : null;
 
   return (
-    <div className="panel">
+    <div className="panel sticky">
       <div className="toolbar">
         <span className="share">Měsíc</span>
         {[...months.map((m) => ({ k: m, l: monthLabels[m] ?? m })), { k: "all", l: "Q4 souhrn" }].map((o) => (
@@ -135,7 +135,7 @@ export function PerfTable({
         </div>
       )}
 
-      <div className="scroll">
+      <div className="scroll stick">
         <table>
           <thead>
             <tr>

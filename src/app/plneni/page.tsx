@@ -27,13 +27,13 @@ export default async function PerfPage() {
           </span>
         </div>
       )}
-      <PerfTable rows={rows} months={[...MONTHS]} monthLabels={MONTH_LABEL} undoLabel={undo[0]?.label ?? null} />
       <div className="banner">
         <span>
           <b>Pracovní podklad.</b> Vyhodnocení slouží jako interní přehled; před sdílením s klientem
           vyžaduje validaci media specialistou.
         </span>
       </div>
+      <PerfTable rows={rows} months={[...MONTHS]} monthLabels={MONTH_LABEL} undoLabel={undo[0]?.label ?? null} />
     </Chrome>
   );
 }

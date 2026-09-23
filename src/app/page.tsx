@@ -56,14 +56,14 @@ export default async function PlanPage() {
         </div>
       )}
 
-      <PlanTable rows={rows} campaigns={campaigns} months={[...MONTHS]} monthLabels={MONTH_LABEL} canEditPlan={canEditPlan} undoLabel={undo[0]?.label ?? null} />
-
       <div className="banner">
         <span>
           <b>Pracovní podklad.</b> Rozdělení rozpočtu, mediamix i částky vyžadují validaci media
           specialistou před sdílením s klientem. Částky jsou vč. agenturního fee.
         </span>
       </div>
+
+      <PlanTable rows={rows} campaigns={campaigns} months={[...MONTHS]} monthLabels={MONTH_LABEL} canEditPlan={canEditPlan} undoLabel={undo[0]?.label ?? null} />
     </Chrome>
   );
 }
