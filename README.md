@@ -55,6 +55,7 @@ build skončí chybou „No Output Directory named public".
 | `AUTH_GOOGLE_ID` | z Google Cloud Console |
 | `AUTH_GOOGLE_SECRET` | z Google Cloud Console |
 | `ALLOWED_EMAIL_DOMAINS` | `fragile.cz` (případně i doména klienta) |
+| `ADMIN_EMAIL_DOMAINS` | **jen pro testovací fázi** — každý z těchto domén dostane ADMIN. Před puštěním klienta smazat. |
 | `ENABLE_DEV_LOGIN` | **nenastavovat**, nebo `false` |
 
 **4. Google OAuth.** Google Cloud Console → *APIs & Services* → *Credentials* →
@@ -155,6 +156,11 @@ Poctivý seznam, aby nepřekvapil:
   z domény v `ALLOWED_EMAIL_DOMAINS`. Ostatní neprojdou ani s platným
   Google účtem.
 - Historie změn se needituje ani nemaže.
+- `ADMIN_EMAIL_DOMAINS` je dočasná testovací pomůcka: povyšuje kohokoli z dané
+  domény na administrátora. Dokud je nastavená, svítí v aplikaci na každé stránce
+  upozornění. **Před puštěním klienta ji smažte** a role lidem upravte ve správě
+  uživatelů — snížení role se automaticky neděje, aby se neztratila ručně
+  udělená práva.
 
 ---
 

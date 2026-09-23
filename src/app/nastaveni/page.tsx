@@ -52,6 +52,12 @@ export default async function SetupPage() {
       hint: "Client secret ze stejného místa.",
     },
     {
+      key: "ADMIN_EMAIL_DOMAINS",
+      ok: !!process.env.ADMIN_EMAIL_DOMAINS,
+      hint: "DOČASNÉ: kdo se přihlásí z těchto domén, dostane práva administrátora. Před puštěním klienta smazat.",
+      optional: true,
+    },
+    {
       key: "ALLOWED_EMAIL_DOMAINS",
       ok: !!process.env.ALLOWED_EMAIL_DOMAINS,
       hint: "Domény, ze kterých se smí kdokoli přihlásit, např. fragile.cz. Bez toho se přihlásí jen pozvaní.",

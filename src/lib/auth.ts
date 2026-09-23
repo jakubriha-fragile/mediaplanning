@@ -19,10 +19,21 @@ import type { Principal } from "@/lib/permissions";
 const devLoginEnabled =
   process.env.ENABLE_DEV_LOGIN === "true" && process.env.NODE_ENV !== "production";
 
-const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS ?? "")
-  .split(",")
-  .map((d) => d.trim().toLowerCase())
-  .filter(Boolean);
+const parseDomains = (value: string | undefined) =>
+  (value ?? "").split(",").map((d) => d.trim().toLowerCase()).filter(Boolean);
+
+const allowedDomains = parseDomains(process.env.ALLOWED_EMAIL_DOMAINS);
+
+/**
+ * DOČASNÉ nastavení pro testovací fázi: kdokoli z uvedené domény dostane roli
+ * ADMIN, tedy právo měnit rozpočty, spravovat uživatele a přidělovat oprávnění.
+ *
+ * Než pustíte dovnitř klienta, proměnnou ADMIN_EMAIL_DOMAINS smažte a rolí
+ * lidem sniťte ve správě uživatelů. Dokud je aktivní, svítí v aplikaci
+ * na každé stránce upozornění, aby se na ni nezapomnělo.
+ */
+export const adminDomains = parseDomains(process.env.ADMIN_EMAIL_DOMAINS);
+export const adminDomainsActive = adminDomains.length > 0;
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Bez databázového adaptéru záměrně: session drží JWT a uživatele si zakládáme
@@ -68,27 +79,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const email = user.email?.toLowerCase();
       if (!email) return false;
 
+      const domain = email.split("@")[1] ?? "";
+      const shouldBeAdmin = adminDomains.includes(domain);
+
       const [existing] = await db.select().from(users).where(eq(users.email, email));
       if (existing) {
         if (!existing.active) return false;
+        const patch: Partial<typeof users.$inferInsert> = {};
         // doplníme jméno a avatar, když je účet vytvořený pozvánkou
-        if ((!existing.name && user.name) || (!existing.image && user.image)) {
-          await db
-            .update(users)
-            .set({ name: existing.name ?? user.name ?? null, image: existing.image ?? user.image ?? null })
-            .where(eq(users.id, existing.id));
+        if (!existing.name && user.name) patch.name = user.name;
+        if (!existing.image && user.image) patch.image = user.image;
+        // roli jen povyšujeme, nikdy nesnižujeme — ať se ručně udělená práva neztratí
+        if (shouldBeAdmin && existing.role !== "ADMIN") patch.role = "ADMIN";
+        if (Object.keys(patch).length) {
+          await db.update(users).set(patch).where(eq(users.id, existing.id));
         }
         return true;
       }
 
-      // nepozvaný účet projde jen z povolené domény, a to s rolí VIEWER
-      const domain = email.split("@")[1] ?? "";
-      if (!allowedDomains.includes(domain)) return false;
+      // nepozvaný účet projde jen z povolené domény
+      if (!allowedDomains.includes(domain) && !shouldBeAdmin) return false;
       await db.insert(users).values({
         email,
         name: user.name ?? null,
         image: user.image ?? null,
-        role: "VIEWER",
+        role: shouldBeAdmin ? "ADMIN" : "VIEWER",
       });
       return true;
     },

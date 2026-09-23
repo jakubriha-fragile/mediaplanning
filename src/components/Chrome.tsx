@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Mark } from "./Mark";
-import { signOut } from "@/lib/auth";
+import { signOut, adminDomains, adminDomainsActive } from "@/lib/auth";
 
 const ROLE_LABEL: Record<string, string> = {
   ADMIN: "administrátor",
@@ -56,7 +56,20 @@ export function Chrome({
           </nav>
         </div>
       </div>
-      <div className="shell">{children}</div>
+      <div className="shell">
+        {adminDomainsActive && (
+          <div className="banner" style={{ marginTop: 12 }}>
+            <span>
+              <b>Testovací režim:</b> každý, kdo se přihlásí z domény{" "}
+              <b>{adminDomains.join(", ")}</b>, dostane automaticky práva administrátora — tedy může
+              měnit rozpočty, spravovat uživatele a přidělovat oprávnění. Než pustíte dovnitř
+              klienta, smažte ve Vercelu proměnnou <code>ADMIN_EMAIL_DOMAINS</code> a role lidem
+              upravte ve správě uživatelů.
+            </span>
+          </div>
+        )}
+        {children}
+      </div>
     </>
   );
 }
