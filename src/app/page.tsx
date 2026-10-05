@@ -79,19 +79,19 @@ export default async function PlanPage({
       <div className="kpis">
         <div className="kpi">
           <div className="k">Plán {periodName}</div>
-          <div className="v num">{kc(total)}</div>
+          <div className="v num">{kc(total)}<span className="cur">Kč</span></div>
           <div className="d">{rows.length} taktik</div>
         </div>
         {(["Paid", "Owned", "Earned"] as const).map((ty) => (
           <div className={`kpi ${ty === "Paid" ? "p" : ty === "Owned" ? "o" : "e"}`} key={ty}>
             <div className="k">{ty}</div>
-            <div className="v num">{kc(byType(ty))}</div>
+            <div className="v num">{kc(byType(ty))}<span className="cur">Kč</span></div>
             <div className="d num">{total ? pct(byType(ty) / total) : "—"}</div>
           </div>
         ))}
         <div className="kpi">
           <div className="k">Čerpáno</div>
-          <div className="v num">{kc(spent)}</div>
+          <div className="v num">{kc(spent)}<span className="cur">Kč</span></div>
           <div className="d num">{total ? pct(spent / total) : "—"} plánu</div>
         </div>
       </div>

@@ -124,8 +124,8 @@ export function ReachPanel({
             </div>
             <div className="kpi">
               <div className="k">Cena za bod zásahu</div>
-              <div className="v num">{total.net > 0 ? kc(total.budget / (total.net * 100)) : "—"}</div>
-              <div className="d">Kč za 1 % čistého zásahu</div>
+              <div className="v num">{total.net > 0 ? <>{kc(total.budget / (total.net * 100))}<span className="cur">Kč</span></> : "—"}</div>
+              <div className="d">za 1 % čistého zásahu</div>
             </div>
           </div>
 
@@ -138,7 +138,7 @@ export function ReachPanel({
                   <th className="r">Zásah</th>
                   <th className="r">Frekvence</th>
                   <th className="r">Zásah {minC}+</th>
-                  <th className="r">Rozpočet</th>
+                  <th className="r">Rozpočet (Kč)</th>
                   <th className="r">Podíl rozpočtu</th>
                   <th style={{ width: "32%" }}>Podíl na zásahu</th>
                 </tr>
@@ -184,7 +184,7 @@ export function ReachPanel({
                     <th className="r">Zásah {minC}+</th>
                     <th className="r">Překryv</th>
                     <th className="r">GRP</th>
-                    <th className="r">Rozpočet</th>
+                    <th className="r">Rozpočet (Kč)</th>
                     <th style={{ width: "40%" }}>Čistý zásah vs. součet médií</th>
                   </tr>
                 </thead>

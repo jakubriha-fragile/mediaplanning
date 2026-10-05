@@ -280,14 +280,14 @@ export function PlanTable({
               <th>Kanál</th>
               <th>Nosič</th>
               <th>Jednotka</th>
-              <th className="r">Cena</th>
+              <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc kontaktů)">Cena (Kč)</th>
               {cols.map((c) => (
                 <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
                     title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : undefined}>
                   {c.label}
                 </th>
               ))}
-              <th className="r">Celkem</th>
+              <th className="r">Celkem (Kč)</th>
               <th className="r">Podíl</th>
               <th style={{ width: 30 }} />
             </tr>
@@ -355,7 +355,7 @@ export function PlanTable({
                     </td>
                     {cols.map((c) => {
                       const v = g.rows.reduce((s, r) => s + colOf(r, c), 0);
-                      return <td className={`r share num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{v ? kc(v) : "–"}</td>;
+                      return <td className={`r share num ${c.kind === "q" ? "qcol" : ""}`} key={c.key} title={v ? `${kc(v)} Kč` : undefined}>{v ? kc(v) : "–"}</td>;
                     })}
                     <td className="r num">{kc(gt)}</td>
                     <td className="r share num">{grand ? pct(gt / grand) : ""}</td>
@@ -568,7 +568,7 @@ export function PlanTable({
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={LEFT_COLS}>CELKEM {anyFilter ? "(výběr)" : periodName}</td>
+              <td colSpan={LEFT_COLS}>CELKEM {anyFilter ? "(výběr)" : periodName} <span className="share" style={{ fontWeight: 300 }}>v Kč</span></td>
               {cols.map((c) => (
                 <td className={`r num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{kc(colTotal(c))}</td>
               ))}

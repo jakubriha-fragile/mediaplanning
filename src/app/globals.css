@@ -140,6 +140,8 @@ tr.grp td { background: var(--surface-2); border-top: 1px solid var(--line-stron
 .kpi { background: var(--surface); padding: 10px 12px; }
 .kpi .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
 .kpi .v { font-size: 22px; font-weight: 200; letter-spacing: -.02em; margin-top: 2px; }
+/* měna u velkých čísel — menší a tlumená, ať nepřebíjí hodnotu */
+.cur { font-size: .6em; font-weight: 300; letter-spacing: 0; margin-left: 4px; color: var(--muted); }
 .kpi .d { font-size: 11px; color: var(--ink-2); }
 .kpi.p .v { color: var(--paid-ink); }
 .kpi.o .v { color: var(--owned-ink); }

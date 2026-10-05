@@ -141,7 +141,7 @@ export function PerfTable({
           {pending ? (
             <span className="saving"><span className="spinner" />ukládám…</span>
           ) : (
-            <>plán {kc(planSum)} · čerpáno {kc(actSum)}{expSum > 0 ? ` · ${pct0(actSum / expSum)} očekávání` : ""}</>
+            <>plán {kc(planSum)} Kč · čerpáno {kc(actSum)} Kč{expSum > 0 ? ` · ${pct0(actSum / expSum)} očekávání` : ""}</>
           )}
         </span>
       </div>
@@ -206,7 +206,7 @@ export function PerfTable({
                       <Meter v={bv} plan={bv.plan} />
                       <div className="share">
                         {bv.plan ? pct0(bv.actual / bv.plan) : "—"} plánu
-                        {bv.expected > 0 ? ` · čekáno ${kc(bv.expected)}` : ""}
+                        {bv.expected > 0 ? ` · čekáno ${kc(bv.expected)} Kč` : ""}
                       </div>
                     </td>
                     <td><Pill v={bv} /></td>
@@ -282,8 +282,8 @@ export function PerfTable({
           <tfoot>
             <tr>
               <td colSpan={2}>CELKEM {tabs.find((t) => t.k === sel)?.l ?? periodName}</td>
-              <td className="r num">{kc(planSum)}</td>
-              <td className="r num realhead">{kc(actSum)}</td>
+              <td className="r num">{kc(planSum)} Kč</td>
+              <td className="r num realhead">{kc(actSum)} Kč</td>
               <td colSpan={3} className="share">
                 {expSum > 0 ? `očekáváno k datu ${kc(Math.round(expSum))} Kč` : "období ještě nezačalo"}
               </td>
