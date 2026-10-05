@@ -134,6 +134,7 @@ export async function currentPrincipal(): Promise<Principal | null> {
       area: g.area,
       level: g.level,
       mediaType: g.mediaType,
+      planId: g.planId,
       campaignId: g.campaignId,
       month: g.month,
     })),

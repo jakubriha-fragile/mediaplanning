@@ -14,6 +14,18 @@ import { createId } from "@/lib/id";
 // ---------------------------------------------------------------- číselníky
 
 export const mediaTypeEnum = pgEnum("media_type", ["Paid", "Owned", "Earned"]);
+
+/** Nosič, ne způsob financování. Paid/Owned/Earned je na to kolmé:
+ *  TV je skoro vždy Paid, Digital může být Paid i Owned. */
+export const channelTypeEnum = pgEnum("channel_type", [
+  "TV", "Rádio", "OOH", "Print", "Kino", "Digital", "Vlastní", "PR",
+]);
+
+/** Čím je taktika v daném měsíci řízená. Ostatní tři hodnoty se dopočítají —
+ *  to je celá pointa: plánovač zadá jedno číslo, ne čtyři, které musí sedět. */
+export const planUnitEnum = pgEnum("plan_unit", ["budget", "grp", "impressions"]);
+
+export const planStatusEnum = pgEnum("plan_status", ["draft", "approved", "live", "closed"]);
 export const phaseEnum = pgEnum("phase", ["Awareness", "Consideration", "Conversion"]);
 
 /** cumulative = načítá se v čase (rozpočet, reach) → pacing vůči uplynulému času
@@ -25,6 +37,9 @@ export const areaEnum = pgEnum("area", ["plan", "actuals", "assets"]);
 export const levelEnum = pgEnum("level", ["read", "write"]);
 
 export type MediaType = (typeof mediaTypeEnum.enumValues)[number];
+export type ChannelType = (typeof channelTypeEnum.enumValues)[number];
+export type PlanUnit = (typeof planUnitEnum.enumValues)[number];
+export type PlanStatus = (typeof planStatusEnum.enumValues)[number];
 export type Role = (typeof roleEnum.enumValues)[number];
 export type Area = (typeof areaEnum.enumValues)[number];
 export type Level = (typeof levelEnum.enumValues)[number];
@@ -80,19 +95,103 @@ export const verificationTokens = pgTable(
   (t) => ({ pk: primaryKey({ columns: [t.identifier, t.token] }) }),
 );
 
-// ---------------------------------------------------------------- plán
+// ---------------------------------------------------------------- klient a plán
+
+export const clients = pgTable("client", {
+  id: text("id").primaryKey().$defaultFn(createId),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Mediaplán je období nad klientem — kvartál, rok, kampaňové okno.
+ * Měsíce se z období odvozují, nikde nejsou zadrátované.
+ */
+export const plans = pgTable(
+  "plan",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    periodStart: text("period_start").notNull(), // "2027-01"
+    periodEnd: text("period_end").notNull(),     // "2027-12"
+    status: planStatusEnum("status").notNull().default("draft"),
+    currency: text("currency").notNull().default("CZK"),
+    /** Výchozí cílová skupina plánu — taktika ji může přebít vlastní. */
+    targetGroupId: text("target_group_id"),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({ uq: uniqueIndex("plan_uq").on(t.clientId, t.name) }),
+);
+
+/**
+ * Cílová skupina a její velikost. Universum je ta hodnota, která drží celé
+ * cross-mediální plánování: bez něj nejde GRP převést na impressions ani zpět,
+ * a zásah se nedá spočítat vůbec.
+ */
+export const targetGroups = pgTable(
+  "target_group",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    clientId: text("client_id").references(() => clients.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    universe: integer("universe").notNull().default(0), // počet osob
+    source: text("source").notNull().default(""),
+    note: text("note").notNull().default(""),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => ({ uq: uniqueIndex("target_group_uq").on(t.name, t.clientId) }),
+);
+
+/**
+ * Křivka zásahu média: kolik čistého zásahu přinese daný objem GRP.
+ *     zásah % = rMax × (1 − e^(−k · GRP/100))
+ * rMax je strop daného média na dané cílové skupině, k rychlost nasycení.
+ * Hodnoty jsou modelové — patří zkalibrovat na panelová data.
+ */
+export const reachCurves = pgTable(
+  "reach_curve",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    channelType: channelTypeEnum("channel_type").notNull(),
+    targetGroupId: text("target_group_id").references(() => targetGroups.id, { onDelete: "cascade" }),
+    rMax: doublePrecision("r_max").notNull().default(0.8),
+    k: doublePrecision("k").notNull().default(0.9),
+    source: text("source").notNull().default(""),
+  },
+  (t) => ({ uq: uniqueIndex("reach_curve_uq").on(t.channelType, t.targetGroupId) }),
+);
+
+/**
+ * Duplikace nad rámec nezávislosti pro dvojici médií. 1,0 = publika se
+ * překrývají přesně tak, jak by odpovídalo náhodě (Sainsbury). Vyšší hodnota
+ * znamená větší reálný překryv, a tedy nižší čistý zásah.
+ */
+export const duplications = pgTable(
+  "duplication",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    typeA: channelTypeEnum("type_a").notNull(),
+    typeB: channelTypeEnum("type_b").notNull(),
+    coef: doublePrecision("coef").notNull().default(1),
+    source: text("source").notNull().default(""),
+  },
+  (t) => ({ uq: uniqueIndex("duplication_uq").on(t.typeA, t.typeB) }),
+);
 
 export const campaigns = pgTable(
   "campaign",
   {
     id: text("id").primaryKey().$defaultFn(createId),
+    planId: text("plan_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    client: text("client").notNull().default("BENU"),
-    quarter: text("quarter").notNull(),
     position: integer("position").notNull().default(0),
     archived: boolean("archived").notNull().default(false),
   },
-  (t) => ({ uq: uniqueIndex("campaign_uq").on(t.name, t.quarter, t.client) }),
+  (t) => ({ uq: uniqueIndex("campaign_uq").on(t.name, t.planId) }),
 );
 
 export const messageLines = pgTable(
@@ -115,6 +214,9 @@ export const tactics = pgTable(
     messageLineId: text("message_line_id").notNull().references(() => messageLines.id, { onDelete: "cascade" }),
     channel: text("channel").notNull(),
     mediaType: mediaTypeEnum("media_type").notNull(),
+    channelType: channelTypeEnum("channel_type").notNull().default("Digital"),
+    /** NULL = použije se cílová skupina plánu. */
+    targetGroupId: text("target_group_id").references(() => targetGroups.id, { onDelete: "set null" }),
     position: integer("position").notNull().default(0),
     note: text("note"),
   },
@@ -127,7 +229,14 @@ export const tacticBudgets = pgTable(
     id: text("id").primaryKey().$defaultFn(createId),
     tacticId: text("tactic_id").notNull().references(() => tactics.id, { onDelete: "cascade" }),
     month: text("month").notNull(),
+    /** Rozpočet v Kč. U GRP i impressions driveru se dopočítá při zápisu,
+     *  aby všechny součty a porovnání se skutečností zůstaly na jednom poli. */
     planned: integer("planned").notNull().default(0),
+    driver: planUnitEnum("driver").notNull().default("budget"),
+    /** Hodnota v jednotce driveru — Kč, GRP, nebo impressions. */
+    driverValue: doublePrecision("driver_value").notNull().default(0),
+    /** CPP (Kč/GRP) u TV a rádia, jinak CPT (Kč/1000 impressions). */
+    unitPrice: doublePrecision("unit_price").notNull().default(0),
   },
   (t) => ({ uq: uniqueIndex("tactic_budget_uq").on(t.tacticId, t.month) }),
 );
@@ -205,6 +314,8 @@ export const grants = pgTable(
     area: areaEnum("area").notNull(),
     level: levelEnum("level").notNull(),
     mediaType: mediaTypeEnum("media_type"),
+    /** Pátý rozměr. Bez něj by grant mohl přetéct do plánu jiného klienta. */
+    planId: text("plan_id").references(() => plans.id, { onDelete: "cascade" }),
     campaignId: text("campaign_id").references(() => campaigns.id, { onDelete: "cascade" }),
     month: text("month"),
     note: text("note"),
@@ -239,7 +350,13 @@ export const changeLog = pgTable(
 
 // ---------------------------------------------------------------- relace
 
-export const campaignRelations = relations(campaigns, ({ many }) => ({
+export const clientRelations = relations(clients, ({ many }) => ({ plans: many(plans) }));
+export const planRelations = relations(plans, ({ one, many }) => ({
+  client: one(clients, { fields: [plans.clientId], references: [clients.id] }),
+  campaigns: many(campaigns),
+}));
+export const campaignRelations = relations(campaigns, ({ one, many }) => ({
+  plan: one(plans, { fields: [campaigns.planId], references: [plans.id] }),
   messageLines: many(messageLines),
 }));
 export const messageLineRelations = relations(messageLines, ({ one, many }) => ({
@@ -277,6 +394,7 @@ export const userRelations = relations(users, ({ many }) => ({ grants: many(gran
 export const grantRelations = relations(grants, ({ one }) => ({
   user: one(users, { fields: [grants.userId], references: [users.id] }),
   campaign: one(campaigns, { fields: [grants.campaignId], references: [campaigns.id] }),
+  plan: one(plans, { fields: [grants.planId], references: [plans.id] }),
 }));
 export const changeLogRelations = relations(changeLog, ({ one }) => ({
   user: one(users, { fields: [changeLog.userId], references: [users.id] }),

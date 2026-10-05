@@ -353,3 +353,53 @@ tr.emptygrp td { color: var(--muted); font-style: italic; background: var(--surf
 
 /* cíl pro upuštění bloku */
 tr.grp.dropInto td { background: var(--brand-soft); box-shadow: inset 0 0 0 2px var(--brand); }
+
+/* ------------------------------------------------- cross-mediální plánování */
+
+/* lišta s výběrem klienta a plánu */
+.planbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 10px 0 12px;
+}
+.planbar .txt { border: 1px solid var(--line-strong); border-radius: 4px; padding: 4px 8px; }
+.planbar .planpick { font-weight: 500; color: var(--brand-ink); min-width: 200px; max-width: 320px; }
+.planbar select { max-width: 320px; }
+
+/* sbalený kvartál */
+th.qcol, td.qcol { background: var(--surface-2); }
+thead th.qcol { color: var(--brand-ink); }
+td.qcol .cellbox { background: transparent; }
+
+/* dopočítaná hodnota pod zadaným číslem */
+.cellbox { position: relative; }
+.derived {
+  position: absolute; right: 7px; bottom: 1px; z-index: 2;
+  font-size: 9px; line-height: 1; color: var(--muted);
+  pointer-events: none; letter-spacing: .01em;
+}
+.budgetcell .cell { padding-bottom: 9px; }
+
+/* jednotková cena */
+.pricecell { display: inline-flex; align-items: baseline; gap: 4px; justify-content: flex-end; }
+.pricecell .cell { width: 62px; text-align: right; padding: 2px 5px; }
+.pricecell i {
+  font-style: normal; font-size: 9px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+
+/* proužky v souhrnu zásahu */
+.minibar {
+  position: relative; height: 9px; border-radius: 2px;
+  background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line);
+}
+.minibar > div { position: absolute; left: 0; top: 0; height: 100%; border-radius: 2px; }
+.minibar.stack .gross { background: var(--line-strong); opacity: .55; }
+
+/* patička s verzí a časem nasazení */
+.foot {
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  margin-top: 18px; padding: 12px 2px 4px;
+  border-top: 1px solid var(--line);
+  font-size: 11px; color: var(--muted);
+}
+.foot b { font-weight: 500; color: var(--brand-ink); }

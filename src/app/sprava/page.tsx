@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { users, campaigns, grants } from "@/db/schema";
+import { users, campaigns, grants, plans } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { currentPrincipal } from "@/lib/auth";
 import { canManageUsers } from "@/lib/permissions";
-import { MONTHS, MONTH_LABEL, QUARTER } from "@/lib/months";
+import { monthsBetween, monthLabel } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
 import { addGrant, removeGrant, inviteUser, setUserActive, recentChanges } from "@/lib/actions";
 import { getUser } from "@/lib/queries";
@@ -27,19 +27,25 @@ export default async function AdminPage() {
   const user = await getUser(me.id);
   if (!user) redirect("/prihlaseni");
 
-  const [people, camps, grantRows, log] = await Promise.all([
+  const [people, planRows, grantRows, log] = await Promise.all([
     db.select().from(users).orderBy(asc(users.role), asc(users.email)),
-    db.select().from(campaigns).where(eq(campaigns.quarter, QUARTER)).orderBy(asc(campaigns.name)),
+    db.select().from(plans).orderBy(asc(plans.position), asc(plans.periodStart)),
     db
       .select({
         id: grants.id, userId: grants.userId, area: grants.area, level: grants.level,
         mediaType: grants.mediaType, month: grants.month, note: grants.note,
-        campaignName: campaigns.name,
+        campaignName: campaigns.name, planId: grants.planId,
       })
       .from(grants)
       .leftJoin(campaigns, eq(grants.campaignId, campaigns.id)),
     recentChanges(40),
   ]);
+
+  // granty se udělují na konkrétní plán, takže kampaně nabízíme jen z nich
+  const camps = await db.select().from(campaigns).orderBy(asc(campaigns.name));
+  const MONTHS = [...new Set(planRows.flatMap((p) => monthsBetween(p.periodStart, p.periodEnd)))].sort();
+  const MONTH_LABEL = Object.fromEntries(MONTHS.map((m) => [m, `${monthLabel(m)} ${m.slice(0, 4)}`]));
+  const planName = Object.fromEntries(planRows.map((p) => [p.id, p.name]));
 
   return (
     <Chrome active="sprava" user={{ name: user.name, email: user.email, role: user.role }}>
@@ -108,13 +114,14 @@ export default async function AdminPage() {
             <div className="scroll">
               <table>
                 <thead>
-                  <tr><th>Oblast</th><th>Úroveň</th><th>Typ média</th><th>Kampaň</th><th>Měsíc</th><th>Poznámka</th><th /></tr>
+                  <tr><th>Oblast</th><th>Úroveň</th><th>Plán</th><th>Typ média</th><th>Kampaň</th><th>Měsíc</th><th>Poznámka</th><th /></tr>
                 </thead>
                 <tbody>
                   {myGrants.map((g) => (
                     <tr key={g.id}>
                       <td>{g.area === "plan" ? "plán" : g.area === "actuals" ? "skutečnost" : "podklady"}</td>
                       <td><span className={`pill ${g.level === "write" ? "s-ok" : "ph"}`}>{g.level === "write" ? "zápis" : "čtení"}</span></td>
+                      <td>{g.planId ? planName[g.planId] ?? g.planId : <span className="share">všechny</span>}</td>
                       <td>{g.mediaType ? <span className={`pill ${g.mediaType}`}>{g.mediaType}</span> : <span className="share">všechny</span>}</td>
                       <td>{g.campaignName ?? <span className="share">všechny</span>}</td>
                       <td>{g.month ? MONTH_LABEL[g.month] ?? g.month : <span className="share">všechny</span>}</td>
@@ -139,6 +146,7 @@ export default async function AdminPage() {
                 area: fd.get("area") as never,
                 level: fd.get("level") as never,
                 mediaType: (fd.get("mediaType") || null) as never,
+                planId: (fd.get("planId") || null) as never,
                 campaignId: (fd.get("campaignId") || null) as never,
                 month: (fd.get("month") || null) as never,
                 note: String(fd.get("note") || ""),
@@ -157,6 +165,13 @@ export default async function AdminPage() {
             <div className="field" style={{ margin: 0, minWidth: 100 }}>
               <label>Úroveň</label>
               <select name="level" defaultValue="write"><option value="read">čtení</option><option value="write">zápis</option></select>
+            </div>
+            <div className="field" style={{ margin: 0, minWidth: 150 }}>
+              <label>Plán</label>
+              <select name="planId" defaultValue="">
+                <option value="">všechny plány</option>
+                {planRows.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
             </div>
             <div className="field" style={{ margin: 0, minWidth: 120 }}>
               <label>Typ média</label>

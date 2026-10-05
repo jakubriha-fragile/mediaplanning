@@ -1,6 +1,6 @@
 {
   "name": "fragile-mediaplan",
-  "version": "0.1.0",
+  "version": "0.12.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,9 @@
     "db:seed": "tsx scripts/seed.ts",
     "setup": "drizzle-kit push && npm run db:seed",
     "test:perms": "tsx scripts/test-permissions.ts",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "test:cross": "tsx scripts/test-crossmedia.ts",
+    "test": "npm run test:perms && npm run test:cross"
   },
   "dependencies": {
     "dotenv": "^18.0.3",

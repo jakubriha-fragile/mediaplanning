@@ -43,8 +43,15 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export function PerfTable({
-  rows, months, monthLabels, undoLabel,
-}: { rows: PerfRow[]; months: string[]; monthLabels: Record<string, string>; undoLabel: string | null }) {
+  rows, months, monthLabels, quarters, periodName, undoLabel,
+}: {
+  rows: PerfRow[];
+  months: string[];
+  monthLabels: Record<string, string>;
+  quarters: Array<{ key: string; label: string; months: string[] }>;
+  periodName: string;
+  undoLabel: string | null;
+}) {
   const [data, setData] = useState(rows);
   /**
    * Otevíráme na aktuálním měsíci, ne na souhrnu — v souhrnu se nedá zadávat
@@ -61,7 +68,20 @@ export function PerfTable({
   const [pending, startTransition] = useTransition();
 
   const now = useMemo(() => (asOf ? new Date(asOf + "T12:00:00") : new Date()), [asOf]);
-  const active = sel === "all" ? months : [sel];
+  /** Záložky: měsíce, pak kvartály (je-li jich víc) a nakonec celé období. */
+  const tabs = useMemo(() => {
+    const out = months.map((m) => ({ k: m, l: monthLabels[m] ?? m, months: [m] }));
+    if (quarters.length > 1) {
+      for (const q of quarters) out.push({ k: `q:${q.key}`, l: q.label.split(" ")[0], months: q.months });
+    }
+    out.push({ k: "all", l: `${periodName} souhrn`, months });
+    return out;
+  }, [months, monthLabels, quarters, periodName]);
+
+  const active = useMemo(
+    () => tabs.find((t) => t.k === sel)?.months ?? [sel],
+    [tabs, sel],
+  );
 
   const budgetVerdict = (r: PerfRow): Verdict & { plan: number; actual: number } =>
     verdictFor("cumulative", active.map((m) => ({ month: m, target: r.budget[m], actual: r.spend[m], spend: r.spend[m] })), now) as never;
@@ -95,7 +115,7 @@ export function PerfTable({
     <div className="panel sticky">
       <div className="toolbar">
         <span className="share">Měsíc</span>
-        {[...months.map((m) => ({ k: m, l: monthLabels[m] ?? m })), { k: "all", l: "Q4 souhrn" }].map((o) => (
+        {tabs.map((o) => (
           <button key={o.k} className="btn" aria-pressed={sel === o.k}
             style={{ borderRadius: 999, ...(sel === o.k ? { borderColor: "var(--brand)", color: "var(--brand-ink)", fontWeight: 500 } : { color: "var(--muted)" }) }}
             onClick={() => setSel(o.k)}>{o.l}</button>
@@ -130,7 +150,8 @@ export function PerfTable({
 
       {!single && (
         <div className="note" style={{ borderTop: "none", borderBottom: "1px solid var(--line)" }}>
-          Souhrn za celé Q4 — skutečnost se zadává po měsících, přepněte na konkrétní měsíc.
+          Souhrn za {tabs.find((t) => t.k === sel)?.l ?? periodName} — skutečnost se zadává po měsících,
+          přepněte na konkrétní měsíc.
           Poměrové ukazatele nejde sčítat, proto se zobrazují jako průměr vážený skutečným čerpáním měsíce.
         </div>
       )}
@@ -260,7 +281,7 @@ export function PerfTable({
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={2}>CELKEM {sel === "all" ? "Q4" : monthLabels[sel]}</td>
+              <td colSpan={2}>CELKEM {tabs.find((t) => t.k === sel)?.l ?? periodName}</td>
               <td className="r num">{kc(planSum)}</td>
               <td className="r num realhead">{kc(actSum)}</td>
               <td colSpan={3} className="share">

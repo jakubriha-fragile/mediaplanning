@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
-  setPlannedBudget, updateTactic, updateMessageLine,
+  setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createCampaign, deleteTactic, deleteCampaign, undoLast,
 } from "@/lib/actions";
 import { Combo, type ComboOption } from "@/components/Combo";
+import { isGrpPriced, priceLabel, priceHint, UNIT_LABEL } from "@/lib/crossmedia";
+import type { ChannelType, PlanUnit } from "@/db/schema";
 
 export type PlanRow = {
   id: string;
@@ -18,6 +20,14 @@ export type PlanRow = {
   audience: string;
   channel: string;
   mediaType: "Paid" | "Owned" | "Earned";
+  channelType: ChannelType;
+  targetGroupId: string | null;
+  universe: number;
+  /** dopočítané jednotky za každý měsíc — rozpočet, GRP, impressions, zásah */
+  cells: Record<string, {
+    budget: number; grp: number; impressions: number; reach: number;
+    frequency: number; driver: PlanUnit; driverValue: number; unitPrice: number;
+  }>;
   budgets: Record<string, number>;
   actuals: Record<string, number>;
   /** které měsíce smí tenhle uživatel u téhle taktiky editovat (rozhodl server) */
@@ -33,20 +43,35 @@ export type CampaignInfo = {
 const kc = (n: number) => Math.round(n).toLocaleString("cs-CZ");
 const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",") + " %";
 const parse = (s: string) => Number(String(s).replace(/[^\d]/g, "")) || 0;
+/** GRP se zadávají i desetinně, proto vlastní parser s čárkou i tečkou. */
+const parseNum = (s: string) => Number(String(s).replace(/\s/g, "").replace(",", ".").replace(/[^\d.]/g, "")) || 0;
 
 const CAMP_COLORS = [
   "var(--paid)", "var(--owned)", "var(--earned)", "#c2477e",
   "#5f8b1f", "#8b5fd6", "#b8502a", "#2b7bbf",
 ];
 const PHASES = ["Awareness", "Consideration", "Conversion"] as const;
+const CHANNEL_TYPES: ChannelType[] = ["TV", "Rádio", "OOH", "Print", "Kino", "Digital", "Vlastní", "PR"];
+const UNITS: PlanUnit[] = ["budget", "grp", "impressions"];
+
+/** Sloupec tabulky je buď měsíc, nebo sbalený kvartál. */
+type Col =
+  | { kind: "m"; key: string; label: string; months: string[] }
+  | { kind: "q"; key: string; label: string; months: string[] };
+
+const LEFT_COLS = 9;   // úchyt, sdělení, fáze, cílení, typ, kanál, nosič, jednotka, cena
+const RIGHT_COLS = 3;  // celkem, podíl, smazat
 
 export function PlanTable({
-  rows, campaigns, months, monthLabels, canEditPlan, undoLabel,
+  rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel,
 }: {
   rows: PlanRow[];
   campaigns: CampaignInfo[];
+  planId: string;
   months: string[];
   monthLabels: Record<string, string>;
+  quarters: Array<{ key: string; label: string; months: string[] }>;
+  periodName: string;
   canEditPlan: boolean;
   undoLabel: string | null;
 }) {
@@ -60,6 +85,23 @@ export function PlanTable({
 
   // server je zdroj pravdy — po každé změně se sem vrátí čerstvá data
   useEffect(() => setData(rows), [rows]);
+
+  /** Sbalený kvartál se ukáže jako jeden součtový sloupec. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const cols: Col[] = useMemo(() => {
+    const out: Col[] = [];
+    for (const q of quarters) {
+      if (collapsed.has(q.key)) {
+        out.push({ kind: "q", key: q.key, label: q.label, months: q.months });
+      } else {
+        for (const m of q.months) {
+          out.push({ kind: "m", key: m, label: monthLabels[m] ?? m, months: [m] });
+        }
+      }
+    }
+    return out;
+  }, [quarters, collapsed, monthLabels]);
 
   const [types, setTypes] = useState<Record<string, boolean>>({ Paid: true, Owned: true, Earned: true });
   const [msgSel, setMsgSel] = useState<Set<string>>(new Set());
@@ -93,10 +135,17 @@ export function PlanTable({
     msgSel.size || chanSel.size || audSel.size || q.trim() || !types.Paid || !types.Owned || !types.Earned;
 
   const rowTotal = (r: PlanRow) => months.reduce((s, m) => s + r.budgets[m], 0);
+  const colOf = (r: PlanRow, c: Col) => c.months.reduce((s, m) => s + (r.budgets[m] ?? 0), 0);
   const grand = data.reduce((s, r) => s + rowTotal(r), 0);
   const selTotal = visible.reduce((s, r) => s + rowTotal(r), 0);
-  const monthTotal = (m: string) => visible.reduce((s, r) => s + r.budgets[m], 0);
+  const colTotal = (c: Col) => visible.reduce((s, r) => s + colOf(r, c), 0);
   const axisMax = Math.max(50000, ...data.flatMap((r) => months.map((m) => r.budgets[m])));
+
+  /** Řídicí jednotka a cena jsou vlastností řádku — bereme je z prvního měsíce. */
+  const rowUnit = (r: PlanRow): PlanUnit => r.cells[months[0]]?.driver ?? "budget";
+  const rowPrice = (r: PlanRow) =>
+    months.map((m) => r.cells[m]?.unitPrice ?? 0).find((v) => v > 0) ?? 0;
+  const rowEditable = (r: PlanRow) => months.every((m) => r.editable[m]);
 
   /** Obálka pro server action: optimistická změna, při odmítnutí návrat zpět. */
   function run(optimistic: () => void, rollback: () => void, action: () => Promise<{ ok: boolean; error?: string }>) {
@@ -167,6 +216,28 @@ export function PlanTable({
               : { borderRadius: 999, color: "var(--muted)" }}
             onClick={() => setTypes((t) => ({ ...t, [ty]: !t[ty] }))}>{ty}</button>
         ))}
+        {quarters.length > 1 && (
+          <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
+            <span className="share" style={{ marginRight: 2 }}>Kvartály</span>
+            {quarters.map((q) => (
+              <button key={q.key} className="btn" title={collapsed.has(q.key) ? "Rozbalit na měsíce" : "Sbalit do jednoho sloupce"}
+                style={{ borderRadius: 999, fontSize: 11, padding: "2px 9px",
+                  color: collapsed.has(q.key) ? "var(--muted)" : "var(--brand-ink)",
+                  borderColor: collapsed.has(q.key) ? undefined : "var(--brand)" }}
+                onClick={() => setCollapsed((c) => {
+                  const n = new Set(c);
+                  if (n.has(q.key)) n.delete(q.key); else n.add(q.key);
+                  return n;
+                })}>
+                {collapsed.has(q.key) ? "▸" : "▾"} {q.label.split(" ")[0]}
+              </button>
+            ))}
+            <button className="btn" style={{ borderRadius: 999, fontSize: 11, padding: "2px 9px" }}
+              onClick={() => setCollapsed((c) => (c.size === quarters.length ? new Set() : new Set(quarters.map((q) => q.key))))}>
+              {collapsed.size === quarters.length ? "Rozbalit vše" : "Sbalit vše"}
+            </button>
+          </span>
+        )}
         <MultiSelect label="Sdělení" options={opts.msg} selected={msgSel} onChange={setMsgSel} />
         <MultiSelect label="Kanál" options={opts.chan} selected={chanSel} onChange={setChanSel} />
         <MultiSelect label="Cílová skupina" options={opts.aud} selected={audSel} onChange={setAudSel} />
@@ -181,7 +252,7 @@ export function PlanTable({
         ) : null}
         <span className="spacer" />
         {canEditPlan && <UndoButton undoLabel={undoLabel} pending={pending} onUndo={() => run(() => {}, () => {}, undoLast)} />}
-        {canEditPlan && <NewCampaignButton onCreate={(name) => run(() => {}, () => {}, () => createCampaign({ name }))} />}
+        {canEditPlan && <NewCampaignButton onCreate={(name) => run(() => {}, () => {}, () => createCampaign({ planId, name }))} />}
         <span className="share">
           {pending ? (
             <span className="saving"><span className="spinner" />ukládám…</span>
@@ -207,9 +278,17 @@ export function PlanTable({
               <th>Cílení</th>
               <th>Typ</th>
               <th>Kanál</th>
-              {months.map((m) => <th className="r" key={m}>{monthLabels[m] ?? m}</th>)}
-              <th className="r">Q4 celkem</th>
-              <th className="r">% Q4</th>
+              <th>Nosič</th>
+              <th>Jednotka</th>
+              <th className="r">Cena</th>
+              {cols.map((c) => (
+                <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
+                    title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : undefined}>
+                  {c.label}
+                </th>
+              ))}
+              <th className="r">Celkem</th>
+              <th className="r">Podíl</th>
               <th style={{ width: 30 }} />
             </tr>
           </thead>
@@ -237,7 +316,7 @@ export function PlanTable({
                         run(() => {}, () => {}, () => moveTactic({ tacticId: t, targetCampaignId: g.campaignId }));
                       }
                     }}>
-                    <td colSpan={6} style={{ boxShadow: `inset 3px 0 0 0 ${campColor(g.campaign)}` }}>
+                    <td colSpan={LEFT_COLS} style={{ boxShadow: `inset 3px 0 0 0 ${campColor(g.campaign)}` }}>
                       {canEditPlan && (
                         <span className="grip" draggable title="Přetažením změníte pořadí bloků"
                           onDragStart={() => setDragCamp(g.campaignId)}
@@ -267,11 +346,10 @@ export function PlanTable({
                           }}>Smazat blok</button>
                       )}
                     </td>
-                    {months.map((m) => (
-                      <td className="r share num" key={m}>
-                        {g.rows.reduce((s, r) => s + r.budgets[m], 0) ? kc(g.rows.reduce((s, r) => s + r.budgets[m], 0)) : "–"}
-                      </td>
-                    ))}
+                    {cols.map((c) => {
+                      const v = g.rows.reduce((s, r) => s + colOf(r, c), 0);
+                      return <td className={`r share num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{v ? kc(v) : "–"}</td>;
+                    })}
                     <td className="r num">{kc(gt)}</td>
                     <td className="r share num">{grand ? pct(gt / grand) : ""}</td>
                     <td />
@@ -280,7 +358,7 @@ export function PlanTable({
                   {!g.rows.length && (
                     <tr className="emptygrp">
                       <td />
-                      <td colSpan={10}>
+                      <td colSpan={LEFT_COLS - 1 + cols.length + RIGHT_COLS}>
                         Blok zatím nemá žádnou taktiku — přidejte ji tlačítkem „+ Taktika" výše.
                       </td>
                     </tr>
@@ -385,20 +463,77 @@ export function PlanTable({
                             }} />
                         </td>
 
-                        {months.map((m) => (
-                          <td key={m} className="budgetcell">
-                            <BudgetCell
-                              value={r.budgets[m]} actual={r.actuals[m]} max={axisMax} type={r.mediaType}
-                              disabled={!r.editable[m]}
-                              onCommit={(v) => {
-                                const prev = r.budgets[m];
-                                if (prev === v) return;
-                                run(() => patchRow(r.id, { budgets: { ...r.budgets, [m]: v } }),
-                                    () => patchRow(r.id, { budgets: { ...r.budgets, [m]: prev } }),
-                                    () => setPlannedBudget({ tacticId: r.id, month: m, planned: v }));
-                              }} />
-                          </td>
-                        ))}
+                        <td>
+                          <select className="txt pill" value={r.channelType} disabled={!canEditPlan}
+                            style={{ width: 86 }}
+                            title="Nosič rozhoduje, jestli se nakupuje na GRP nebo na tisíc kontaktů"
+                            onChange={(e) => {
+                              const v = e.target.value as ChannelType, prev = r.channelType;
+                              run(() => patchRow(r.id, { channelType: v }),
+                                  () => patchRow(r.id, { channelType: prev }),
+                                  () => setTacticMedia({ tacticId: r.id, channelType: v }));
+                            }}>
+                            {CHANNEL_TYPES.map((t) => <option key={t}>{t}</option>)}
+                          </select>
+                        </td>
+
+                        <td>
+                          <select className="txt" value={rowUnit(r)} disabled={!rowEditable(r)}
+                            style={{ width: 104 }}
+                            title="Co zadáváte do měsíců. Zbylé jednotky se dopočítají."
+                            onChange={(e) => {
+                              const v = e.target.value as PlanUnit;
+                              run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, driver: v }));
+                            }}>
+                            {UNITS.map((u) => <option key={u} value={u}>{UNIT_LABEL[u]}</option>)}
+                          </select>
+                        </td>
+
+                        <td className="r">
+                          <PriceCell
+                            value={rowPrice(r)}
+                            label={priceLabel(r.channelType)}
+                            hint={priceHint(r.channelType)}
+                            disabled={!rowEditable(r)}
+                            onCommit={(v) => run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, unitPrice: v }))} />
+                        </td>
+
+                        {cols.map((c) => {
+                          const unit = rowUnit(r);
+                          if (c.kind === "q") {
+                            const sum = c.months.reduce((s, m) => s + (r.cells[m]?.driverValue ?? 0), 0);
+                            return (
+                              <td key={c.key} className="budgetcell qcol">
+                                <div className="cellbox locked filled" title="Sbalený kvartál — rozbalte v liště, chcete-li editovat">
+                                  <span className="cell num" style={{ display: "block", textAlign: "right", padding: "0 7px" }}>
+                                    {sum ? unitFmt(sum, unit) : "–"}
+                                  </span>
+                                </div>
+                              </td>
+                            );
+                          }
+                          const m = c.key;
+                          const cell = r.cells[m];
+                          return (
+                            <td key={m} className="budgetcell">
+                              <BudgetCell
+                                value={cell?.driverValue ?? 0}
+                                unit={unit}
+                                budget={r.budgets[m]}
+                                grp={cell?.grp ?? 0}
+                                impressions={cell?.impressions ?? 0}
+                                reach={cell?.reach ?? 0}
+                                actual={r.actuals[m]} max={axisMax} type={r.mediaType}
+                                disabled={!r.editable[m]}
+                                onCommit={(v) => {
+                                  const prev = cell?.driverValue ?? 0;
+                                  if (prev === v) return;
+                                  run(() => {}, () => {},
+                                      () => setPlannedBudget({ tacticId: r.id, month: m, driver: unit, value: v }));
+                                }} />
+                            </td>
+                          );
+                        })}
 
                         <td className="r num" style={{ fontWeight: 500 }}>{kc(rowTotal(r))}</td>
                         <td className="r share num">{grand ? pct(rowTotal(r) / grand) : "—"}</td>
@@ -419,15 +554,17 @@ export function PlanTable({
               );
             })}
             {!visible.length && (
-              <tr><td colSpan={11} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
+              <tr><td colSpan={LEFT_COLS + cols.length + RIGHT_COLS} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
                 Žádná taktika neodpovídá filtru.
               </td></tr>
             )}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={6}>CELKEM {anyFilter ? "(výběr)" : "Q4"}</td>
-              {months.map((m) => <td className="r num" key={m}>{kc(monthTotal(m))}</td>)}
+              <td colSpan={LEFT_COLS}>CELKEM {anyFilter ? "(výběr)" : periodName}</td>
+              {cols.map((c) => (
+                <td className={`r num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{kc(colTotal(c))}</td>
+              ))}
               <td className="r num">{kc(selTotal)}</td>
               <td className="r num">{grand ? pct(selTotal / grand) : "—"}</td>
               <td />
@@ -456,10 +593,22 @@ function GroupBlock({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Formát hodnoty podle řídicí jednotky. */
+function unitFmt(v: number, unit: PlanUnit): string {
+  if (!v) return "";
+  if (unit === "budget") return kc(v);
+  if (unit === "grp") return (Math.round(v * 10) / 10).toLocaleString("cs-CZ");
+  return v >= 1_000_000
+    ? (v / 1_000_000).toFixed(1).replace(".", ",") + " M"
+    : kc(v);
+}
+
 function BudgetCell({
-  value, actual, max, type, disabled, onCommit,
+  value, unit, budget, grp, impressions, reach, actual, max, type, disabled, onCommit,
 }: {
-  value: number; actual: number; max: number;
+  value: number; unit: PlanUnit;
+  budget: number; grp: number; impressions: number; reach: number;
+  actual: number; max: number;
   type: string; disabled: boolean; onCommit: (v: number) => void;
 }) {
   /**
@@ -469,13 +618,27 @@ function BudgetCell({
    */
   const [draft, setDraft] = useState<string | null>(null);
   const editing = draft !== null;
-  const shown = editing ? draft : value ? kc(value) : "";
-  const w = Math.min(100, (value / max) * 100);
+  const shown = editing ? draft : unitFmt(value, unit);
+  // pruh měří peníze i tam, kde se zadávají GRP — jinak by řádky nešly porovnat
+  const w = Math.min(100, (budget / max) * 100);
   const aw = Math.min(100, (actual / max) * 100);
 
+  /** Pod číslem se ukazuje to, co se z něj dopočítalo. U prázdné buňky nic. */
+  const second = !value ? ""
+    : unit === "budget"
+      ? grp > 0 ? `${Math.round(grp)} GRP` : impressions > 0 ? `${unitFmt(impressions, "impressions")} imp.` : ""
+      : kc(budget) + " Kč";
+  const tip = [
+    budget ? `${kc(budget)} Kč` : null,
+    grp ? `${(Math.round(grp * 10) / 10).toLocaleString("cs-CZ")} GRP` : null,
+    impressions ? `${kc(impressions)} impressions` : null,
+    reach ? `zásah ${(reach * 100).toFixed(1).replace(".", ",")} %` : null,
+    actual ? `čerpáno ${kc(actual)} Kč` : null,
+  ].filter(Boolean).join(" · ");
+
   return (
-    <div className={`cellbox ${disabled ? "locked" : "editable"} ${value ? "filled" : ""}`}>
-      {value > 0 && (
+    <div className={`cellbox ${disabled ? "locked" : "editable"} ${value ? "filled" : ""}`} title={tip || undefined}>
+      {budget > 0 && (
         <div className="cellfill" style={{
           width: `${w}%`,
           background: `var(--${type.toLowerCase()}-fill, var(--${type.toLowerCase()}-soft))`,
@@ -491,15 +654,43 @@ function BudgetCell({
         title={disabled ? "K tomuto rozpočtu nemáte oprávnění" : undefined}
         value={shown}
         placeholder="0"
-        onFocus={(e) => { setDraft(value ? String(value) : ""); requestAnimationFrame(() => e.target.select()); }}
-        onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ""))}
-        onBlur={() => { if (draft !== null) { onCommit(parse(draft)); setDraft(null); } }}
+        onFocus={(e) => { setDraft(value ? String(Math.round(value * 10) / 10) : ""); requestAnimationFrame(() => e.target.select()); }}
+        onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ""))}
+        onBlur={() => { if (draft !== null) { onCommit(parseNum(draft)); setDraft(null); } }}
         onKeyDown={(e) => {
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); }
         }}
       />
+      {!editing && second && <span className="derived">{second}</span>}
     </div>
+  );
+}
+
+/** Jednotková cena — CPP u TV a rádia, jinak CPT. */
+function PriceCell({
+  value, label, hint, disabled, onCommit,
+}: { value: number; label: string; hint: string; disabled: boolean; onCommit: (v: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (value ? kc(value) : "");
+  return (
+    <span className="pricecell" title={`${label} — ${hint}`}>
+      <input
+        className="cell num"
+        inputMode="numeric"
+        disabled={disabled}
+        value={shown}
+        placeholder={label}
+        onFocus={(e) => { setDraft(value ? String(value) : ""); requestAnimationFrame(() => e.target.select()); }}
+        onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ""))}
+        onBlur={() => { if (draft !== null) { onCommit(parseNum(draft)); setDraft(null); } }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); }
+        }}
+      />
+      {value > 0 && <i>{label}</i>}
+    </span>
   );
 }
 

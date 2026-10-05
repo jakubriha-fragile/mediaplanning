@@ -2,9 +2,11 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
 import { canManageUsers } from "@/lib/permissions";
-import { getUser } from "@/lib/queries";
+import { getUser, getTargetGroups, getPlans } from "@/lib/queries";
 import { Chrome } from "@/components/Chrome";
 import { Copyable } from "@/components/Copyable";
+import { TargetGroups } from "@/components/TargetGroups";
+import { periodLabel } from "@/lib/period";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +67,7 @@ export default async function SetupPage() {
     },
   ];
 
+  const [tgs, planRows] = await Promise.all([getTargetGroups(), getPlans()]);
   const missing = checks.filter((c) => !c.ok && !c.optional);
   const googleReady = !!process.env.AUTH_GOOGLE_ID && !!process.env.AUTH_GOOGLE_SECRET;
 
@@ -78,6 +81,32 @@ export default async function SetupPage() {
           </span>
         </div>
       )}
+
+      <div className="panel" style={{ borderRadius: "var(--radius)", marginBottom: 16 }}>
+        <div className="toolbar"><b style={{ fontSize: 13 }}>Mediaplány</b></div>
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr><th>Plán</th><th>Období</th><th>Stav</th><th>Cílová skupina</th></tr>
+            </thead>
+            <tbody>
+              {planRows.map((p) => (
+                <tr key={p.id}>
+                  <td><a href={`/?plan=${p.id}`}>{p.clientName} — {p.name}</a></td>
+                  <td>{periodLabel(p.periodStart, p.periodEnd)}</td>
+                  <td>{p.status}</td>
+                  <td>{tgs.find((t) => t.id === p.targetGroupId)?.name ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <TargetGroups
+        rows={tgs.map((t) => ({ id: t.id, name: t.name, universe: t.universe, source: t.source, note: t.note }))}
+        canEdit
+      />
 
       {missing.length > 0 && (
         <div className="banner">

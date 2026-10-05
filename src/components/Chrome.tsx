@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Mark } from "./Mark";
 import { Sticky } from "./Sticky";
 import { signOut, adminDomains, adminDomainsActive } from "@/lib/auth";
+import { VERSION, COMMIT, buildLabel, buildAge } from "@/lib/version";
 
 const ROLE_LABEL: Record<string, string> = {
   ADMIN: "administrátor",
@@ -14,10 +15,13 @@ const ROLE_LABEL: Record<string, string> = {
 export function Chrome({
   active,
   user,
+  title,
   children,
 }: {
   active: "plan" | "plneni" | "sprava" | "nastaveni";
   user: { name: string | null; email: string; role: string };
+  /** klient a období otevřeného plánu; bez plánu zůstane jen název aplikace */
+  title?: { client: string; period: string };
   children: React.ReactNode;
 }) {
   return (
@@ -28,7 +32,7 @@ export function Chrome({
           <div className="brandline">
             <Mark />
             <h1>
-              <em>BENU</em> — Mediaplán Q4 2026
+              {title ? <><em>{title.client}</em> — Mediaplán {title.period}</> : <><em>Mediaplán</em></>}
             </h1>
             <span className="sub">Fragile · Paid / Owned / Earned</span>
             <div className="right">
@@ -71,6 +75,19 @@ export function Chrome({
           </div>
         )}
         {children}
+
+        <footer className="foot">
+          <span>
+            Mediaplán <b>v{VERSION}</b>
+            {COMMIT && <span className="share"> · {COMMIT}</span>}
+          </span>
+          <span className="share" title={`Čas posledního nasazení: ${buildLabel()}`}>
+            Naposledy aktualizováno {buildLabel()}
+            {buildAge() && <> · {buildAge()}</>}
+          </span>
+          <span className="spacer" />
+          <span className="share">Fragile · KNOWLIMITS Group</span>
+        </footer>
       </div>
     </>
   );

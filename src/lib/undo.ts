@@ -3,6 +3,7 @@ import { db } from "@/db";
 import {
   undoEntries, tactics, tacticBudgets, messageLines, metrics, metricTargets,
   actualSpends, metricActuals, accountNotes, campaigns,
+  type PlanUnit,
 } from "@/db/schema";
 
 /**
@@ -11,7 +12,8 @@ import {
  * hodnoty; díky tomu nezáleží na tom, co se stalo mezitím jinde.
  */
 export type UndoOp =
-  | { t: "budget"; tacticId: string; month: string; planned: number }
+  | { t: "budget"; tacticId: string; month: string; planned: number;
+      driver?: PlanUnit; driverValue?: number; unitPrice?: number }
   | { t: "actual"; tacticId: string; month: string; amount: number }
   | { t: "metricTarget"; metricId: string; month: string; target: number }
   | { t: "metricActual"; metricId: string; month: string; value: number }
@@ -50,10 +52,17 @@ export async function listUndo(userId: string) {
 export async function applyOps(ops: UndoOp[]) {
   for (const op of ops) {
     switch (op.t) {
-      case "budget":
-        await db.insert(tacticBudgets).values({ tacticId: op.tacticId, month: op.month, planned: op.planned })
-          .onConflictDoUpdate({ target: [tacticBudgets.tacticId, tacticBudgets.month], set: { planned: op.planned } });
+      case "budget": {
+        const row = {
+          planned: op.planned,
+          driver: op.driver ?? ("budget" as const),
+          driverValue: op.driverValue ?? op.planned,
+          unitPrice: op.unitPrice ?? 0,
+        };
+        await db.insert(tacticBudgets).values({ tacticId: op.tacticId, month: op.month, ...row })
+          .onConflictDoUpdate({ target: [tacticBudgets.tacticId, tacticBudgets.month], set: row });
         break;
+      }
       case "actual":
         await db.insert(actualSpends).values({ tacticId: op.tacticId, month: op.month, amount: op.amount })
           .onConflictDoUpdate({ target: [actualSpends.tacticId, actualSpends.month], set: { amount: op.amount } });
@@ -128,8 +137,11 @@ export async function snapshotPositions(): Promise<UndoOp> {
   return { t: "positions", items: rows };
 }
 
-export async function snapshotCampaignOrder(): Promise<UndoOp> {
-  const rows = await db.select({ id: campaigns.id, position: campaigns.position }).from(campaigns);
+export async function snapshotCampaignOrder(planId: string): Promise<UndoOp> {
+  const rows = await db
+    .select({ id: campaigns.id, position: campaigns.position })
+    .from(campaigns)
+    .where(eq(campaigns.planId, planId));
   return { t: "campaignPositions", items: rows };
 }
 

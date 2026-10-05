@@ -1,7 +1,9 @@
 /**
  * Engine oprávnění — zadání §5.2.
  *
- * Grant má čtyři rozměry: typ média × kampaň × měsíc × oblast, plus úroveň.
+ * Grant má pět rozměrů: plán × typ média × kampaň × měsíc × oblast, plus úroveň.
+ * Rozměr plánu je tam proto, že jeden grant nesmí přetéct do plánu jiného
+ * klienta ani do jiného roku — oprávnění se udělují na konkrétní plán.
  * NULL v rozměru znamená „vše". Operace projde, pokud existuje grant, který
  * pokrývá VŠECHNY rozměry dotčeného záznamu. Chybí-li grant, operace se odmítne —
  * výchozí stav je zákaz.
@@ -17,6 +19,7 @@ export type GrantRow = {
   area: Area;
   level: Level;
   mediaType: MediaType | null;
+  planId: string | null;
   campaignId: string | null;
   month: string | null;
 };
@@ -28,10 +31,11 @@ export type Principal = {
   grants: GrantRow[];
 };
 
-/** Co se zrovna mění — souřadnice záznamu ve čtyřech rozměrech. */
+/** Co se zrovna mění — souřadnice záznamu v pěti rozměrech. */
 export type Target = {
   area: Area;
   mediaType?: MediaType | null;
+  planId?: string | null;
   campaignId?: string | null;
   month?: string | null;
 };
@@ -87,11 +91,12 @@ export function can(principal: Principal | null, need: Level, target: Target): b
     if (base.area === target.area && RANK[base.level] >= RANK[need]) return true;
   }
 
-  // 2) granty — musí sedět všechny čtyři rozměry
+  // 2) granty — musí sedět všechny rozměry
   for (const g of principal.grants) {
     if (g.area !== target.area) continue;
     if (RANK[g.level] < RANK[need]) continue;
     if (!dimensionMatches(g.mediaType, target.mediaType ?? null)) continue;
+    if (!dimensionMatches(g.planId, target.planId ?? null)) continue;
     if (!dimensionMatches(g.campaignId, target.campaignId ?? null)) continue;
     if (!dimensionMatches(g.month, target.month ?? null)) continue;
     return true;
@@ -104,6 +109,7 @@ export function assertCan(principal: Principal | null, need: Level, target: Targ
   if (!can(principal, need, target)) {
     const where = [
       target.area,
+      target.planId ? "plán" : "*",
       target.mediaType ?? "*",
       target.campaignId ? "kampaň" : "*",
       target.month ?? "*",
@@ -127,6 +133,7 @@ export function canManageUsers(principal: Principal | null): boolean {
  */
 export function editableMatrix(
   principal: Principal | null,
+  planId: string,
   campaignId: string,
   months: string[],
   mediaTypes: MediaType[],
@@ -138,6 +145,7 @@ export function editableMatrix(
         out[`${area}|${mt}|${m}`] = can(principal, "write", {
           area,
           mediaType: mt,
+          planId,
           campaignId,
           month: m,
         });
