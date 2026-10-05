@@ -22,6 +22,7 @@ export type UndoOp =
   | { t: "line"; id: string; message: string; audience: string; phase: "Awareness" | "Consideration" | "Conversion"; code: string }
   | { t: "positions"; items: Array<{ id: string; position: number; messageLineId: string }> }
   | { t: "dropTactic"; id: string }
+  | { t: "dropLine"; id: string }
   | { t: "campaignPositions"; items: Array<{ id: string; position: number }> }
   | { t: "dropCampaign"; id: string };
 
@@ -109,6 +110,9 @@ export async function applyOps(ops: UndoOp[]) {
       case "dropTactic":
         await db.delete(tactics).where(eq(tactics.id, op.id));
         break;
+      case "dropLine":
+        await db.delete(messageLines).where(eq(messageLines.id, op.id));
+        break;
       case "dropCampaign":
         await db.delete(campaigns).where(eq(campaigns.id, op.id));
         break;
@@ -147,5 +151,6 @@ export async function snapshotCampaignOrder(planId: string): Promise<UndoOp> {
 
 /** Metriky nové taktiky se smažou kaskádou, stačí smazat taktiku. */
 export const undoCreatedTactic = (id: string): UndoOp => ({ t: "dropTactic", id });
+export const undoCreatedLine = (id: string): UndoOp => ({ t: "dropLine", id });
 export const undoCreatedCampaign = (id: string): UndoOp => ({ t: "dropCampaign", id });
 export { metrics };

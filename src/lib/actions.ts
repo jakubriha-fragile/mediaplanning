@@ -27,7 +27,7 @@ import { monthLabel, monthsBetween, periodLabel, shiftYears, kc, num } from "@/l
 import { derive, isGrpPriced } from "@/lib/crossmedia";
 import {
   pushUndo, popUndo, listUndo, snapshotPositions, snapshotCampaignOrder,
-  undoCreatedTactic, undoCreatedCampaign, type UndoOp,
+  undoCreatedTactic, undoCreatedCampaign, undoCreatedLine, type UndoOp,
 } from "@/lib/undo";
 
 export type Result = { ok: true } | { ok: false; error: string };
@@ -783,6 +783,45 @@ const newTactic = z.object({
   mediaType: z.enum(["Paid", "Owned", "Earned"]).default("Paid"),
 });
 
+/**
+ * Založí taktiku i s rozpočtovými řádky a metrikami. Měsíce se berou
+ * z období plánu — dřív tu byl zadrátovaný Q4 2026, takže taktika přidaná
+ * do plánu 2027 dostala nulové řádky za rok 2026 a žádné za vlastní období.
+ */
+async function insertTactic(
+  line: typeof messageLines.$inferSelect,
+  channel: string,
+  mediaType: "Paid" | "Owned" | "Earned",
+) {
+  const [plan] = await db
+    .select({ periodStart: plans.periodStart, periodEnd: plans.periodEnd })
+    .from(campaigns)
+    .innerJoin(plans, eq(campaigns.planId, plans.id))
+    .where(eq(campaigns.id, line.campaignId))
+    .limit(1);
+  if (!plan) throw new Error("Blok neexistuje");
+
+  const [{ max }] = await db
+    .select({ max: sql<number>`coalesce(max(${tactics.position}), -1)` })
+    .from(tactics);
+
+  const [t] = await db
+    .insert(tactics)
+    .values({ messageLineId: line.id, channel, mediaType, position: Number(max) + 1 })
+    .returning();
+
+  await db.insert(tacticBudgets).values(
+    monthsBetween(plan.periodStart, plan.periodEnd).map((month) => ({ tacticId: t.id, month, planned: 0 })),
+  );
+  // sada metrik podle fáze linky — stejná logika jako v seedu
+  const brand = line.phase === "Awareness";
+  await db.insert(metrics).values([
+    { tacticId: t.id, name: brand ? "Reach" : "Konverze", kind: "cumulative" as const, unit: "", slot: 0 },
+    { tacticId: t.id, name: brand ? "CPM" : "CPA", kind: "rate_low" as const, unit: "Kč", slot: 1 },
+  ]);
+  return t;
+}
+
 /** Nová taktika pod danou linkou sdělení. Rozpočty začínají na nule. */
 export async function createTactic(raw: z.input<typeof newTactic>): Promise<Result> {
   try {
@@ -793,29 +832,7 @@ export async function createTactic(raw: z.input<typeof newTactic>): Promise<Resu
 
     assertCan(me, "write", { area: "plan", mediaType: data.mediaType, planId: await campaignPlan(line.campaignId), campaignId: line.campaignId, month: null });
 
-    const [{ max }] = await db
-      .select({ max: sql<number>`coalesce(max(${tactics.position}), -1)` })
-      .from(tactics);
-
-    const [t] = await db
-      .insert(tactics)
-      .values({
-        messageLineId: data.messageLineId,
-        channel: data.channel,
-        mediaType: data.mediaType,
-        position: Number(max) + 1,
-      })
-      .returning();
-
-    await db.insert(tacticBudgets).values(
-      ["2026-10", "2026-11", "2026-12"].map((month) => ({ tacticId: t.id, month, planned: 0 })),
-    );
-    // sada metrik podle fáze linky — stejná logika jako v seedu
-    const brand = line.phase === "Awareness";
-    await db.insert(metrics).values([
-      { tacticId: t.id, name: brand ? "Reach" : "Konverze", kind: "cumulative" as const, unit: "", slot: 0 },
-      { tacticId: t.id, name: brand ? "CPM" : "CPA", kind: "rate_low" as const, unit: "Kč", slot: 1 },
-    ]);
+    const t = await insertTactic(line, data.channel, data.mediaType);
 
     await pushUndo(me!.id, `Přidána taktika „${data.channel}"`, [undoCreatedTactic(t.id)]);
     await log(me!.id, "plan", [`Přidána taktika „${data.channel}" pod ${line.code}`]);
@@ -887,19 +904,47 @@ export async function createCampaign(raw: z.input<typeof newCampaign>): Promise<
 
 const newLine = z.object({
   campaignId: z.string().min(1),
-  code: z.string().max(60),
+  /** Bez kódu se dopočítá z kódů bloku: BENU-1, BENU-2 → BENU-3. */
+  code: z.string().max(60).optional(),
   message: z.string().max(200).default("Nové sdělení"),
   phase: z.enum(["Awareness", "Consideration", "Conversion"]).default("Awareness"),
   audience: z.string().max(120).default("—"),
 });
 
+/** Další volný kód linky v bloku. Unikátnost (kód × blok) hlídá i index. */
+function nextLineCode(campaignName: string, existing: string[]): string {
+  const base =
+    existing.map((c) => c.match(/^(.*)-\d+$/)?.[1]).find(Boolean) ??
+    (campaignName.toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) || "NOVA");
+  const taken = new Set(existing);
+  let n = existing.length + 1;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+/**
+ * Nová linka sdělení i s první taktikou. Prázdná linka by v tabulce nebyla
+ * vidět — řádky jsou taktiky — a plánovač by neměl kde začít psát.
+ */
 export async function createMessageLine(raw: z.input<typeof newLine>): Promise<Result> {
   try {
     const data = newLine.parse(raw);
     const me = await currentPrincipal();
     assertCan(me, "write", { area: "plan", mediaType: null, planId: await campaignPlan(data.campaignId), campaignId: data.campaignId, month: null });
-    await db.insert(messageLines).values(data);
-    await log(me!.id, "plan", [`Přidána linka sdělení ${data.code}`]);
+
+    const [camp] = await db.select({ name: campaigns.name }).from(campaigns).where(eq(campaigns.id, data.campaignId));
+    const existing = await db
+      .select({ code: messageLines.code })
+      .from(messageLines)
+      .where(eq(messageLines.campaignId, data.campaignId));
+    const code = data.code?.trim() || nextLineCode(camp.name, existing.map((r) => r.code));
+
+    const [line] = await db.insert(messageLines).values({ ...data, code }).returning();
+    await insertTactic(line, "Nový kanál", "Paid");
+
+    // smazáním linky padnou kaskádou i její taktika, rozpočty a metriky
+    await pushUndo(me!.id, `Přidána linka sdělení ${code}`, [undoCreatedLine(line.id)]);
+    await log(me!.id, "plan", [`Přidána linka sdělení ${code}`]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {

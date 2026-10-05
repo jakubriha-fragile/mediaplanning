@@ -141,7 +141,6 @@ Technický dluh:
 - Rozhraní pro kalibraci křivek zásahu a duplikací (cílové skupiny editovatelné jsou).
 - Efektivní zásah (3+ kontakty) — spočítaný v `crossmedia.ts`, v UI není.
 - Podklady a poznámky — tabulky jsou, rozhraní chybí.
-- Tlačítko „+ linka sdělení" — akce `createMessageLine` existuje, tlačítko ne.
 - Přechod z `db:push` na verzované migrace (`drizzle-kit generate`).
 
 ## Nevyřízené bezpečnostní úkoly

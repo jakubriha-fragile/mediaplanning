@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
-  moveTactic, moveCampaign, createTactic, createCampaign, deleteTactic, deleteCampaign, undoLast,
+  moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
 } from "@/lib/actions";
 import { Combo, type ComboOption } from "@/components/Combo";
 import { isGrpPriced, priceLabel, priceHint, UNIT_LABEL } from "@/lib/crossmedia";
@@ -330,6 +330,13 @@ export function PlanTable({
                         <button className="btn" style={{ marginLeft: 10, fontSize: 11, padding: "2px 8px" }}
                           onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: lines[0].id }))}>
                           + Taktika
+                        </button>
+                      )}
+                      {canEditPlan && (
+                        <button className="btn" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
+                          title="Nové sdělení v tomto bloku, rovnou s první taktikou"
+                          onClick={() => run(() => {}, () => {}, () => createMessageLine({ campaignId: g.campaignId }))}>
+                          + Linka sdělení
                         </button>
                       )}
                       {canEditPlan && (
