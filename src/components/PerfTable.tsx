@@ -43,8 +43,10 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export function PerfTable({
-  rows, months, monthLabels, quarters, periodName, undoLabel,
+  rows, months, monthLabels, quarters, periodName, undoLabel, clientView = false,
 }: {
+  /** klient komentář agentury jen čte */
+  clientView?: boolean;
   rows: PerfRow[];
   months: string[];
   monthLabels: Record<string, string>;
@@ -161,7 +163,7 @@ export function PerfTable({
           <thead>
             <tr>
               <th>Taktika</th><th>Ukazatel</th><th className="r">Plán / cíl</th>
-              <th className="r realhead">Skutečnost</th><th>Průběh</th><th>Stav</th><th>Poznámka accountu</th>
+              <th className="r realhead">Skutečnost</th><th>Průběh</th><th>Stav</th><th>Komentář agentury</th>
             </tr>
           </thead>
           <tbody>
@@ -211,8 +213,10 @@ export function PerfTable({
                     </td>
                     <td><Pill v={bv} /></td>
                     <td rowSpan={rowSpan} style={{ verticalAlign: "top", paddingTop: 9, minWidth: 160 }}>
-                      {single ? (
-                        <input className="txt" disabled={!canEdit} placeholder="poznámka accountu"
+                      {single && clientView ? (
+                        <span>{r.note[single] || <span className="share">—</span>}</span>
+                      ) : single ? (
+                        <input className="txt" disabled={!canEdit} placeholder={canEdit ? "komentář pro klienta i tým" : ""}
                           defaultValue={r.note[single]}
                           onBlur={(e) => {
                             const t = e.target.value; const prev = r.note[single];
@@ -296,7 +300,8 @@ export function PerfTable({
         <b>Jak se počítá stav.</b> Kumulativní ukazatele (rozpočet, reach, konverze) se poměřují s časem:
         očekávání = cíl × podíl uplynulého období. V plánu 90–110 %, mírný skluz 75–110 %, <b>skluz pod 75 %</b>.
         Poměrové ukazatele (CPM, CPA, CTR, ROAS) se s časem nepoměřují — porovnávají se rovnou s plánem.
-        Poznámka accountu skluz <b>nezhasíná</b>, jen zaznamená, že o odchylce víte.
+        V první čtvrtině období se nulové čerpání nebere jako skluz — čerpání se vykazuje se zpožděním.
+        {!clientView && <> Komentář agentury skluz <b>nezhasíná</b>, jen zaznamená, že o odchylce víte.</>}
       </div>
     </div>
   );

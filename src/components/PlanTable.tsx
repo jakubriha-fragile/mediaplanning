@@ -59,11 +59,14 @@ type Col =
   | { kind: "m"; key: string; label: string; months: string[] }
   | { kind: "q"; key: string; label: string; months: string[] };
 
-const LEFT_COLS = 9;   // úchyt, sdělení, fáze, cílení, typ, kanál, nosič, jednotka, cena
+// úchyt, sdělení, fáze, cílení, typ, kanál, nosič, jednotka, cena — klient nevidí
+// jednotku ani cenu, ty jsou pro něj agenturní kuchyně
+const LEFT_COLS_AGENCY = 9;
+const LEFT_COLS_CLIENT = 7;
 const RIGHT_COLS = 3;  // celkem, podíl, smazat
 
 export function PlanTable({
-  rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel,
+  rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel, clientView = false,
 }: {
   rows: PlanRow[];
   campaigns: CampaignInfo[];
@@ -74,7 +77,10 @@ export function PlanTable({
   periodName: string;
   canEditPlan: boolean;
   undoLabel: string | null;
+  /** pohled klienta: bez agenturních sloupců a dopočtů v buňkách */
+  clientView?: boolean;
 }) {
+  const leftCols = clientView ? LEFT_COLS_CLIENT : LEFT_COLS_AGENCY;
   const [data, setData] = useState(rows);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -269,7 +275,8 @@ export function PlanTable({
       )}
 
       <div className="scroll stick">
-        <table className="plan">
+        {/* bez práva na úpravu se tabulka kreslí jako text, ne jako zašedlý formulář */}
+        <table className={`plan ${canEditPlan ? "" : "ro"}`}>
           <thead>
             <tr>
               <th style={{ width: 28 }} />
@@ -279,8 +286,8 @@ export function PlanTable({
               <th>Typ</th>
               <th>Kanál</th>
               <th>Nosič</th>
-              <th>Jednotka</th>
-              <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc kontaktů)">Cena (Kč)</th>
+              {!clientView && <th>Jednotka</th>}
+              {!clientView && <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc kontaktů)">Cena (Kč)</th>}
               {cols.map((c) => (
                 <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
                     title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : undefined}>
@@ -316,7 +323,7 @@ export function PlanTable({
                         run(() => {}, () => {}, () => moveTactic({ tacticId: t, targetCampaignId: g.campaignId }));
                       }
                     }}>
-                    <td colSpan={LEFT_COLS} style={{ boxShadow: `inset 3px 0 0 0 ${campColor(g.campaign)}` }}>
+                    <td colSpan={leftCols} style={{ boxShadow: `inset 3px 0 0 0 ${campColor(g.campaign)}` }}>
                       {canEditPlan && (
                         <span className="grip" draggable title="Přetažením změníte pořadí bloků"
                           onDragStart={() => setDragCamp(g.campaignId)}
@@ -365,7 +372,7 @@ export function PlanTable({
                   {!g.rows.length && (
                     <tr className="emptygrp">
                       <td />
-                      <td colSpan={LEFT_COLS - 1 + cols.length + RIGHT_COLS}>
+                      <td colSpan={leftCols - 1 + cols.length + RIGHT_COLS}>
                         Blok zatím nemá žádnou taktiku — přidejte ji tlačítkem „+ Taktika" výše.
                       </td>
                     </tr>
@@ -421,7 +428,7 @@ export function PlanTable({
                         </td>
 
                         <td>
-                          <select className="txt" value={r.phase} disabled={!canEditPlan}
+                          <select className="txt" value={r.phase} disabled={!canEditPlan} style={{ minWidth: 118 }}
                             onChange={(e) => {
                               const v = e.target.value as (typeof PHASES)[number], prev = r.phase;
                               run(() => patchLine(r.messageLineId, { phase: v }),
@@ -432,8 +439,8 @@ export function PlanTable({
                           </select>
                         </td>
 
-                        <td style={{ maxWidth: 150 }}>
-                          <input className="txt" defaultValue={r.audience} disabled={!canEditPlan}
+                        <td style={{ minWidth: 120, maxWidth: 170 }}>
+                          <input className="txt" defaultValue={r.audience} disabled={!canEditPlan} title={r.audience}
                             key={`aud-${r.messageLineId}-${r.audience}`}
                             onBlur={(e) => {
                               const v = e.target.value, prev = r.audience;
@@ -484,7 +491,7 @@ export function PlanTable({
                           </select>
                         </td>
 
-                        <td>
+                        {!clientView && <td>
                           <select className="txt" value={rowUnit(r)} disabled={!rowEditable(r)}
                             style={{ width: 104 }}
                             title="Co zadáváte do měsíců. Zbylé jednotky se dopočítají."
@@ -494,16 +501,16 @@ export function PlanTable({
                             }}>
                             {UNITS.map((u) => <option key={u} value={u}>{UNIT_LABEL[u]}</option>)}
                           </select>
-                        </td>
+                        </td>}
 
-                        <td className="r">
+                        {!clientView && <td className="r">
                           <PriceCell
                             value={rowPrice(r)}
                             label={priceLabel(r.channelType)}
                             hint={priceHint(r.channelType)}
                             disabled={!rowEditable(r)}
                             onCommit={(v) => run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, unitPrice: v }))} />
-                        </td>
+                        </td>}
 
                         {cols.map((c) => {
                           const unit = rowUnit(r);
@@ -532,6 +539,7 @@ export function PlanTable({
                                 reach={cell?.reach ?? 0}
                                 actual={r.actuals[m]} max={axisMax} type={r.mediaType}
                                 disabled={!r.editable[m]}
+                                showDerived={!clientView}
                                 onCommit={(v) => {
                                   const prev = cell?.driverValue ?? 0;
                                   if (prev === v) return;
@@ -561,14 +569,14 @@ export function PlanTable({
               );
             })}
             {!visible.length && (
-              <tr><td colSpan={LEFT_COLS + cols.length + RIGHT_COLS} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
+              <tr><td colSpan={leftCols + cols.length + RIGHT_COLS} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
                 Žádná taktika neodpovídá filtru.
               </td></tr>
             )}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={LEFT_COLS}>CELKEM {anyFilter ? "(výběr)" : periodName} <span className="share" style={{ fontWeight: 300 }}>v Kč</span></td>
+              <td colSpan={leftCols}>CELKEM {anyFilter ? "(výběr)" : periodName} <span className="share" style={{ fontWeight: 300 }}>v Kč</span></td>
               {cols.map((c) => (
                 <td className={`r num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{kc(colTotal(c))}</td>
               ))}
@@ -611,8 +619,9 @@ function unitFmt(v: number, unit: PlanUnit): string {
 }
 
 function BudgetCell({
-  value, unit, budget, grp, impressions, reach, actual, max, type, disabled, onCommit,
+  value, unit, budget, grp, impressions, reach, actual, max, type, disabled, showDerived, onCommit,
 }: {
+  showDerived: boolean;
   value: number; unit: PlanUnit;
   budget: number; grp: number; impressions: number; reach: number;
   actual: number; max: number;
@@ -631,7 +640,7 @@ function BudgetCell({
   const aw = Math.min(100, (actual / max) * 100);
 
   /** Pod číslem se ukazuje to, co se z něj dopočítalo. U prázdné buňky nic. */
-  const second = !value ? ""
+  const second = !value || !showDerived ? ""
     : unit === "budget"
       ? grp > 0 ? `${Math.round(grp)} GRP` : impressions > 0 ? `${unitFmt(impressions, "impressions")} imp.` : ""
       : kc(budget) + " Kč";
@@ -660,7 +669,6 @@ function BudgetCell({
         disabled={disabled}
         title={disabled ? "K tomuto rozpočtu nemáte oprávnění" : undefined}
         value={shown}
-        placeholder="0"
         onFocus={(e) => { setDraft(value ? String(Math.round(value * 10) / 10) : ""); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ""))}
         onBlur={() => { if (draft !== null) { onCommit(parseNum(draft)); setDraft(null); } }}

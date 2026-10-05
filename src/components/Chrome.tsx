@@ -34,7 +34,7 @@ export function Chrome({
             <h1>
               {title ? <><em>{title.client}</em> — Mediaplán {title.period}</> : <><em>Mediaplán</em></>}
             </h1>
-            <span className="sub">Fragile · Paid / Owned / Earned</span>
+            <span className="sub">Fragile · plánování a vyhodnocení kampaní</span>
             <div className="right">
               <span>
                 {user.name ?? user.email}

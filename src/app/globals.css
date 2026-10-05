@@ -176,6 +176,19 @@ input:disabled, select:disabled, textarea:disabled {
 }
 .locked { position: relative; }
 
+/* Plán jen pro čtení (klient, čtenář): pole se kreslí jako prostý text.
+   Zašedlé inputy a šipky výběrů působily jako rozbitý formulář. */
+table.plan.ro input:disabled, table.plan.ro select:disabled {
+  background: transparent; color: var(--ink); cursor: default; border-color: transparent;
+  appearance: none; -webkit-appearance: none; padding-left: 0; padding-right: 0;
+}
+table.plan.ro select.txt.pill:disabled { padding: 2px 8px; width: auto !important; }
+table.plan.ro select.txt.pill.Paid:disabled { background: var(--paid-soft); color: var(--paid-ink); }
+table.plan.ro select.txt.pill.Owned:disabled { background: var(--owned-soft); color: var(--owned-ink); }
+table.plan.ro select.txt.pill.Earned:disabled { background: var(--earned-soft); color: var(--earned-ink); }
+table.plan.ro .cellbox.locked { cursor: default; opacity: 1; }
+table.plan.ro .cellbox .cell:disabled { background: transparent; }
+
 .btn {
   appearance: none; font: inherit; font-size: 12px; padding: 5px 12px; border-radius: 4px;
   cursor: pointer; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);

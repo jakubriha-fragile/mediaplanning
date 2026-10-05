@@ -346,6 +346,8 @@ export async function setAccountNote(raw: z.input<typeof noteInput>): Promise<Re
     const { mediaType, campaignId, planId, channel } = await tacticCoords(tacticId);
 
     assertCan(me, "write", { area: "actuals", mediaType, planId, campaignId, month });
+    // komentář píše agentura; klient s právem na čerpání ho jen čte
+    if (me!.role === "CLIENT") throw new PermissionError("Komentář agentury klient nemění.");
 
     const [before] = await db
       .select()
@@ -403,6 +405,10 @@ export async function addGrant(raw: z.input<typeof grantInput>): Promise<Result>
     if (campaign && data.planId && campaign.planId !== data.planId) {
       return { ok: false, error: "Vybraná kampaň není v tomto plánu." };
     }
+    // stejně tak měsíc mimo období plánu
+    if (plan && data.month && !monthsBetween(plan.periodStart, plan.periodEnd).includes(data.month)) {
+      return { ok: false, error: "Vybraný měsíc není v období plánu." };
+    }
 
     await db.insert(grants).values({ ...data, note: data.note || null });
     await log(me!.id, "plan", [
@@ -455,6 +461,29 @@ export async function inviteUser(raw: z.input<typeof inviteInput>): Promise<Resu
       .onConflictDoUpdate({ target: users.email, set: { role: data.role, active: true } });
 
     await log(me!.id, "plan", [`Pozván uživatel ${email} v roli ${data.role}`]);
+    revalidatePath("/sprava");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const roleInput = z.object({
+  userId: z.string().min(1),
+  role: z.enum(["ADMIN", "PLANNER", "ACCOUNT", "CLIENT", "VIEWER"]),
+});
+
+/** Změna role. Sám sobě ji administrátor měnit nesmí — mohl by se zamknout. */
+export async function setUserRole(raw: z.input<typeof roleInput>): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    if (!canManageUsers(me)) throw new PermissionError("Role smí měnit jen administrátor.");
+    const data = roleInput.parse(raw);
+    if (data.userId === me!.id) throw new PermissionError("Vlastní roli změnit nejde.");
+    const [before] = await db.select().from(users).where(eq(users.id, data.userId));
+    if (!before || before.role === data.role) return { ok: true };
+    await db.update(users).set({ role: data.role }).where(eq(users.id, data.userId));
+    await log(me!.id, "plan", [`Role ${before.email}: ${before.role} → ${data.role}`]);
     revalidatePath("/sprava");
     return { ok: true };
   } catch (e) {

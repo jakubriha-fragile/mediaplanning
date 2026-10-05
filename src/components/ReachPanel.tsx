@@ -28,8 +28,10 @@ const MIN_CONTACTS = [2, 3, 4, 5] as const;
  * Panel ukazuje obojí vedle sebe, aby bylo poznat, kolik se počítá dvakrát.
  */
 export function ReachPanel({
-  planId, showCalculator, months, total, universe, hasUniverse, targetGroupName,
+  planId, showCalculator, clientView = false, months, total, universe, hasUniverse, targetGroupName,
 }: {
+  /** klient dostane zjednodušený, ve výchozím stavu sbalený panel */
+  clientView?: boolean;
   planId: string;
   /** klient kalkulačku nevidí — koeficienty jsou know-how agentury */
   showCalculator: boolean;
@@ -41,6 +43,12 @@ export function ReachPanel({
 }) {
   const [open, setOpen] = useState(true);
   const [minC, setMinC] = useState<number>(3);
+
+  if (clientView) {
+    return hasUniverse
+      ? <ClientReach months={months} total={total} universe={universe} targetGroupName={targetGroupName} />
+      : null;
+  }
 
   if (!hasUniverse) {
     return (
@@ -222,6 +230,116 @@ export function ReachPanel({
             koeficienty se upravují v {showCalculator ? <a href="/kalkulacka">Kalkulačce zásahu</a> : "Kalkulačce zásahu"}{" "}
             a před prvním použitím u klienta patří zkalibrovat na panelový zdroj a nechat validovat
             media specialistou.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Zásah, jak ho vidí klient. Bez GRP, překryvu a „součtu médií" — procenta
+ * nad sto a odborné mezivýpočty klienta spíš mátly, než aby mu něco řekly.
+ * Výhrada o modelovém odhadu zůstává, jen je napsaná srozumitelně.
+ */
+function ClientReach({
+  months, total, universe, targetGroupName,
+}: {
+  months: ReachSummary[];
+  total: ReachSummary;
+  universe: number;
+  targetGroupName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const f = frequencyOf(total.grp, total.net);
+  const eff3 = effectiveReach(total.net, f, 3);
+  const live = months.filter((m) => m.net > 0);
+
+  return (
+    <div className="panel" style={{ borderRadius: "var(--radius)", marginBottom: 10 }}>
+      <div className="toolbar">
+        <button className="btn" onClick={() => setOpen((o) => !o)} style={{ borderRadius: 999 }}>
+          {open ? "▾" : "▸"} Odhad zásahu kampaně
+        </button>
+        <span className="share">{targetGroupName}</span>
+        <span className="spacer" />
+        <span className="share">
+          zasáhne <b style={{ color: "var(--brand-ink)" }}>{pct(total.net)}</b> cílové skupiny
+          {" "}({big(total.people)} osob)
+        </span>
+      </div>
+
+      {open && (
+        <>
+          <div className="kpis" style={{ margin: 0, border: 0, borderRadius: 0, borderBottom: "1px solid var(--line)" }}>
+            <div className="kpi">
+              <div className="k">Zásah</div>
+              <div className="v num">{pct(total.net)}</div>
+              <div className="d num">{big(total.people)} osob z {big(universe)}</div>
+            </div>
+            <div className="kpi">
+              <div className="k">Aspoň 3 kontakty</div>
+              <div className="v num">{pct(eff3)}</div>
+              <div className="d num">{big(eff3 * universe)} osob</div>
+            </div>
+            <div className="kpi">
+              <div className="k">Průměrná frekvence</div>
+              <div className="v num">{f ? f.toFixed(1).replace(".", ",") + "×" : "—"}</div>
+              <div className="d">kolikrát reklamu uvidí zasažený</div>
+            </div>
+          </div>
+
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Médium</th>
+                  <th className="r">Zásah</th>
+                  <th className="r">Rozpočet (Kč)</th>
+                  <th className="r">Podíl rozpočtu</th>
+                </tr>
+              </thead>
+              <tbody>
+                {total.byType.map((b) => (
+                  <tr key={b.channelType}>
+                    <td>
+                      <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2,
+                        background: TYPE_COLOR[b.channelType] ?? "var(--brand)", marginRight: 7 }} />
+                      {b.channelType}
+                    </td>
+                    <td className="r num">{pct(b.reach)}</td>
+                    <td className="r num">{kc(b.budget)}</td>
+                    <td className="r share num">{total.budget ? pct(b.budget / total.budget) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {live.length > 1 && (
+            <div className="scroll" style={{ borderTop: "1px solid var(--line)" }}>
+              <table>
+                <thead>
+                  <tr><th>Měsíc</th><th className="r">Zásah</th><th className="r">Rozpočet (Kč)</th></tr>
+                </thead>
+                <tbody>
+                  {live.map((m) => (
+                    <tr key={m.month}>
+                      <td>{monthShort(m.month)}</td>
+                      <td className="r num">{pct(m.net)}</td>
+                      <td className="r num">{m.budget ? kc(m.budget) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="note">
+            Zásah je podíl cílové skupiny, který kampaň uvidí aspoň jednou — lidé, kteří vidí víc
+            médií, se počítají jen jednou. <b>Jde o modelový odhad, ne o měření</b>: vychází
+            z velikosti cílové skupiny a typických křivek zásahu jednotlivých médií. Přesné číslo
+            by vyžadovalo panelová data.
           </div>
         </>
       )}

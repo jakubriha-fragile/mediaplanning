@@ -73,7 +73,7 @@ export default async function LoginPage({
 
       <div className="card">
         <h2>Mediaplán</h2>
-        <p>Plánování a vyhodnocování kampaní BENU. Přístup jen pro pozvané účty.</p>
+        <p>Plánování a vyhodnocování mediálních kampaní. Přístup jen pro pozvané účty.</p>
 
         {err && (
           <div className="banner" style={{ marginTop: 0 }}>

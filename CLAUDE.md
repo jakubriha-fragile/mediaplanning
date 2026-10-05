@@ -84,7 +84,13 @@ Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení �
    `"use server"` je **veřejná akce** — i čtecí funkce tam musí mít kontrolu
    (viz `recentChanges`). Přesuny taktik a bloků mezi plány jsou zakázané.
 
-9. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
+9. **Klient má vlastní pohled** (`role === "CLIENT"` → `clientView` v `PlanTable`,
+   `ReachPanel`, `PerfTable`). Nevidí agenturní sloupce (Jednotka, Cena), dopočty
+   GRP v buňkách, odborný panel zásahu ani texty typu „před sdílením s klientem".
+   Komentář agentury nesmí měnit ani na serveru (`setAccountNote`). Výhrada
+   „modelový odhad, ne měření" u zásahu zůstává i v jeho pohledu.
+
+10. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
    jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se
    „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.
 

@@ -6,7 +6,7 @@ import { currentPrincipal } from "@/lib/auth";
 import { canManageUsers } from "@/lib/permissions";
 import { monthsBetween, monthLabel } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
-import { addGrant, removeGrant, inviteUser, setUserActive, recentChanges } from "@/lib/actions";
+import { addGrant, removeGrant, inviteUser, setUserActive, setUserRole, recentChanges } from "@/lib/actions";
 import { getUser } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
@@ -103,6 +103,16 @@ export default async function AdminPage() {
             <span className="share">{u.email}</span>
             {!u.active && <span className="pill s-bad">deaktivován</span>}
             <span className="spacer" />
+            {u.id !== me.id && (
+              <form action={async (fd: FormData) => { "use server"; await setUserRole({ userId: u.id, role: fd.get("role") as never }); }}
+                style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <select name="role" defaultValue={u.role} aria-label="Role" className="txt"
+                  style={{ width: "auto", border: "1px solid var(--line-strong)" }}>
+                  {Object.keys(ROLE_HINT).map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <button className="btn" type="submit">Změnit roli</button>
+              </form>
+            )}
             <form action={async () => { "use server"; await setUserActive(u.id, !u.active); }}>
               <button className={`btn ${u.active ? "danger" : ""}`} type="submit" disabled={u.id === me.id}>
                 {u.active ? "Deaktivovat" : "Aktivovat"}
@@ -138,15 +148,24 @@ export default async function AdminPage() {
             </div>
           )}
 
+          {/* administrátor a plánovač mají z role plný přístup — grant by nic nepřidal
+              a předvyplněný formulář jen sváděl k omylu */}
+          {u.role === "ADMIN" || u.role === "PLANNER" ? (
+            <div className="note" style={{ borderTop: "1px solid var(--line)" }}>
+              Role {u.role} má přístup ke všem plánům z role — další oprávnění nepotřebuje.
+            </div>
+          ) : (
           <form
             action={async (fd: FormData) => {
               "use server";
+              const plan = String(fd.get("planId") || "");
               await addGrant({
                 userId: u.id,
                 area: fd.get("area") as never,
                 level: fd.get("level") as never,
                 mediaType: (fd.get("mediaType") || null) as never,
-                planId: (fd.get("planId") || null) as never,
+                // „*" je vědomá volba všech plánů; prázdná hodnota formulář neodešle
+                planId: (plan === "*" ? null : plan) as never,
                 campaignId: (fd.get("campaignId") || null) as never,
                 month: (fd.get("month") || null) as never,
                 note: String(fd.get("note") || ""),
@@ -156,7 +175,8 @@ export default async function AdminPage() {
           >
             <div className="field" style={{ margin: 0, minWidth: 120 }}>
               <label>Oblast</label>
-              <select name="area" defaultValue="actuals">
+              <select name="area" defaultValue="" required>
+                <option value="" disabled>vyberte…</option>
                 <option value="plan">plán</option>
                 <option value="actuals">skutečnost</option>
                 <option value="assets">podklady</option>
@@ -164,13 +184,17 @@ export default async function AdminPage() {
             </div>
             <div className="field" style={{ margin: 0, minWidth: 100 }}>
               <label>Úroveň</label>
-              <select name="level" defaultValue="write"><option value="read">čtení</option><option value="write">zápis</option></select>
+              <select name="level" defaultValue="" required>
+                <option value="" disabled>vyberte…</option>
+                <option value="read">čtení</option><option value="write">zápis</option>
+              </select>
             </div>
             <div className="field" style={{ margin: 0, minWidth: 150 }}>
               <label>Plán</label>
-              <select name="planId" defaultValue="">
-                <option value="">všechny plány</option>
+              <select name="planId" defaultValue="" required>
+                <option value="" disabled>vyberte plán…</option>
                 {planRows.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <option value="*">všechny plány (i budoucí)</option>
               </select>
             </div>
             <div className="field" style={{ margin: 0, minWidth: 120 }}>
@@ -180,13 +204,23 @@ export default async function AdminPage() {
             </div>
             <div className="field" style={{ margin: 0, minWidth: 150 }}>
               <label>Kampaň</label>
+              {/* kampaně se jmenují v každém plánu stejně — bez seskupení se snadno
+                  vybrala kampaň z jiného plánu a grant pak nikdy nezabral */}
               <select name="campaignId" defaultValue=""><option value="">všechny</option>
-                {camps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                {planRows.map((p) => (
+                  <optgroup key={p.id} label={p.name}>
+                    {camps.filter((c) => c.planId === p.id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                ))}</select>
             </div>
             <div className="field" style={{ margin: 0, minWidth: 120 }}>
               <label>Měsíc</label>
               <select name="month" defaultValue=""><option value="">všechny</option>
-                {MONTHS.map((m) => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}</select>
+                {planRows.map((p) => (
+                  <optgroup key={p.id} label={p.name}>
+                    {monthsBetween(p.periodStart, p.periodEnd).map((m) => <option key={`${p.id}-${m}`} value={m}>{MONTH_LABEL[m]}</option>)}
+                  </optgroup>
+                ))}</select>
             </div>
             <div className="field" style={{ margin: 0, minWidth: 140 }}>
               <label>Poznámka</label>
@@ -194,6 +228,7 @@ export default async function AdminPage() {
             </div>
             <button className="btn" type="submit">Přidat oprávnění</button>
           </form>
+          )}
         </div>
         );
       })}

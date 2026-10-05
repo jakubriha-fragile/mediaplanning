@@ -82,7 +82,11 @@ export default async function PlanPage({
           <div className="v num">{kc(total)}<span className="cur">Kč</span></div>
           <div className="d">{rows.length} taktik</div>
         </div>
-        {(["Paid", "Owned", "Earned"] as const).map((ty) => (
+        {/* kdo vidí jen výsek plánu, by u typů mimo svůj grant viděl „0 Kč",
+            jako by v plánu nebyly — takové dlaždice vynecháme */}
+        {(["Paid", "Owned", "Earned"] as const)
+          .filter((ty) => seesWholePlan(me, planId) || rows.some((r) => r.mediaType === ty))
+          .map((ty) => (
           <div className={`kpi ${ty === "Paid" ? "p" : ty === "Owned" ? "o" : "e"}`} key={ty}>
             <div className="k">{ty}</div>
             <div className="v num">{kc(byType(ty))}<span className="cur">Kč</span></div>
@@ -99,6 +103,7 @@ export default async function PlanPage({
       <ReachPanel
         planId={planId}
         showCalculator={me.role !== "CLIENT"}
+        clientView={me.role === "CLIENT"}
         months={reach.months}
         total={reach.total}
         universe={reach.universe}
@@ -106,7 +111,7 @@ export default async function PlanPage({
         targetGroupName={tgName}
       />
 
-      {readOnlyPlan && (
+      {readOnlyPlan && me.role !== "CLIENT" && (
         <div className="banner info">
           <span>
             <b>Plán máte jen ke čtení.</b> Rozpočty mění media plánovač. Skutečné čerpání vyplňujete
@@ -115,12 +120,22 @@ export default async function PlanPage({
         </div>
       )}
 
-      <div className="banner">
-        <span>
-          <b>Pracovní podklad.</b> Rozdělení rozpočtu, mediamix, odhady zásahu i částky vyžadují
-          validaci media specialistou před sdílením s klientem. Částky jsou vč. agenturního fee.
-        </span>
-      </div>
+      {me.role === "CLIENT" ? (
+        <div className="banner info">
+          <span>
+            Mediaplán připravila agentura Fragile. <b>Částky jsou včetně agenturního fee.</b>{" "}
+            Skutečné čerpání najdete v záložce{" "}
+            <a href={`/plneni?plan=${planId}`}>Detail &amp; plnění</a>; s dotazy se obraťte na svého accounta.
+          </span>
+        </div>
+      ) : (
+        <div className="banner">
+          <span>
+            <b>Pracovní podklad.</b> Rozdělení rozpočtu, mediamix, odhady zásahu i částky vyžadují
+            validaci media specialistou před sdílením s klientem. Částky jsou vč. agenturního fee.
+          </span>
+        </div>
+      )}
 
       <PlanTable
         rows={rows as unknown as PlanRow[]}
@@ -132,6 +147,7 @@ export default async function PlanPage({
         periodName={periodName}
         canEditPlan={canEditPlan}
         undoLabel={undo[0]?.label ?? null}
+        clientView={me.role === "CLIENT"}
       />
     </Chrome>
   );

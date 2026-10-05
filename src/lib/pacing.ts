@@ -46,6 +46,9 @@ export function monthState(month: string, now: Date = new Date()): "before" | "l
   return e <= 0 ? "before" : e >= 1 ? "after" : "live";
 }
 
+/** Do jakého podílu uplynulého období se nulové čerpání nebere jako skluz. */
+export const EARLY_SHARE = 0.25;
+
 const IDLE = (label: string): Verdict => ({ status: "idle", label, ratio: null, expected: 0, deviation: null });
 
 /**
@@ -57,6 +60,9 @@ export function pacingCumulative(plan: number, actual: number, expected: number,
   if (expected <= 0) return IDLE("nezahájeno");
   const ratio = actual / expected;
   if (!actual) {
+    // v první čtvrtině období čerpání zpravidla ještě není vykázané (faktury
+    // chodí se zpožděním) — červená u všech taktik by byla planý poplach
+    if (!closed && expected < plan * EARLY_SHARE) return IDLE("zatím bez dat");
     return { status: "bad", label: closed ? "nesplněno" : "bez plnění", ratio: 0, expected, deviation: null };
   }
   const v = (status: Status, label: string): Verdict => ({ status, label, ratio, expected, deviation: null });

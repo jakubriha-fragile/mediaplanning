@@ -42,27 +42,44 @@ export default async function PerfPage({
     <Chrome active="plneni" user={{ name: user.name, email: user.email, role: user.role }}
       title={{ client: plan.clientName, period: periodLabel(plan.periodStart, plan.periodEnd) }}>
       <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />
-      {!canWriteAnything && (
+      {me.role === "CLIENT" ? (
         <div className="banner info">
           <span>
-            <b>Máte jen čtení.</b> Skutečnost vyplňuje ten, komu administrátor přidělil oprávnění
-            pro daný typ média, kampaň a měsíc.
+            {canWriteAnything ? (
+              <><b>Skutečné čerpání</b> vyplňujete do bílých polí — u médií, která máte na starosti.
+                Ostatní údaje doplňuje agentura.</>
+            ) : (
+              <><b>Přehled plnění plánu.</b> Údaje doplňuje agentura; s dotazy se obraťte na svého accounta.</>
+            )}
           </span>
         </div>
+      ) : (
+        <>
+          {!canWriteAnything && (
+            <div className="banner info">
+              <span>
+                <b>Máte jen čtení.</b> Skutečnost vyplňuje ten, komu administrátor přidělil oprávnění
+                pro daný typ média, kampaň a měsíc.
+              </span>
+            </div>
+          )}
+          {/* jen pro agenturu — klientovi by text o „sdílení s klientem" nedával smysl */}
+          <div className="banner">
+            <span>
+              <b>Pracovní podklad.</b> Vyhodnocení slouží jako interní přehled; před sdílením s klientem
+              vyžaduje validaci media specialistou.
+            </span>
+          </div>
+        </>
       )}
-      <div className="banner">
-        <span>
-          <b>Pracovní podklad.</b> Vyhodnocení slouží jako interní přehled; před sdílením s klientem
-          vyžaduje validaci media specialistou.
-        </span>
-      </div>
       <PerfTable
         rows={rows}
         months={months}
         monthLabels={Object.fromEntries(months.map((m) => [m, monthLabel(m)]))}
         quarters={quarterGroups(months)}
         periodName={periodLabel(plan.periodStart, plan.periodEnd)}
-        undoLabel={undo[0]?.label ?? null} />
+        undoLabel={undo[0]?.label ?? null}
+        clientView={me.role === "CLIENT"} />
     </Chrome>
   );
 }
