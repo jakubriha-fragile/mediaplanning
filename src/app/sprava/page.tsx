@@ -52,8 +52,8 @@ export default async function AdminPage() {
       <div className="banner info">
         <span>
           <b>Oprávnění se vynucuje na serveru.</b> Zašedlá pole v rozhraní jsou pohodlí, ne ochrana —
-          o tom, co projde, rozhoduje engine u každého zápisu. Grant má čtyři rozměry: typ média,
-          kampaň, měsíc a oblast. Prázdná hodnota znamená „vše". Kdo nemá grant, nemá přístup.
+          o tom, co projde, rozhoduje engine u každého zápisu i čtení. Grant má pět rozměrů: plán,
+          typ média, kampaň, měsíc a oblast. Klient uvidí jen taktiky, na které má grant. Prázdná hodnota znamená „vše". Kdo nemá grant, nemá přístup.
         </span>
       </div>
 

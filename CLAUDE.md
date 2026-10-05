@@ -40,6 +40,7 @@ src/lib/period.ts        měsíce a kvartály odvozené z období plánu
 src/lib/actions.ts       VŠECHNY zápisy; každý projde assertCan()
 src/lib/queries.ts       čtení dat pro stránky
 src/lib/undo.ts          zásobník vrácení zpět (10 kroků na uživatele)
+src/app/kalkulacka/      Sainsburyho kalkulačka + editace koeficientů duplikace
 ```
 
 Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení → Taktika`.
@@ -71,13 +72,27 @@ Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení �
 6. **Poměrové ukazatele (CPM, CPA, CTR, ROAS) se nikdy neškálují časem.**
    Porovnávají se přímo s plánem. Přes měsíce se váží skutečným čerpáním.
 
-7. **Vrácení zpět ukládá PŮVODNÍ HODNOTU**, ne opačnou operaci.
+7. **Vrácení zpět ukládá PŮVODNÍ HODNOTU**, ne opačnou operaci. A je to zápis:
+   `undoLast` každou operaci znovu ověří přes `assertCanUndo` proti dnešním
+   grantům. Snímky pořadí (`snapshotPositions`) jsou vždy jen za jeden plán.
+
+8. **Čtení se kontroluje taky.** Stránky berou plány výhradně z
+   `getVisiblePlans(me)` + `pickPlan()`, nikdy z `getPlans()` (ten vrací plány
+   všech klientů). Řádky filtruje `canSeeTactic`, souhrn zásahu se počítá jen
+   z viditelných taktik. Kdo vidí jen výsek plánu (`seesWholePlan` = false),
+   nedostane ani názvy bloků bez viditelné taktiky. Exportovaná funkce v souboru
+   `"use server"` je **veřejná akce** — i čtecí funkce tam musí mít kontrolu
+   (viz `recentChanges`). Přesuny taktik a bloků mezi plány jsou zakázané.
+
+9. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
+   jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se
+   „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.
 
 ## Ověřování — pouštět před každou dodávkou
 
 ```bash
 npx tsc --noEmit
-npm test                                    # 22 testů oprávnění + 45 cross-média
+npm test                                    # 33 testů oprávnění + 55 cross-média
 npx next build
 env -u DATABASE_URL -u AUTH_SECRET npx next build   # build nesmí potřebovat proměnné
 ```
@@ -96,6 +111,21 @@ psql -h 127.0.0.1 -p 5433 -U postgres -c "create database mediaplan;"
 export DATABASE_URL="postgres://postgres@127.0.0.1:5433/mediaplan" ENABLE_DEV_LOGIN=true
 npx drizzle-kit push --force && npm run db:seed && npx next dev -p 3100
 ```
+
+**Na Macu zadavatele** Postgres ani Docker nejsou. Funguje PGlite (Postgres
+ve WASM) se síťovým rozhraním — jen musí dostat jediné spojení bez pipeliningu,
+jinak hlásí `unnamed prepared statement does not exist`:
+
+```bash
+npm i --prefix "$SCRATCH/pg" @electric-sql/pglite @electric-sql/pglite-socket
+"$SCRATCH/pg/node_modules/.bin/pglite-server" -d "$SCRATCH/pg/data" -p 5433 -m 1 &
+export DATABASE_URL="postgres://postgres@127.0.0.1:5433/postgres?max_pipeline=1" DATABASE_POOL_MAX=1
+npx drizzle-kit push --force && npm run db:seed
+```
+
+Dev server pak přes `.claude/launch.json` (konfigurace `mediaplan-local`, port
+3100, testovací přihlášení zapnuté). Při `next build` dev server zastavit —
+oba píšou do `.next`.
 
 Pak Playwright (`/opt/pw-browsers/chromium`, spouštět s `--no-proxy-server`),
 přihlásit se přes `select#email` jako `admin@fragile.cz`. **Tři reálné chyby
@@ -146,7 +176,16 @@ Zadavatel si vyžádal tento směr (zbývá z původního seznamu):
 Technický dluh:
 
 - Import a export XLSX (zadání §9) — data se zatím nahrávají seedem.
-- Rozhraní pro kalibraci křivek zásahu a duplikací (cílové skupiny editovatelné jsou).
+- Rozhraní pro kalibraci křivek zásahu (duplikace i cílové skupiny editovatelné jsou).
+- **Výchozí koeficienty duplikace** jsou 1,05–1,70 (publika se překrývají), kalkulačka
+  zadavatele počítá s ≤ 1. Při vysokých zásazích k > 1 narazí na strop překryvu
+  a další média nepřidají nic. Rozhodnout s media specialistou, ideálně z dat.
+- Z revize (říjen 2026), zatím neřešené: ukotvené levé sloupce v ročním plánu;
+  kopie plánu na další rok nekopíruje metriky; měsíc zápisu se neověřuje proti
+  období plánu; žádné transakce u vícekrokových zápisů; `loadPlan` stahuje celé
+  tabulky všech plánů; křivky, duplikace a cílové skupiny nejsou oddělené po
+  klientech; ROLE_BASE dává PLANNER/ACCOUNT/VIEWER čtení všech klientů;
+  `actions.ts` (1400 řádků) a `PlanTable.tsx` rozdělit.
 - Podklady a poznámky — tabulky jsou, rozhraní chybí.
 - Přechod z `db:push` na verzované migrace (`drizzle-kit generate`).
 

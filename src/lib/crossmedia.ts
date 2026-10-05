@@ -188,7 +188,23 @@ export function derive(t: TacticInput): Derived {
 
 // ------------------------------------------------------------- zásah a překryv
 
-export type ReachPart = { channelType: ChannelType; reach: number };
+/** `label` je jen pro kalkulačku — dvě TV stanice jsou dvě média téhož nosiče. */
+export type ReachPart = { channelType: ChannelType; reach: number; label?: string };
+
+/** Jeden krok sekvenčního skládání — co ukazuje list „Kalkulace" v Excelu. */
+export type ReachStep = {
+  part: ReachPart;
+  /** k̄ použité v kroku; u prvního média null, s ničím se neskládá */
+  k: number | null;
+  /** kumulativní čistý zásah po přidání média */
+  cumulative: number;
+  /** o kolik se médium překrylo s tím, co už bylo pokryté */
+  overlap: number;
+  /** kolik zásahu médium reálně přidalo */
+  increment: number;
+  /** kumulativní zásah při nezávislosti (k = 1), pro srovnání */
+  independent: number;
+};
 
 export type Combined = {
   /** čistý zásah 0–1 po odečtení překryvu */
@@ -199,6 +215,8 @@ export type Combined = {
   overlap: number;
   /** čistý zásah při čisté nezávislosti — kontrolní číslo */
   independent: number;
+  /** jednotlivé kroky od nejsilnějšího média */
+  steps: ReachStep[];
 };
 
 /**
@@ -222,7 +240,7 @@ export function combineReach(
   dup: Record<string, number> = DEFAULT_DUPLICATION,
 ): Combined {
   const live = parts.filter((p) => p.reach > 0).sort((a, b) => b.reach - a.reach);
-  if (live.length === 0) return { net: 0, gross: 0, overlap: 0, independent: 0 };
+  if (live.length === 0) return { net: 0, gross: 0, overlap: 0, independent: 0, steps: [] };
 
   const gross = live.reduce((s, p) => s + p.reach, 0);
   const independent = 1 - live.reduce((s, p) => s * (1 - p.reach), 1);
@@ -231,6 +249,10 @@ export function combineReach(
   // to, co už je pokryté — a překryv je kᵢⱼ-krát větší, než by dala náhoda.
   const included: ReachPart[] = [live[0]];
   let net = live[0].reach;
+  let indep = live[0].reach;
+  const steps: ReachStep[] = [{
+    part: live[0], k: null, cumulative: net, overlap: 0, increment: net, independent: indep,
+  }];
 
   for (let i = 1; i < live.length; i++) {
     const p = live[i];
@@ -245,11 +267,15 @@ export function combineReach(
 
     // překryv nemůže být větší než menší z obou zásahů
     const overlap = Math.min(p.reach, net, kBar * p.reach * net);
+    const before = net;
     net = Math.min(1, net + p.reach - overlap);
+    indep = indep + p.reach - indep * p.reach;
     included.push(p);
+    // max kvůli zaokrouhlení — přírůstek −1e-17 by se ukázal jako „−0,0 %"
+    steps.push({ part: p, k: kBar, cumulative: net, overlap, increment: Math.max(0, net - before), independent: indep });
   }
 
-  return { net, gross, overlap: Math.max(0, gross - net), independent };
+  return { net, gross, overlap: Math.max(0, gross - net), independent, steps };
 }
 
 /**
@@ -314,3 +340,28 @@ export function effectiveReach(reach: number, frequency: number, minContacts = 3
 export function frequencyOf(grp: number, reach: number): number {
   return reach > 0 ? grp / 100 / reach : 0;
 }
+
+/**
+ * Zpětný dopočet koeficientu z naměřených dat (Sainsbury obráceně):
+ * k = (R_A + R_B − R_A∪B) / (R_A × R_B).
+ *
+ * Naměřený společný zásah musí ležet mezi větším z obou zásahů (úplný
+ * překryv) a jejich součtem (žádný překryv) — jinak je měření nebo zadání
+ * špatně a koeficient nemá smysl ukládat.
+ */
+export function kFromMeasured(
+  ra: number, rb: number, rab: number,
+): { k: number; ok: true } | { ok: false; error: string } {
+  if (ra <= 0 || rb <= 0 || ra > 1 || rb > 1) return { ok: false, error: "Zásahy médií musí být mezi 0 a 100 %." };
+  if (rab < Math.max(ra, rb) - 1e-9) {
+    return { ok: false, error: "Společný zásah nemůže být menší než zásah silnějšího média." };
+  }
+  if (rab > Math.min(1, ra + rb) + 1e-9) {
+    return { ok: false, error: "Společný zásah nemůže být větší než součet obou zásahů." };
+  }
+  return { ok: true, k: (ra + rb - rab) / (ra * rb) };
+}
+
+/** Rozumné meze koeficientu: pod 0,3 nebo nad 3 jde skoro jistě o chybu v datech. */
+export const K_MIN = 0.3;
+export const K_MAX = 3;

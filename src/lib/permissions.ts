@@ -122,6 +122,51 @@ export class PermissionError extends Error {
   readonly code = "FORBIDDEN";
 }
 
+// ------------------------------------------------------------------- čtení
+//
+// Čtení je volnější než zápis: k tomu, aby klient plán vůbec otevřel, mu stačí
+// JAKÝKOLI grant na ten plán (třeba jen Paid). Co pak v plánu uvidí, rozhoduje
+// canSeeTactic — taktiky mimo jeho typ média nebo kampaň se mu vůbec nepošlou.
+// Rozměr měsíce řádky neskrývá: grant na říjen znamená „smí zapisovat říjen",
+// ne „nesmí vědět, že existuje listopad".
+
+const READ_AREAS: Area[] = ["plan", "actuals"];
+
+function roleReadsEverything(p: Principal): boolean {
+  if (p.role === "ADMIN") return true;
+  return (ROLE_BASE[p.role] ?? []).some((b) => READ_AREAS.includes(b.area));
+}
+
+/** Smí uživatel plán otevřít? Bez toho nesmí vidět ani jeho název. */
+export function canSeePlan(p: Principal | null, planId: string): boolean {
+  if (!p || !p.active) return false;
+  if (roleReadsEverything(p)) return true;
+  return p.grants.some((g) => READ_AREAS.includes(g.area) && (g.planId === null || g.planId === planId));
+}
+
+/** Smí vidět konkrétní taktiku? Typ média a kampaň musí sedět na některý grant. */
+export function canSeeTactic(
+  p: Principal | null,
+  t: { planId: string; mediaType: MediaType; campaignId: string },
+): boolean {
+  if (!p || !p.active) return false;
+  if (roleReadsEverything(p)) return true;
+  return p.grants.some((g) =>
+    READ_AREAS.includes(g.area) &&
+    dimensionMatches(g.planId, t.planId) &&
+    dimensionMatches(g.mediaType, t.mediaType) &&
+    dimensionMatches(g.campaignId, t.campaignId));
+}
+
+/** Vidí celý plán, nebo jen jeho výsek? Podle toho se ukazují souhrny za celý plán. */
+export function seesWholePlan(p: Principal | null, planId: string): boolean {
+  if (!p || !p.active) return false;
+  if (roleReadsEverything(p)) return true;
+  return p.grants.some((g) =>
+    READ_AREAS.includes(g.area) && (g.planId === null || g.planId === planId) &&
+    g.mediaType === null && g.campaignId === null);
+}
+
 /** Smí uživatel spravovat uživatele a oprávnění? */
 export function canManageUsers(principal: Principal | null): boolean {
   return !!principal && principal.active && principal.role === "ADMIN";

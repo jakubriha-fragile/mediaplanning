@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
 import {
-  getPlanRows, getCampaignTree, getUser, getPlans, getPlan,
-  defaultPlanId, getReachSummary, getTargetGroups,
+  getPlanRows, getCampaignTree, getUser, getVisiblePlans, pickPlan, getPlan,
+  getReachSummary, getTargetGroups,
 } from "@/lib/queries";
 import { myUndoStack } from "@/lib/actions";
-import { can } from "@/lib/permissions";
+import { can, seesWholePlan } from "@/lib/permissions";
 import { monthsBetween, monthLabel, quarterGroups, periodLabel, kc, pct } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
 import { PlanSwitcher } from "@/components/PlanSwitcher";
@@ -21,19 +21,20 @@ export default async function PlanPage({
 }) {
   const me = await currentPrincipal();
   if (!me) redirect("/prihlaseni");
+  if (!me.active) redirect("/prihlaseni?error=Inactive");
 
   const user = await getUser(me.id);
   if (!user) redirect("/prihlaseni");
 
   const sp = await searchParams;
-  const allPlans = await getPlans();
-  const planId = (sp.plan && allPlans.some((p) => p.id === sp.plan) ? sp.plan : null) ?? (await defaultPlanId());
+  const allPlans = await getVisiblePlans(me);
+  const planId = pickPlan(allPlans, sp.plan);
 
   if (!planId) {
     return (
       <Chrome active="plan" user={{ name: user.name, email: user.email, role: user.role }}>
         <div className="banner info">
-          <span><b>Zatím tu není žádný plán.</b> Založte ho v <a href="/nastaveni">Nastavení</a>.</span>
+          <span><b>Nemáte otevřený žádný plán.</b> Buď zatím žádný neexistuje, nebo vám k němu administrátor ještě nepřidělil přístup.</span>
         </div>
       </Chrome>
     );
@@ -44,13 +45,19 @@ export default async function PlanPage({
   const quarters = quarterGroups(months);
   const periodName = periodLabel(plan.periodStart, plan.periodEnd);
 
-  const [rows, campaigns, undo, reach, tgs] = await Promise.all([
+  const [rows, allCampaigns, undo, reach, tgs] = await Promise.all([
     getPlanRows(me, planId),
     getCampaignTree(planId),
     myUndoStack(),
-    getReachSummary(planId),
+    getReachSummary(me, planId),
     getTargetGroups(),
   ]);
+
+  // kdo vidí jen výsek plánu, nesmí ani přes prázdné bloky poznat, co dalšího
+  // v plánu je — bloky bez jediné viditelné taktiky se mu nepošlou
+  const campaigns = seesWholePlan(me, planId)
+    ? allCampaigns
+    : allCampaigns.filter((c) => rows.some((r) => r.campaignId === c.id));
 
   const canEditPlan = can(me, "write", {
     area: "plan", mediaType: null, planId, campaignId: null, month: null,
@@ -90,6 +97,8 @@ export default async function PlanPage({
       </div>
 
       <ReachPanel
+        planId={planId}
+        showCalculator={me.role !== "CLIENT"}
         months={reach.months}
         total={reach.total}
         universe={reach.universe}

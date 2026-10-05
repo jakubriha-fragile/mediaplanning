@@ -3,11 +3,11 @@ import { db } from "@/db";
 import {
   campaigns, messageLines, tactics, tacticBudgets, actualSpends,
   accountNotes, metrics, metricTargets, metricActuals, users,
-  clients, plans, targetGroups, reachCurves, duplications,
+  clients, plans, targetGroups, reachCurves, duplications, channelTypeEnum,
   type ChannelType, type PlanUnit,
 } from "@/db/schema";
 import { monthsBetween } from "@/lib/period";
-import { can, type Principal } from "@/lib/permissions";
+import { can, canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
 import {
   derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey,
   type Curve, type Derived,
@@ -55,11 +55,24 @@ export async function getPlan(planId: string) {
   return row ?? null;
 }
 
-/** Když uživatel nic nevybral: poslední plán, který právě běží, jinak nejnovější. */
-export async function defaultPlanId(): Promise<string | null> {
+/**
+ * Plány, které uživatel smí otevřít. Stránky berou nabídku plánů VŽDY odsud —
+ * getPlans() vrací i plány cizích klientů a sám nic nefiltruje.
+ */
+export async function getVisiblePlans(me: Principal | null) {
   const all = await getPlans();
-  if (!all.length) return null;
-  return (all.find((p) => p.status === "live") ?? all[all.length - 1]).id;
+  return all.filter((p) => canSeePlan(me, p.id));
+}
+
+/** Když uživatel nic nevybral: poslední plán, který právě běží, jinak nejnovější. */
+export function defaultPlanId(visible: Array<{ id: string; status: string }>): string | null {
+  if (!visible.length) return null;
+  return (visible.find((p) => p.status === "live") ?? visible[visible.length - 1]).id;
+}
+
+/** Vybraný plán z adresy, pokud ho uživatel smí vidět; jinak výchozí. */
+export function pickPlan(visible: Array<{ id: string; status: string }>, wanted?: string): string | null {
+  return (wanted && visible.some((p) => p.id === wanted) ? wanted : null) ?? defaultPlanId(visible);
 }
 
 export async function getTargetGroups() {
@@ -98,6 +111,38 @@ async function crossContext(planTargetGroupId: string | null): Promise<CrossCont
     },
     dup,
   };
+}
+
+// --------------------------------------------------- koeficienty duplikace
+
+export type DuplicationRow = {
+  typeA: ChannelType;
+  typeB: ChannelType;
+  coef: number;
+  defaultCoef: number;
+  source: string;
+  /** true = hodnota je vlastní, ne výchozí */
+  custom: boolean;
+};
+
+/** Celá matice dvojic nosičů: výchozí hodnoty přebité tím, co je v databázi. */
+export async function getDuplicationRows(): Promise<DuplicationRow[]> {
+  const rows = await db.select().from(duplications);
+  const types = channelTypeEnum.enumValues;
+  const out: DuplicationRow[] = [];
+  for (let i = 0; i < types.length; i++) {
+    for (let j = i; j < types.length; j++) {
+      const key = dupKey(types[i], types[j]);
+      const [typeA, typeB] = key.split("|") as [ChannelType, ChannelType];
+      const own = rows.find((r) => dupKey(r.typeA, r.typeB) === key);
+      const def = DEFAULT_DUPLICATION[key] ?? 1;
+      // seed ukládá do databáze i výchozí hodnoty, takže „vlastní" je jen to,
+      // co se od výchozí hodnoty opravdu liší
+      const custom = !!own && Math.abs(own.coef - def) > 1e-9;
+      out.push({ typeA, typeB, coef: own?.coef ?? def, defaultCoef: def, source: own?.source ?? "", custom });
+    }
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------- plán
@@ -156,10 +201,12 @@ export type PlanCell = Derived & {
 
 export async function getPlanRows(me: Principal, planId: string) {
   const plan = await getPlan(planId);
-  if (!plan) return [];
+  if (!plan || !canSeePlan(me, planId)) return [];
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
   const ctx = await crossContext(plan.targetGroupId);
-  const { rows, budgets, spends } = await loadPlan(planId);
+  const loaded = await loadPlan(planId);
+  const { budgets, spends } = loaded;
+  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }));
 
   return rows.map((r) => {
     const universe = ctx.universeOf(r.targetGroupId);
@@ -242,6 +289,8 @@ export type ReachSummary = {
   net: number;
   gross: number;
   overlap: number;
+  /** čistý zásah při nezávislosti (k = 1) — srovnání jako v kalkulačce */
+  independent: number;
   people: number;
   grp: number;
   impressions: number;
@@ -256,7 +305,7 @@ export type ReachSummary = {
  * médii, jinak by roční zásah vyšel přes sto procent. Je to modelový odhad,
  * ne měření; před sdílením s klientem patří validovat media specialistou.
  */
-export async function getReachSummary(planId: string): Promise<{
+export async function getReachSummary(me: Principal, planId: string): Promise<{
   months: ReachSummary[];
   total: ReachSummary;
   universe: number;
@@ -264,14 +313,19 @@ export async function getReachSummary(planId: string): Promise<{
 }> {
   const plan = await getPlan(planId);
   const empty: ReachSummary = {
-    month: "", net: 0, gross: 0, overlap: 0, people: 0,
+    month: "", net: 0, gross: 0, overlap: 0, independent: 0, people: 0,
     grp: 0, impressions: 0, budget: 0, byType: [],
   };
   if (!plan) return { months: [], total: empty, universe: 0, hasUniverse: false };
 
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
   const ctx = await crossContext(plan.targetGroupId);
-  const { rows, budgets } = await loadPlan(planId);
+  const loaded = await loadPlan(planId);
+  const { budgets } = loaded;
+  // jen taktiky, které uživatel vidí — jinak by souhrn prozradil zbytek plánu
+  const rows = canSeePlan(me, planId)
+    ? loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }))
+    : [];
   const universe = ctx.universeOf(null);
 
   const perMonth: ReachSummary[] = months.map((m) => {
@@ -317,6 +371,7 @@ export async function getReachSummary(planId: string): Promise<{
       net: c.net,
       gross: c.gross,
       overlap: c.overlap,
+      independent: c.independent,
       people: c.net * universe,
       grp: byType.reduce((s, b) => s + b.grp, 0),
       impressions,
@@ -351,6 +406,7 @@ export async function getReachSummary(planId: string): Promise<{
       net: tc.net,
       gross: tc.gross,
       overlap: tc.overlap,
+      independent: tc.independent,
       people: tc.net * universe,
       grp: totalByType.reduce((s, b) => s + b.grp, 0),
       impressions: perMonth.reduce((s, m) => s + m.impressions, 0),
@@ -366,9 +422,11 @@ export async function getReachSummary(planId: string): Promise<{
 
 export async function getPerfRows(me: Principal, planId: string) {
   const plan = await getPlan(planId);
-  if (!plan) return [];
+  if (!plan || !canSeePlan(me, planId)) return [];
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
-  const { rows, budgets, spends, notes, mets, targets, mActuals } = await loadPlan(planId);
+  const loaded = await loadPlan(planId);
+  const { budgets, spends, notes, mets, targets, mActuals } = loaded;
+  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }));
 
   return rows.map((r) => ({
     id: r.tacticId,

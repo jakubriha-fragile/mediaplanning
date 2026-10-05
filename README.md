@@ -148,9 +148,21 @@ jednotlivým médiem a sto procenty.
 
 > **Je to modelový odhad, ne měření.** Přesná deduplikace vyžaduje single-source
 > panelová data. Universa, křivky zásahu i duplikační koeficienty jsou zatím
-> **výchozí hodnoty odvozené z veřejné demografie** — upravíte je v *Nastavení*
+> **výchozí hodnoty odvozené z veřejné demografie** — koeficienty duplikace upravíte v *Kalkulačce zásahu*, universa v *Nastavení*,
 > a před prvním použitím u klienta patří zkalibrovat na panelový zdroj
 > (Nielsen Admosphere, SKMO) a nechat validovat media specialistou.
+
+### Kalkulačka zásahu
+
+Samostatná položka menu (klient ji nevidí). Zásahy nosičů se dají **načíst
+z libovolného plánu** a období (celé, nebo jeden měsíc) a pak upravovat ručně
+— „co když přidám rádio". Do plánu se nic nezapisuje. Ukazuje kombinaci krok
+za krokem, srovnání s nezávislostí (k = 1) a s naivním součtem.
+
+Níž je **dopočet koeficientu z naměřených dat**: k = (R_A + R_B − R_A+B) / (R_A × R_B),
+který jde uložit k dané dvojici nosičů, a **tabulka všech koeficientů** — upravit
+je smí administrátor a plánovač, změna platí pro všechny plány a zapíše se do
+historie i se zdrojem. Na rozdíl od kalkulačky v Excelu nezáleží na pořadí médií.
 
 ---
 
@@ -194,11 +206,14 @@ externista jen na Vánoce, jen prosinec:
   (externista, Q4 2026, *, Vánoční katalog, 2026-12, actuals, write)
 ```
 
-Kontrola běží **na serveru u každého zápisu** (`src/lib/actions.ts`).
-Zašedlá pole v rozhraní jsou pohodlí, ne ochrana.
+Kontrola běží **na serveru u každého zápisu** (`src/lib/actions.ts`) **i čtení**.
+Zašedlá pole v rozhraní jsou pohodlí, ne ochrana. Klient vidí jen plány, na které
+má grant — ostatní plány ani jejich názvy se mu nepošlou, ani na přímý odkaz.
+V plánu vidí jen taktiky, na jejichž typ média a kampaň má grant (rozměr měsíce
+řádky neskrývá), a souhrny se počítají jen z nich.
 
 ```bash
-npm run test:perms    # 22 testů včetně scénářů ze zadání a izolace plánů
+npm run test:perms    # 33 testů včetně scénářů ze zadání, izolace plánů a čtení
 npm test              # oprávnění i cross-mediální přepočty
 ```
 
@@ -221,11 +236,10 @@ Poctivý seznam, aby nepřekvapil:
 
 - **Benchmarky** — zatím se neukládá historie uzavřených plánů ani externí zdroj.
 - **Import z XLSX** — data se zatím nahrávají seedem, ne přes rozhraní.
-- **Kalibrace modelu zásahu** — křivky a duplikace jdou upravit v databázi,
-  rozhraní pro ně zatím chybí (cílové skupiny a universa editovatelné jsou).
+- **Kalibrace křivek zásahu** — jdou upravit jen v databázi (koeficienty duplikace,
+  cílové skupiny a universa editovatelné jsou).
 - **Export do XLSX** — zadání §9.
 - **Podklady a poznámky** — tabulky v databázi jsou, rozhraní chybí.
-- **Přidávání linek sdělení** — akce `createMessageLine` existuje, tlačítko v UI ne.
 - **Migrace** — projekt používá `db:push`. Před produkčním provozem přejděte
   na `drizzle-kit generate` a verzované migrace.
 

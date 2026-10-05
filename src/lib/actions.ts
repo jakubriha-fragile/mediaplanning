@@ -15,7 +15,7 @@ import { and, eq, desc, asc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
-  tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets,
+  tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, duplications,
   metrics, metricTargets, actualSpends, metricActuals, accountNotes, grants,
   users, changeLog,
   channelTypeEnum, planUnitEnum, mediaTypeEnum,
@@ -24,9 +24,9 @@ import {
 import { currentPrincipal } from "@/lib/auth";
 import { assertCan, canManageUsers, PermissionError } from "@/lib/permissions";
 import { monthLabel, monthsBetween, periodLabel, shiftYears, kc, num } from "@/lib/period";
-import { derive, isGrpPriced } from "@/lib/crossmedia";
+import { derive, isGrpPriced, dupKey, DEFAULT_DUPLICATION, K_MIN, K_MAX } from "@/lib/crossmedia";
 import {
-  pushUndo, popUndo, listUndo, snapshotPositions, snapshotCampaignOrder,
+  pushUndo, popUndo, peekUndo, listUndo, snapshotPositions, snapshotCampaignOrder,
   undoCreatedTactic, undoCreatedCampaign, undoCreatedLine, type UndoOp,
 } from "@/lib/undo";
 
@@ -61,6 +61,17 @@ async function tacticCoords(tacticId: string) {
     .limit(1);
   if (!row) throw new Error("Taktika neexistuje");
   return row;
+}
+
+/** Taktiky jednoho plánu v pořadí, jak jdou v tabulce. */
+async function planTacticOrder(planId: string) {
+  return db
+    .select({ id: tactics.id, position: tactics.position, messageLineId: tactics.messageLineId })
+    .from(tactics)
+    .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
+    .innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
+    .where(eq(campaigns.planId, planId))
+    .orderBy(asc(tactics.position));
 }
 
 /** Ke které kampani patří který plán. */
@@ -467,6 +478,9 @@ export async function setUserActive(userId: string, active: boolean): Promise<Re
 
 /** Posledních N záznamů historie pro výpis ve správě. */
 export async function recentChanges(limit = 40) {
+  // soubor je "use server", takže tohle je veřejně volatelná akce — bez
+  // kontroly by kdokoli přihlášený dostal historii změn všech klientů
+  if (!canManageUsers(await currentPrincipal())) return [];
   return db
     .select({
       id: changeLog.id,
@@ -507,6 +521,9 @@ export async function updateTactic(raw: z.input<typeof tacticPatch>): Promise<Re
     if (data.messageLineId) {
       const [line] = await db.select().from(messageLines).where(eq(messageLines.id, data.messageLineId));
       if (!line) throw new Error("Linka sdělení neexistuje");
+      if ((await campaignPlan(line.campaignId)) !== before.planId) {
+        throw new PermissionError("Taktiku nejde přeřadit do jiného plánu.");
+      }
       if (line.campaignId !== before.campaignId) {
         assertCan(me, "write", { area: "plan", mediaType: before.mediaType, planId: before.planId, campaignId: line.campaignId, month: null });
       }
@@ -615,10 +632,9 @@ export async function moveTactic(raw: {
     const before = await tacticCoords(raw.tacticId);
     assertCan(me, "write", { area: "plan", mediaType: before.mediaType, planId: before.planId, campaignId: before.campaignId, month: null });
 
-    const all = await db
-      .select({ id: tactics.id, position: tactics.position, messageLineId: tactics.messageLineId })
-      .from(tactics)
-      .orderBy(asc(tactics.position));
+    // jen taktiky tohoto plánu: pořadí se porovnává vždy uvnitř plánu a
+    // přečíslování napříč plány by přes Zpět přepsalo cizí přesuny
+    const all = await planTacticOrder(before.planId);
     const moving = all.find((t) => t.id === raw.tacticId);
     if (!moving) throw new Error("Taktika neexistuje");
 
@@ -633,6 +649,10 @@ export async function moveTactic(raw: {
         .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
         .where(eq(tactics.id, raw.targetTacticId));
       targetCampaignId = row?.campaignId ?? null;
+    }
+
+    if (targetCampaignId && (await campaignPlan(targetCampaignId)) !== before.planId) {
+      throw new PermissionError("Taktiku nejde přesunout do jiného plánu.");
     }
 
     let newLineId = moving.messageLineId;
@@ -671,7 +691,7 @@ export async function moveTactic(raw: {
     }
 
     await pushUndo(me!.id, `Přesun taktiky ${before.channel}`, [
-      await snapshotPositions(),
+      await snapshotPositions(before.planId),
       { t: "tactic", tacticId: moving.id, channel: before.channel, mediaType: before.mediaType, messageLineId: moving.messageLineId },
     ]);
 
@@ -726,6 +746,9 @@ export async function moveCampaign(raw: {
 
     const moving = all.find((c) => c.id === raw.campaignId);
     if (!moving || raw.campaignId === raw.targetCampaignId) return { ok: true };
+    if (!all.some((c) => c.id === raw.targetCampaignId)) {
+      throw new PermissionError("Blok nejde přesunout do jiného plánu.");
+    }
 
     await pushUndo(me!.id, `Přesun bloku ${moving.name}`, [await snapshotCampaignOrder(planId)]);
 
@@ -954,6 +977,50 @@ export async function createMessageLine(raw: z.input<typeof newLine>): Promise<R
 
 // ----------------------------------------------------------------- vrácení zpět
 
+/**
+ * Vrácení zpět je taky zápis. Krok uložený včera nesmí projít, když mezitím
+ * administrátor grant odebral — proto se každá operace ověří znovu proti
+ * dnešním oprávněním, stejně jako by ji uživatel dělal ručně.
+ */
+async function assertCanUndo(me: NonNullable<Awaited<ReturnType<typeof currentPrincipal>>>, ops: UndoOp[]) {
+  const tactic = async (tacticId: string, area: "plan" | "actuals", month: string | null) => {
+    const c = await tacticCoords(tacticId).catch(() => null);
+    if (!c) return; // taktika mezitím zmizela, zápis do ní nic neudělá
+    assertCan(me, "write", { area, mediaType: c.mediaType, planId: c.planId, campaignId: c.campaignId, month });
+  };
+  const metric = async (metricId: string, area: "plan" | "actuals", month: string) => {
+    const [m] = await db.select({ tacticId: metrics.tacticId }).from(metrics).where(eq(metrics.id, metricId));
+    if (m) await tactic(m.tacticId, area, month);
+  };
+  const campaign = async (campaignId: string) => {
+    const planId = await campaignPlan(campaignId).catch(() => null);
+    if (planId) assertCan(me, "write", { area: "plan", mediaType: null, planId, campaignId, month: null });
+  };
+  const line = async (lineId: string) => {
+    const [l] = await db.select({ campaignId: messageLines.campaignId }).from(messageLines).where(eq(messageLines.id, lineId));
+    if (l) await campaign(l.campaignId);
+  };
+
+  for (const op of ops) {
+    switch (op.t) {
+      case "budget": await tactic(op.tacticId, "plan", op.month); break;
+      case "actual": await tactic(op.tacticId, "actuals", op.month); break;
+      case "note": await tactic(op.tacticId, "actuals", op.month); break;
+      case "metricTarget": await metric(op.metricId, "plan", op.month); break;
+      case "metricActual": await metric(op.metricId, "actuals", op.month); break;
+      case "tactic":
+        await tactic(op.tacticId, "plan", null);
+        await line(op.messageLineId);
+        break;
+      case "dropTactic": await tactic(op.id, "plan", null); break;
+      case "positions": for (const it of op.items) await tactic(it.id, "plan", null); break;
+      case "line": case "dropLine": await line(op.id); break;
+      case "campaignPositions": for (const it of op.items) await campaign(it.id); break;
+      case "dropCampaign": await campaign(op.id); break;
+    }
+  }
+}
+
 /** Posledních 10 kroků aktuálního uživatele, nejnovější první. */
 export async function myUndoStack() {
   const me = await currentPrincipal();
@@ -967,6 +1034,9 @@ export async function undoLast(): Promise<Result & { label?: string }> {
   try {
     const me = await currentPrincipal();
     if (!me) throw new PermissionError("Nejste přihlášen.");
+    const ops = await peekUndo(me.id);
+    if (!ops) return { ok: false, error: "Není co vrátit." };
+    await assertCanUndo(me, ops);
     const label = await popUndo(me.id);
     if (!label) return { ok: false, error: "Není co vrátit." };
     await log(me.id, "plan", [`Vráceno zpět: ${label}`]);
@@ -1323,6 +1393,83 @@ export async function setRowUnit(raw: {
     await pushUndo(me!.id, items[0], undo);
     await log(me!.id, "plan", items);
     revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ------------------------------------------------- koeficienty duplikace
+
+const dupInput = z.object({
+  typeA: z.enum(channelTypeEnum.enumValues),
+  typeB: z.enum(channelTypeEnum.enumValues),
+  coef: z.number().min(K_MIN).max(K_MAX),
+  source: z.string().max(200).default(""),
+});
+
+/**
+ * Koeficienty platí pro VŠECHNY plány všech klientů — proto je smí měnit jen
+ * ten, kdo smí měnit plány napříč (administrátor nebo plánovač), stejně jako
+ * universa cílových skupin.
+ */
+function assertCanCalibrate(me: Awaited<ReturnType<typeof currentPrincipal>>) {
+  if (!canManageUsers(me)) {
+    assertCan(me, "write", { area: "plan", mediaType: null, planId: null, campaignId: null, month: null });
+  }
+}
+
+/**
+ * Dvojice se ukládá v pořadí, jaké skládá dupKey(). Unikátní index je na
+ * (type_a, type_b), takže TV|Digital a Digital|TV by jinak byly dva řádky
+ * a vyhrál by náhodně jeden z nich.
+ */
+function sortedPair(a: string, b: string) {
+  const [typeA, typeB] = [a, b].sort() as [ChannelType, ChannelType];
+  return { typeA, typeB };
+}
+
+export async function saveDuplication(raw: z.input<typeof dupInput>): Promise<Result> {
+  try {
+    const data = dupInput.parse(raw);
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+
+    const pair = sortedPair(data.typeA, data.typeB);
+    const [before] = await db.select().from(duplications)
+      .where(and(eq(duplications.typeA, pair.typeA), eq(duplications.typeB, pair.typeB)));
+    const old = before?.coef ?? DEFAULT_DUPLICATION[dupKey(pair.typeA, pair.typeB)] ?? 1;
+
+    await db.insert(duplications).values({ ...pair, coef: data.coef, source: data.source })
+      .onConflictDoUpdate({
+        target: [duplications.typeA, duplications.typeB],
+        set: { coef: data.coef, source: data.source },
+      });
+    await log(me!.id, "plan", [
+      `Koeficient ${pair.typeA}×${pair.typeB}: ${num(old)} → ${num(data.coef)}${data.source ? ` (${data.source})` : ""}`,
+    ]);
+    revalidatePath("/");
+    revalidatePath("/kalkulacka");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Vrátí dvojici na výchozí hodnotu — smaže vlastní řádek. */
+export async function resetDuplication(raw: { typeA: string; typeB: string }): Promise<Result> {
+  try {
+    const data = dupInput.pick({ typeA: true, typeB: true }).parse(raw);
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    const pair = sortedPair(data.typeA, data.typeB);
+    // pro jistotu obě pořadí — řádky uložené dřív, než se pořadí sjednotilo
+    for (const [a, b] of [[pair.typeA, pair.typeB], [pair.typeB, pair.typeA]] as const) {
+      await db.delete(duplications).where(and(eq(duplications.typeA, a), eq(duplications.typeB, b)));
+    }
+    await log(me!.id, "plan", [`Koeficient ${pair.typeA}×${pair.typeB} vrácen na výchozí hodnotu`]);
+    revalidatePath("/");
+    revalidatePath("/kalkulacka");
     return { ok: true };
   } catch (e) {
     return fail(e);

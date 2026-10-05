@@ -28,8 +28,11 @@ function connect(): Db {
     );
   }
 
-  // prepare: false je nutné kvůli poolovanému připojení přes pgBouncer
-  const conn = globalForDb.conn ?? postgres(url, { max: 5, prepare: false });
+  // prepare: false je nutné kvůli poolovanému připojení přes pgBouncer.
+  // DATABASE_POOL_MAX je jen pro lokální testy proti PGlite, které má jediný
+  // backend a souběžná spojení si pletou; v produkci nenastavovat.
+  const max = Number(process.env.DATABASE_POOL_MAX) || 5;
+  const conn = globalForDb.conn ?? postgres(url, { max, prepare: false });
   const db = drizzle(conn, { schema });
 
   if (process.env.NODE_ENV !== "production") {

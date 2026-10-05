@@ -120,6 +120,17 @@ export async function applyOps(ops: UndoOp[]) {
   }
 }
 
+/** Operace posledního kroku bez provedení — aby šlo nejdřív ověřit oprávnění. */
+export async function peekUndo(userId: string): Promise<UndoOp[] | null> {
+  const [entry] = await db
+    .select({ ops: undoEntries.ops })
+    .from(undoEntries)
+    .where(eq(undoEntries.userId, userId))
+    .orderBy(desc(undoEntries.ts))
+    .limit(1);
+  return entry ? (JSON.parse(entry.ops) as UndoOp[]) : null;
+}
+
 export async function popUndo(userId: string) {
   const [entry] = await db
     .select()
@@ -133,11 +144,14 @@ export async function popUndo(userId: string) {
   return entry.label;
 }
 
-/** Snímek celého pořadí — potřeba před přetažením, které pořadí přepisuje. */
-export async function snapshotPositions(): Promise<UndoOp> {
+/** Snímek pořadí taktik jednoho plánu — potřeba před přetažením, které pořadí přepisuje. */
+export async function snapshotPositions(planId: string): Promise<UndoOp> {
   const rows = await db
     .select({ id: tactics.id, position: tactics.position, messageLineId: tactics.messageLineId })
-    .from(tactics);
+    .from(tactics)
+    .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
+    .innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
+    .where(eq(campaigns.planId, planId));
   return { t: "positions", items: rows };
 }
 

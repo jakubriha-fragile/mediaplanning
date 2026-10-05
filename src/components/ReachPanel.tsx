@@ -28,8 +28,11 @@ const MIN_CONTACTS = [2, 3, 4, 5] as const;
  * Panel ukazuje obojí vedle sebe, aby bylo poznat, kolik se počítá dvakrát.
  */
 export function ReachPanel({
-  months, total, universe, hasUniverse, targetGroupName,
+  planId, showCalculator, months, total, universe, hasUniverse, targetGroupName,
 }: {
+  planId: string;
+  /** klient kalkulačku nevidí — koeficienty jsou know-how agentury */
+  showCalculator: boolean;
   months: ReachSummary[];
   total: ReachSummary;
   universe: number;
@@ -70,6 +73,8 @@ export function ReachPanel({
           {targetGroupName} · universum {big(universe)} osob
         </span>
         <span className="spacer" />
+        {showCalculator && <a className="btn" href={`/kalkulacka?plan=${planId}`} style={{ fontSize: 11, padding: "2px 9px" }}
+          title="Otevře Sainsburyho kalkulačku s nosiči tohoto plánu — co kdyby">Otevřít v kalkulačce</a>}
         <span className="share">
           čistý zásah za období <b style={{ color: "var(--brand-ink)" }}>{pct(total.net)}</b>
           {" "}({big(total.people)} osob) · {minC}+ {pct(totalEff)} · překryv {pct(total.overlap)}
@@ -101,6 +106,11 @@ export function ReachPanel({
               <div className="k">Součet médií</div>
               <div className="v num">{pct(total.gross)}</div>
               <div className="d">kdyby se nepřekrývala</div>
+            </div>
+            <div className="kpi">
+              <div className="k">Při nezávislosti</div>
+              <div className="v num">{pct(total.independent)}</div>
+              <div className="d">k = 1 pro všechny dvojice</div>
             </div>
             <div className="kpi">
               <div className="k">Překryv</div>
@@ -209,8 +219,9 @@ export function ReachPanel({
             <br />
             <b>Jde o modelový odhad, ne o měření.</b> Přesná deduplikace vyžaduje single-source
             panelová data. Křivky zásahu i duplikační koeficienty jsou zatím výchozí hodnoty —
-            upravíte je v <a href="/nastaveni">Nastavení</a> a před prvním použitím u klienta patří
-            zkalibrovat na panelový zdroj a nechat validovat media specialistou.
+            koeficienty se upravují v {showCalculator ? <a href="/kalkulacka">Kalkulačce zásahu</a> : "Kalkulačce zásahu"}{" "}
+            a před prvním použitím u klienta patří zkalibrovat na panelový zdroj a nechat validovat
+            media specialistou.
           </div>
         </>
       )}

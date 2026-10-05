@@ -7,7 +7,7 @@
  */
 import {
   derive, combineReach, incrementalReach, reachFromGrp, grpForReach,
-  effectiveReach, duplicationOf, DEFAULT_CURVE, isGrpPriced,
+  effectiveReach, duplicationOf, DEFAULT_CURVE, isGrpPriced, kFromMeasured,
 } from "../src/lib/crossmedia";
 
 let failed = 0;
@@ -131,6 +131,37 @@ ok("frekvence 4: 3+ ≈ 76,5 % zasažených", Math.abs(effectiveReach(1, 4, 3) -
 // netruncovaný vzorec tu dával 0,191 — dvojnásobek
 ok("nízká frekvence 1,5: 3+ kolem 10 %, ne 19 %", Math.abs(effectiveReach(1, 1.5, 3) - 0.101) < 0.005);
 ok("efektivní zásah nepřekročí zásah", effectiveReach(0.6, 30, 3) <= 0.6);
+
+console.log("\nSainsbury — shoda s kalkulačkou v Excelu");
+{
+  // list „Vstupy" kalkulačky Sainsbury: TV 69 %, Online 45 %, OOH 30 %, Rádio 20 %
+  const parts = [
+    { channelType: "TV" as const, reach: 0.69 }, { channelType: "Digital" as const, reach: 0.45 },
+    { channelType: "OOH" as const, reach: 0.30 }, { channelType: "Rádio" as const, reach: 0.20 },
+  ];
+  const k: Record<string, number> = {
+    [dupKey("TV", "Digital")]: 0.9, [dupKey("TV", "OOH")]: 0.95, [dupKey("Digital", "OOH")]: 0.95,
+  };
+  const c = combineReach(parts, k);
+  ok("výsledek 93,22 % jako v Excelu", close(c.net, 0.9322346, 1e-6), `${c.net}`);
+  ok("nezávislost 90,45 % jako v Excelu", close(c.independent, 0.90452, 1e-6), `${c.independent}`);
+  ok("kroky: druhý krok 86,06 %", close(c.steps[1].cumulative, 0.86055, 1e-6));
+  ok("kroky: poslední kumulativ = výsledek", c.steps[c.steps.length - 1].cumulative === c.net);
+  ok("kroky: nezávislost v posledním kroku = independent", close(c.steps[3].independent, c.independent, 1e-12));
+  ok("kroky: přírůstky dají dohromady čistý zásah",
+     close(c.steps.reduce((s, x) => s + x.increment, 0), c.net, 1e-12));
+}
+
+console.log("\nZpětný dopočet koeficientu");
+{
+  const r = kFromMeasured(0.69, 0.45, 0.83);
+  ok("TV 69 % + Online 45 % → 83 % dá k ≈ 0,998", r.ok && close(r.k, 0.998389694, 1e-6));
+  const back = r.ok ? combineReach([{ channelType: "TV", reach: 0.69 }, { channelType: "Digital", reach: 0.45 }],
+    { [dupKey("TV", "Digital")]: r.k }).net : 0;
+  ok("dopočtené k vrátí naměřený společný zásah", close(back, 0.83, 1e-9), `${back}`);
+  ok("společný zásah pod silnějším médiem se odmítne", !kFromMeasured(0.69, 0.45, 0.6).ok);
+  ok("společný zásah nad součtem se odmítne", !kFromMeasured(0.3, 0.2, 0.6).ok);
+}
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");
 process.exit(failed ? 1 : 0);

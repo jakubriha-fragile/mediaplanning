@@ -25,6 +25,10 @@ const ERRORS: Record<string, { title: string; detail: string }> = {
       "Požádejte administrátora o pozvánku.",
   },
   Verification: { title: "Odkaz vypršel", detail: "Zkuste se přihlásit znovu." },
+  Inactive: {
+    title: "Účet je deaktivovaný",
+    detail: "Administrátor vám přístup pozastavil. Pokud jde o omyl, ozvěte se mu.",
+  },
   Default: { title: "Přihlášení se nezdařilo", detail: "Zkuste to prosím znovu." },
 };
 
@@ -34,9 +38,11 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const session = await auth();
-  if (session?.user) redirect("/");
-
   const { error } = await searchParams;
+  // deaktivovaný uživatel má pořád platnou session — bez výjimky by ho
+  // stránky posílaly sem a odsud zpátky na „/" pořád dokola
+  if (session?.user && error !== "Inactive") redirect("/");
+
   const err = error ? (ERRORS[error] ?? ERRORS.Default) : null;
 
   // Bootstrap pomůcka: dokud se nedá přihlásit, ukážeme NÁZVY chybějících

@@ -6,7 +6,7 @@
  * Ověřuje scénář ze zadání §5.2: klient BENU smí vyplňovat skutečné čerpání
  * jen u Paid. U Owned a u plánu musí narazit.
  */
-import { can, type Principal } from "../src/lib/permissions";
+import { can, canSeePlan, canSeeTactic, seesWholePlan, type Principal } from "../src/lib/permissions";
 
 let failed = 0;
 function check(label: string, actual: boolean, expected: boolean) {
@@ -87,6 +87,26 @@ check("NESMÍ čerpání v plánu Q4 2026", can(naRok2027, "write", { area: "act
 check("NESMÍ operaci napříč plány", can(naRok2027, "write", { area: "actuals", planId: null, mediaType: "Paid", campaignId: CAMP_BRAND, month: "2027-03" }), false);
 check("klient s grantem bez plánu smí v obou plánech", can(klient, "write", { area: "actuals", planId: PLAN_2027, mediaType: "Paid", campaignId: CAMP_BRAND, month: "2027-05" }), true);
 check("administrátor projde i přes rozměr plánu", can(admin, "write", { area: "plan", planId: PLAN_2027, mediaType: "Paid", campaignId: CAMP_BRAND, month: "2027-07" }), true);
+
+console.log("\nČtení — co klient vůbec uvidí");
+{
+  const paid2027: Principal = {
+    id: "u-p27", role: "CLIENT", active: true,
+    grants: [{ area: "actuals", level: "write", mediaType: "Paid", planId: PLAN_2027, campaignId: null, month: null }],
+  };
+  const t = (planId: string, mediaType: "Paid" | "Owned" | "Earned", campaignId = CAMP_BRAND) => ({ planId, mediaType, campaignId });
+  check("klient vidí plán, na který má grant", canSeePlan(paid2027, PLAN_2027), true);
+  check("klient NEVIDÍ plán bez grantu (ani jeho název)", canSeePlan(paid2027, PLAN_2026), false);
+  check("klient vidí Paid taktiku", canSeeTactic(paid2027, t(PLAN_2027, "Paid")), true);
+  check("klient NEVIDÍ Owned taktiku", canSeeTactic(paid2027, t(PLAN_2027, "Owned")), false);
+  check("klient s výsekem NEVIDÍ celý plán (souhrny)", seesWholePlan(paid2027, PLAN_2027), false);
+  check("externista vidí jen svou kampaň", canSeeTactic(externista, t(PLAN_2026, "Paid", CAMP_VANOCE)), true);
+  check("externista NEVIDÍ jinou kampaň", canSeeTactic(externista, t(PLAN_2026, "Paid", CAMP_BRAND)), false);
+  check("klient s plan/read napříč vidí celý plán", seesWholePlan(klient, PLAN_2026), true);
+  check("account vidí všechny plány", canSeePlan(account, PLAN_2027), true);
+  check("klient bez grantů nevidí nic", canSeePlan({ id: "x", role: "CLIENT", active: true, grants: [] }, PLAN_2026), false);
+  check("deaktivovaný nevidí nic", canSeePlan(vypnuty, PLAN_2026), false);
+}
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");
 process.exit(failed ? 1 : 0);
