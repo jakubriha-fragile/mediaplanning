@@ -267,15 +267,50 @@ export function incrementalReach(
   return Math.max(0, after - before);
 }
 
-/** Efektivní zásah: podíl skupiny zasažený aspoň n×, odhad z Poissonova rozdělení. */
+/**
+ * λ Poissonova rozdělení useknutého v nule, jehož průměr je `frequency`.
+ *
+ * Frekvence je průměr mezi ZASAŽENÝMI — každý z nich má aspoň jeden kontakt.
+ * Kdo by dosadil frekvenci rovnou do Poissona, započítal by i nulové kontakty
+ * a při nízké frekvenci by efektivní zásah vyšel skoro dvojnásobný.
+ * Průměr useknutého rozdělení λ/(1−e^−λ) roste s λ, stačí tedy bisekce.
+ */
+function truncatedLambda(frequency: number): number {
+  if (frequency <= 1) return 0;
+  let lo = 0;
+  let hi = frequency;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (mid / -Math.expm1(-mid) < frequency) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * Efektivní zásah: podíl skupiny zasažený aspoň n×.
+ *
+ * `reach` je čistý zásah (0–1), `frequency` průměrný počet kontaktů na
+ * zasaženého (GRP / 100 / reach). Předpokládá Poissonovo rozdělení kontaktů —
+ * reálné rozdělení bývá šikmější (pár lidí vidí reklamu mnohokrát), takže jde
+ * o modelový odhad, ne měření.
+ */
 export function effectiveReach(reach: number, frequency: number, minContacts = 3): number {
   if (reach <= 0 || frequency <= 0) return 0;
   if (minContacts <= 1) return reach;
-  let cum = 0;
-  let term = Math.exp(-frequency);
+  const lam = truncatedLambda(frequency);
+  if (lam <= 0) return 0;
+  let below = 0;
+  let term = Math.exp(-lam);
   for (let i = 0; i < minContacts; i++) {
-    if (i > 0) term *= frequency / i;
-    cum += term;
+    if (i > 0) term *= lam / i;
+    below += term;
   }
-  return reach * Math.max(0, 1 - cum);
+  const share = (1 - below) / -Math.expm1(-lam);
+  return reach * Math.min(1, Math.max(0, share));
+}
+
+/** Průměrná frekvence mezi zasaženými. GRP 240 při zásahu 60 % = 4 kontakty. */
+export function frequencyOf(grp: number, reach: number): number {
+  return reach > 0 ? grp / 100 / reach : 0;
 }

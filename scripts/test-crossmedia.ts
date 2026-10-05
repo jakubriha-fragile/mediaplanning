@@ -123,6 +123,14 @@ ok("3+ kontakty jsou méně než celkový zásah", effectiveReach(0.6, 4, 3) < 0
 ok("vyšší frekvence zvedá efektivní zásah",
    effectiveReach(0.6, 6, 3) > effectiveReach(0.6, 3, 3));
 ok("1+ kontakt = celý zásah", effectiveReach(0.6, 4, 1) === 0.6);
+ok("frekvence 1 = každý právě jednou, 2+ je nula", effectiveReach(0.6, 1, 2) === 0);
+ok("2+ ≥ 3+ ≥ 4+", effectiveReach(0.6, 3, 2) >= effectiveReach(0.6, 3, 3) &&
+   effectiveReach(0.6, 3, 3) >= effectiveReach(0.6, 3, 4));
+// useknutý Poisson: frekvence 4 ⇒ λ ≈ 3,92, P(≥3 | ≥1) ≈ 0,765
+ok("frekvence 4: 3+ ≈ 76,5 % zasažených", Math.abs(effectiveReach(1, 4, 3) - 0.765) < 0.005);
+// netruncovaný vzorec tu dával 0,191 — dvojnásobek
+ok("nízká frekvence 1,5: 3+ kolem 10 %, ne 19 %", Math.abs(effectiveReach(1, 1.5, 3) - 0.101) < 0.005);
+ok("efektivní zásah nepřekročí zásah", effectiveReach(0.6, 30, 3) <= 0.6);
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");
 process.exit(failed ? 1 : 0);

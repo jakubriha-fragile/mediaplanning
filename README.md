@@ -223,7 +223,6 @@ Poctivý seznam, aby nepřekvapil:
 - **Import z XLSX** — data se zatím nahrávají seedem, ne přes rozhraní.
 - **Kalibrace modelu zásahu** — křivky a duplikace jdou upravit v databázi,
   rozhraní pro ně zatím chybí (cílové skupiny a universa editovatelné jsou).
-- **Efektivní zásah (3+ kontakty)** — spočítaný v `crossmedia.ts`, v rozhraní není.
 - **Export do XLSX** — zadání §9.
 - **Podklady a poznámky** — tabulky v databázi jsou, rozhraní chybí.
 - **Přidávání linek sdělení** — akce `createMessageLine` existuje, tlačítko v UI ne.

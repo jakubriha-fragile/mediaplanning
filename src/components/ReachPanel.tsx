@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ReachSummary } from "@/lib/queries";
 import { kc, big, pct, monthShort } from "@/lib/period";
+import { effectiveReach, frequencyOf } from "@/lib/crossmedia";
 
 const TYPE_COLOR: Record<string, string> = {
   TV: "#382ea8",
@@ -14,6 +15,11 @@ const TYPE_COLOR: Record<string, string> = {
   Vlastní: "#5f8b1f",
   PR: "#b8502a",
 };
+
+const freq = (f: number) => (f ? f.toFixed(1).replace(".", ",") + "×" : "—");
+
+/** Kolik kontaktů už se počítá jako účinný zásah — 3+ je zvyk, ne zákon. */
+const MIN_CONTACTS = [2, 3, 4, 5] as const;
 
 /**
  * Cross-mediální zásah a překryv.
@@ -31,6 +37,7 @@ export function ReachPanel({
   targetGroupName: string;
 }) {
   const [open, setOpen] = useState(true);
+  const [minC, setMinC] = useState<number>(3);
 
   if (!hasUniverse) {
     return (
@@ -43,6 +50,11 @@ export function ReachPanel({
       </div>
     );
   }
+
+  // frekvence napříč médii = všechny kontakty / čistý zásah; efektivní zásah
+  // se počítá z čistého, ne ze součtu médií — jinak by překryv počítal dvakrát
+  const totalFreq = frequencyOf(total.grp, total.net);
+  const totalEff = effectiveReach(total.net, totalFreq, minC);
 
   const live = months.filter((m) => m.net > 0);
   const peak = Math.max(0.01, ...months.map((m) => m.gross));
@@ -60,7 +72,7 @@ export function ReachPanel({
         <span className="spacer" />
         <span className="share">
           čistý zásah za období <b style={{ color: "var(--brand-ink)" }}>{pct(total.net)}</b>
-          {" "}({big(total.people)} osob) · překryv {pct(total.overlap)}
+          {" "}({big(total.people)} osob) · {minC}+ {pct(totalEff)} · překryv {pct(total.overlap)}
         </span>
       </div>
 
@@ -71,6 +83,19 @@ export function ReachPanel({
               <div className="k">Čistý zásah</div>
               <div className="v num">{pct(total.net)}</div>
               <div className="d num">{big(total.people)} osob</div>
+            </div>
+            <div className="kpi">
+              <div className="k">
+                Efektivní zásah{" "}
+                <select value={minC} onChange={(e) => setMinC(Number(e.target.value))}
+                  title="Kolik kontaktů se počítá jako účinný zásah"
+                  style={{ font: "inherit", fontSize: 10.5, border: "1px solid var(--line-strong)",
+                    borderRadius: 3, background: "var(--surface)", color: "var(--ink)", padding: "0 2px" }}>
+                  {MIN_CONTACTS.map((n) => <option key={n} value={n}>{n}+</option>)}
+                </select>
+              </div>
+              <div className="v num">{pct(totalEff)}</div>
+              <div className="d num">{big(totalEff * universe)} osob · frekvence {freq(totalFreq)}</div>
             </div>
             <div className="kpi">
               <div className="k">Součet médií</div>
@@ -101,6 +126,8 @@ export function ReachPanel({
                   <th>Nosič</th>
                   <th className="r">GRP</th>
                   <th className="r">Zásah</th>
+                  <th className="r">Frekvence</th>
+                  <th className="r">Zásah {minC}+</th>
                   <th className="r">Rozpočet</th>
                   <th className="r">Podíl rozpočtu</th>
                   <th style={{ width: "32%" }}>Podíl na zásahu</th>
@@ -116,6 +143,8 @@ export function ReachPanel({
                     </td>
                     <td className="r num">{Math.round(b.grp).toLocaleString("cs-CZ")}</td>
                     <td className="r num">{pct(b.reach)}</td>
+                    <td className="r share num">{freq(frequencyOf(b.grp, b.reach))}</td>
+                    <td className="r num">{pct(effectiveReach(b.reach, frequencyOf(b.grp, b.reach), minC))}</td>
                     <td className="r num">{kc(b.budget)}</td>
                     <td className="r share num">{total.budget ? pct(b.budget / total.budget) : "—"}</td>
                     <td>
@@ -127,7 +156,7 @@ export function ReachPanel({
                   </tr>
                 ))}
                 {!total.byType.length && (
-                  <tr><td colSpan={6} style={{ padding: 18, textAlign: "center", color: "var(--muted)" }}>
+                  <tr><td colSpan={8} style={{ padding: 18, textAlign: "center", color: "var(--muted)" }}>
                     Zatím není co počítat — doplňte do plánu rozpočty nebo GRP.
                   </td></tr>
                 )}
@@ -142,6 +171,7 @@ export function ReachPanel({
                   <tr>
                     <th>Měsíc</th>
                     <th className="r">Čistý zásah</th>
+                    <th className="r">Zásah {minC}+</th>
                     <th className="r">Překryv</th>
                     <th className="r">GRP</th>
                     <th className="r">Rozpočet</th>
@@ -153,6 +183,7 @@ export function ReachPanel({
                     <tr key={m.month}>
                       <td>{monthShort(m.month)}</td>
                       <td className="r num">{m.net ? pct(m.net) : "—"}</td>
+                      <td className="r num">{m.net ? pct(effectiveReach(m.net, frequencyOf(m.grp, m.net), minC)) : "—"}</td>
                       <td className="r share num">{m.overlap ? pct(m.overlap) : "—"}</td>
                       <td className="r num">{m.grp ? Math.round(m.grp).toLocaleString("cs-CZ") : "—"}</td>
                       <td className="r num">{m.budget ? kc(m.budget) : "—"}</td>
@@ -173,6 +204,8 @@ export function ReachPanel({
             <b>Jak se to počítá.</b> Z rozpočtu nebo GRP se přes universum cílové skupiny dopočítají
             impressions, z nich křivkou zásahu dílčí zásah každého nosiče. Ty se pak skládají od
             nejsilnějšího média: každé další přidá svůj zásah minus překryv s tím, co už je pokryté.
+            Efektivní zásah předpokládá Poissonovo rozdělení kontaktů mezi zasaženými; reálné
+            rozdělení bývá šikmější, takže skutečný podíl {minC}+ může vyjít o něco nižší.
             <br />
             <b>Jde o modelový odhad, ne o měření.</b> Přesná deduplikace vyžaduje single-source
             panelová data. Křivky zásahu i duplikační koeficienty jsou zatím výchozí hodnoty —

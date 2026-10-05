@@ -77,7 +77,7 @@ Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení �
 
 ```bash
 npx tsc --noEmit
-npm test                                    # 22 testů oprávnění + 40 cross-média
+npm test                                    # 22 testů oprávnění + 45 cross-média
 npx next build
 env -u DATABASE_URL -u AUTH_SECRET npx next build   # build nesmí potřebovat proměnné
 ```
@@ -103,6 +103,14 @@ vylezly až takhle** — nesetříděné klíče duplikací, zaseknutý model z�
 a nepřepočítané rozpočty po změně nosiče. Žádnou z nich by typecheck nechytil.
 
 ## Nasazení
+
+**Pozor, už se to stalo:** commit se změnou schématu se pushnul bez `db:push`
+a produkce padala na `column "plan_id" does not exist`. Když přibude povinný
+sloupec bez výchozí hodnoty do neprázdné tabulky, `drizzle-kit push` nabídne
+tabulku vyprázdnit — buď to vědomě přijmout a pustit seed, nebo napsat
+migraci, která sloupec nejdřív naplní. Na otázku „created or renamed" volit
+`+ create`, pokud nejde opravdu o přejmenování. `db:push` i seed pouštět
+v interaktivním terminálu, ne přes `!` v Claude Code (nemá stdin).
 
 1. `npm run db:push` proti **produkční** databázi, pokud se měnilo schéma.
    **Nepoolovaný** connection string z Neonu — přes pooler DDL zlobí a zasekne se.
@@ -139,7 +147,6 @@ Technický dluh:
 
 - Import a export XLSX (zadání §9) — data se zatím nahrávají seedem.
 - Rozhraní pro kalibraci křivek zásahu a duplikací (cílové skupiny editovatelné jsou).
-- Efektivní zásah (3+ kontakty) — spočítaný v `crossmedia.ts`, v UI není.
 - Podklady a poznámky — tabulky jsou, rozhraní chybí.
 - Přechod z `db:push` na verzované migrace (`drizzle-kit generate`).
 
