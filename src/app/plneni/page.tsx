@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
 import { getPerfRows, getUser, getVisiblePlans, pickPlan, getPlan } from "@/lib/queries";
 import { myUndoStack } from "@/lib/actions";
-import { monthsBetween, monthLabel, quarterGroups, periodLabel } from "@/lib/period";
+import { planTitle, monthsBetween, monthLabel, quarterGroups, periodLabel } from "@/lib/period";
 import { PlanSwitcher } from "@/components/PlanSwitcher";
 import { Chrome } from "@/components/Chrome";
 import { PerfTable, type PerfRow } from "@/components/PerfTable";
@@ -40,7 +40,7 @@ export default async function PerfPage({
 
   return (
     <Chrome active="plneni" user={{ name: user.name, email: user.email, role: user.role }}
-      title={{ client: plan.clientName, period: periodLabel(plan.periodStart, plan.periodEnd) }}>
+      title={{ client: plan.clientName, period: planTitle(plan) }}>
       <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />
       {me.role === "CLIENT" ? (
         <div className="banner info">

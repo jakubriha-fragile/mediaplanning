@@ -81,13 +81,13 @@ export async function getTargetGroups() {
 
 // ------------------------------------------------------- cross-mediální vstupy
 
-type CrossContext = {
+export type CrossContext = {
   universeOf: (tacticTgId: string | null) => number;
   curveOf: (ct: ChannelType, tacticTgId: string | null) => Curve;
   dup: Record<string, number>;
 };
 
-async function crossContext(planTargetGroupId: string | null): Promise<CrossContext> {
+export async function crossContext(planTargetGroupId: string | null): Promise<CrossContext> {
   const [tgs, curves, dups] = await Promise.all([
     db.select().from(targetGroups),
     db.select().from(reachCurves),
@@ -148,7 +148,7 @@ export async function getDuplicationRows(): Promise<DuplicationRow[]> {
 // ------------------------------------------------------------------- plán
 
 /** Jeden plochý dotaz přes celé období — levnější než N+1 i na ročním plánu. */
-async function loadPlan(planId: string) {
+export async function loadPlan(planId: string) {
   const rows = await db
     .select({
       tacticId: tactics.id,

@@ -152,6 +152,25 @@ jednotlivým médiem a sto procenty.
 > a před prvním použitím u klienta patří zkalibrovat na panelový zdroj
 > (Nielsen Admosphere, SKMO) a nechat validovat media specialistou.
 
+### Přehled
+
+První záložka pro agenturu (klient ji nevidí). Nahoře **hlavní zjištění** dopočítaná
+z dat (rozpočet, zásah, frekvence, přírůstek ostatních médií k TV, kolik rozpočtu
+nemá data o doručení), pod nimi KPI, **zásah v čase** (TV + přírůstek ostatních médií,
+kumulativní zásah), **investice po měsících** podle média, **frekvence s nastavitelnou
+hranicí přehlcení**, **kontakty po blocích** a tabulka bloků jako flowchart. Na konci
+zdroje, předpoklady a otevřené body. Každý graf jde přepnout na tabulku.
+
+### Import strategického plánu z Excelu
+
+```bash
+DATABASE_URL="…" npx tsx scripts/import-strategicky-plan.ts "BENU Strategic Plan 2027.xlsx" --nahradit
+```
+
+Čte týdenní flowchart (měsíce jsou sloučené buňky v hlavičce, „Dec II" patří k prosinci),
+bere *Total Client cost including fee*, u TV TRP a u online imprese. Na konci porovná
+importovaný součet se součtem v Excelu. Data klienta zůstávají mimo repozitář.
+
 ### Kalkulačka zásahu
 
 Samostatná položka menu (klient ji nevidí). Zásahy nosičů se dají **načíst
@@ -177,8 +196,19 @@ jsou jen jiné hodnoty téhož. V ročním plánu jdou **kvartály sbalit** do j
 součtového sloupce.
 
 Plán se drží v adrese (`?plan=…`), takže odkaz na konkrétní plán jde komukoli poslat.
-Tlačítko **+ Další rok** založí plán o rok dál se stejnou strukturou — bloky, sdělení,
-taktiky i ceník se přenesou, **rozpočty a metriky ne**.
+
+Vedle výběru plánu (administrátor a plánovač):
+
+- **+ Nový plán** — název, období (Q1–Q4, celý rok, nebo vlastní od–do i přes přelom
+  roku), výchozí cílová skupina a volitelně *převzít strukturu* z jiného plánu téhož
+  klienta. Název se doplní z období, dokud ho nepřepíšete.
+- **⚙ Nastavení plánu** — přejmenovat, změnit stav, cílovou skupinu i období. Když
+  období zkrátíte, aplikace předem řekne, kolik vyplněných čísel v měsících, které
+  vypadnou, se smaže. Tamtéž **Smazat plán** — s potvrzením přesným názvem, nejde vrátit.
+- **+ Další rok** — rychlá kopie téhož plánu o rok dál.
+
+Kopie přenáší bloky, sdělení, taktiky, ceník i ukazatele (Reach/CPM, Konverze/CPA),
+**rozpočty, GRP a cíle ne**. Názvy plánů musí být u klienta jedinečné.
 
 Stavy: `návrh → schváleno → v běhu → uzavřeno`.
 

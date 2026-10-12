@@ -18,7 +18,7 @@ export function Chrome({
   title,
   children,
 }: {
-  active: "plan" | "plneni" | "kalkulacka" | "sprava" | "nastaveni";
+  active: "prehled" | "plan" | "plneni" | "kalkulacka" | "sprava" | "nastaveni";
   user: { name: string | null; email: string; role: string };
   /** klient a období otevřeného plánu; bez plánu zůstane jen název aplikace */
   title?: { client: string; period: string };
@@ -51,6 +51,9 @@ export function Chrome({
             </div>
           </div>
           <nav className="nav">
+            {user.role !== "CLIENT" && (
+              <Link href="/prehled" aria-current={active === "prehled" ? "page" : undefined}>Přehled</Link>
+            )}
             <Link href="/" aria-current={active === "plan" ? "page" : undefined}>Plán</Link>
             <Link href="/plneni" aria-current={active === "plneni" ? "page" : undefined}>Detail &amp; plnění</Link>
             {user.role !== "CLIENT" && (

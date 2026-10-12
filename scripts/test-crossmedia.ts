@@ -9,6 +9,7 @@ import {
   derive, combineReach, incrementalReach, reachFromGrp, grpForReach,
   effectiveReach, duplicationOf, DEFAULT_CURVE, isGrpPriced, kFromMeasured,
 } from "../src/lib/crossmedia";
+import { periodLabel } from "../src/lib/period";
 
 let failed = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -161,6 +162,15 @@ console.log("\nZpětný dopočet koeficientu");
   ok("dopočtené k vrátí naměřený společný zásah", close(back, 0.83, 1e-9), `${back}`);
   ok("společný zásah pod silnějším médiem se odmítne", !kFromMeasured(0.69, 0.45, 0.6).ok);
   ok("společný zásah nad součtem se odmítne", !kFromMeasured(0.3, 0.2, 0.6).ok);
+}
+
+console.log("\nNázvy období");
+{
+  ok("říjen–prosinec = Q4 2026", periodLabel("2026-10", "2026-12") === "Q4 2026");
+  ok("leden–prosinec = Rok 2027", periodLabel("2027-01", "2027-12") === "Rok 2027");
+  ok("listopad–prosinec NENÍ Q4", periodLabel("2027-11", "2027-12") === "Lis–Pro 2027", periodLabel("2027-11", "2027-12"));
+  ok("jeden měsíc = Prosinec 2027", periodLabel("2027-12", "2027-12") === "Prosinec 2027", periodLabel("2027-12", "2027-12"));
+  ok("přes přelom roku", periodLabel("2027-11", "2028-02") === "Lis 2027 – Úno 2028", periodLabel("2027-11", "2028-02"));
 }
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");

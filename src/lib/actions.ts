@@ -11,7 +11,7 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { and, eq, desc, asc, sql } from "drizzle-orm";
+import { and, eq, desc, asc, sql, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -22,7 +22,7 @@ import {
   type Area, type ChannelType, type PlanUnit,
 } from "@/db/schema";
 import { currentPrincipal } from "@/lib/auth";
-import { assertCan, canManageUsers, PermissionError } from "@/lib/permissions";
+import { assertCan, canManageUsers, canSeePlan, PermissionError } from "@/lib/permissions";
 import { monthLabel, monthsBetween, periodLabel, shiftYears, kc, num } from "@/lib/period";
 import { derive, isGrpPriced, dupKey, DEFAULT_DUPLICATION, K_MIN, K_MAX } from "@/lib/crossmedia";
 import {
@@ -1102,8 +1102,19 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
       // zakládat plány smí administrátor nebo kdokoli s právem měnit plán napříč
       assertCan(me, "write", { area: "plan", mediaType: null, planId: null, campaignId: null, month: null });
     }
-    if (monthsBetween(data.periodStart, data.periodEnd).length < 1) {
+    if (!periodOk(data.periodStart, data.periodEnd)) {
       return { ok: false, error: "Období je prázdné nebo obrácené." };
+    }
+    if (await planNameTaken(data.clientId, data.name)) {
+      return { ok: false, error: `Plán „${data.name}" už u tohoto klienta existuje — zvolte jiný název.` };
+    }
+    if (data.copyFromPlanId) {
+      // kopírovat smí jen plán, který uživatel vidí, a jen v rámci klienta —
+      // jinak by šlo převzít strukturu cizího klienta
+      const [src] = await db.select({ clientId: plans.clientId }).from(plans).where(eq(plans.id, data.copyFromPlanId));
+      if (!src || src.clientId !== data.clientId || !canSeePlan(me, data.copyFromPlanId)) {
+        return { ok: false, error: "Ze zvoleného plánu nejde strukturu převzít." };
+      }
     }
 
     const [{ max }] = await db
@@ -1174,6 +1185,14 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
                 })),
               );
             }
+            // ukazatele (Reach/CPM, Konverze/CPA) patří ke struktuře — bez nich
+            // nová taktika v Plnění neměla co vyhodnocovat; cíle se nekopírují
+            const srcMetrics = await db.select().from(metrics).where(eq(metrics.tacticId, t.id));
+            if (srcMetrics.length) {
+              await db.insert(metrics).values(
+                srcMetrics.map((m) => ({ tacticId: nt.id, name: m.name, kind: m.kind, unit: m.unit, slot: m.slot })),
+              );
+            }
             copied++;
           }
         }
@@ -1216,7 +1235,70 @@ const planPatch = z.object({
   name: z.string().min(1).max(120).optional(),
   status: z.enum(["draft", "approved", "live", "closed"]).optional(),
   targetGroupId: z.string().min(1).nullable().optional(),
+  periodStart: monthSchema.optional(),
+  periodEnd: monthSchema.optional(),
 });
+
+function periodOk(start: string, end: string) {
+  return start <= end && monthsBetween(start, end).length >= 1;
+}
+
+async function planNameTaken(clientId: string, name: string, exceptPlanId?: string) {
+  const rows = await db.select({ id: plans.id }).from(plans)
+    .where(and(eq(plans.clientId, clientId), eq(plans.name, name)));
+  return rows.some((r) => r.id !== exceptPlanId);
+}
+
+/** Taktiky plánu — pro čištění dat a souhrny. */
+async function planTacticIds(planId: string): Promise<string[]> {
+  const rows = await db.select({ id: tactics.id }).from(tactics)
+    .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
+    .innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
+    .where(eq(campaigns.planId, planId));
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Kolik vyplněných hodnot leží mimo nové období. Plánovač to musí vidět dřív,
+ * než období zkrátí — měsíce, které vypadnou, se i s čísly smažou.
+ */
+export async function planPeriodImpact(raw: { planId: string; periodStart: string; periodEnd: string }): Promise<
+  Result & { budgets?: number; actuals?: number; metrics?: number; notes?: number; dropped?: string[] }
+> {
+  try {
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, planId: raw.planId, campaignId: null, month: null });
+    const [plan] = await db.select().from(plans).where(eq(plans.id, raw.planId));
+    if (!plan) return { ok: false, error: "Plán neexistuje." };
+    if (!periodOk(raw.periodStart, raw.periodEnd)) return { ok: false, error: "Období je prázdné nebo obrácené." };
+
+    const keep = monthsBetween(raw.periodStart, raw.periodEnd);
+    const dropped = monthsBetween(plan.periodStart, plan.periodEnd).filter((m) => !keep.includes(m));
+    const ids = await planTacticIds(raw.planId);
+    if (!dropped.length || !ids.length) return { ok: true, budgets: 0, actuals: 0, metrics: 0, notes: 0, dropped };
+
+    const metricIds = (await db.select({ id: metrics.id }).from(metrics).where(inArray(metrics.tacticId, ids))).map((m) => m.id);
+    const count = async <T>(q: Promise<T[]>) => (await q).length;
+    return {
+      ok: true,
+      dropped,
+      budgets: await count(db.select({ id: tacticBudgets.id }).from(tacticBudgets).where(and(
+        inArray(tacticBudgets.tacticId, ids), inArray(tacticBudgets.month, dropped), sql`${tacticBudgets.planned} <> 0`))),
+      actuals: await count(db.select({ id: actualSpends.id }).from(actualSpends).where(and(
+        inArray(actualSpends.tacticId, ids), inArray(actualSpends.month, dropped), sql`${actualSpends.amount} <> 0`))),
+      notes: await count(db.select({ id: accountNotes.id }).from(accountNotes).where(and(
+        inArray(accountNotes.tacticId, ids), inArray(accountNotes.month, dropped)))),
+      metrics: metricIds.length
+        ? (await count(db.select({ id: metricTargets.id }).from(metricTargets).where(and(
+            inArray(metricTargets.metricId, metricIds), inArray(metricTargets.month, dropped))))) +
+          (await count(db.select({ id: metricActuals.id }).from(metricActuals).where(and(
+            inArray(metricActuals.metricId, metricIds), inArray(metricActuals.month, dropped)))))
+        : 0,
+    };
+  } catch (e) {
+    return fail(e);
+  }
+}
 
 export async function updatePlan(raw: z.input<typeof planPatch>): Promise<Result> {
   try {
@@ -1235,11 +1317,94 @@ export async function updatePlan(raw: z.input<typeof planPatch>): Promise<Result
       patch.targetGroupId = data.targetGroupId;
       items.push(`Plán ${before.name}: změněna výchozí cílová skupina`);
     }
+    if (patch.name && (await planNameTaken(before.clientId, data.name!, before.id))) {
+      return { ok: false, error: `Plán „${data.name}" už u tohoto klienta existuje — zvolte jiný název.` };
+    }
+
+    const start = data.periodStart ?? before.periodStart;
+    const end = data.periodEnd ?? before.periodEnd;
+    const periodChanged = start !== before.periodStart || end !== before.periodEnd;
+    if (periodChanged) {
+      if (!periodOk(start, end)) return { ok: false, error: "Období je prázdné nebo obrácené." };
+      patch.periodStart = start;
+      patch.periodEnd = end;
+      items.push(`Plán ${before.name}: období ${periodLabel(before.periodStart, before.periodEnd)} → ${periodLabel(start, end)}`);
+    }
     if (!items.length) return { ok: true };
 
     await db.update(plans).set(patch).where(eq(plans.id, data.planId));
+
+    if (periodChanged) {
+      // Čísla v měsících mimo nové období by zůstala v databázi neviditelná,
+      // ale počítala by se do součtů v souhrnech — proto se smažou. Plánovač
+      // to předtím potvrdil podle planPeriodImpact.
+      const keep = monthsBetween(start, end);
+      const ids = await planTacticIds(data.planId);
+      if (ids.length) {
+        await db.delete(tacticBudgets).where(and(inArray(tacticBudgets.tacticId, ids), notInArray(tacticBudgets.month, keep)));
+        await db.delete(actualSpends).where(and(inArray(actualSpends.tacticId, ids), notInArray(actualSpends.month, keep)));
+        await db.delete(accountNotes).where(and(inArray(accountNotes.tacticId, ids), notInArray(accountNotes.month, keep)));
+        const metricIds = (await db.select({ id: metrics.id }).from(metrics).where(inArray(metrics.tacticId, ids))).map((m) => m.id);
+        if (metricIds.length) {
+          await db.delete(metricTargets).where(and(inArray(metricTargets.metricId, metricIds), notInArray(metricTargets.month, keep)));
+          await db.delete(metricActuals).where(and(inArray(metricActuals.metricId, metricIds), notInArray(metricActuals.month, keep)));
+        }
+      }
+      revalidatePath("/plneni");
+    }
     await log(me!.id, "plan", items);
     revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Co plán obsahuje — do potvrzení před smazáním. */
+export async function planSummary(planId: string): Promise<Result & { campaigns?: number; tactics?: number; budget?: number; actual?: number }> {
+  try {
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, planId, campaignId: null, month: null });
+    const camps = await db.select({ id: campaigns.id }).from(campaigns).where(eq(campaigns.planId, planId));
+    const ids = await planTacticIds(planId);
+    const sum = async (q: Promise<Array<{ v: number | null }>>) => Number((await q)[0]?.v ?? 0);
+    return {
+      ok: true,
+      campaigns: camps.length,
+      tactics: ids.length,
+      budget: ids.length ? await sum(db.select({ v: sql<number>`coalesce(sum(${tacticBudgets.planned}), 0)` })
+        .from(tacticBudgets).where(inArray(tacticBudgets.tacticId, ids))) : 0,
+      actual: ids.length ? await sum(db.select({ v: sql<number>`coalesce(sum(${actualSpends.amount}), 0)` })
+        .from(actualSpends).where(inArray(actualSpends.tacticId, ids))) : 0,
+    };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Smazání celého plánu i s bloky, taktikami, čísly a granty na něj (kaskádou).
+ * Vrátit nejde, proto jen administrátor a plánovač, a jen s potvrzením názvu.
+ */
+export async function deletePlan(raw: { planId: string; confirmName: string }): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, planId: raw.planId, campaignId: null, month: null });
+    if (me!.role !== "ADMIN" && me!.role !== "PLANNER") {
+      throw new PermissionError("Plán smí smazat jen administrátor nebo plánovač.");
+    }
+    const [plan] = await db.select().from(plans).where(eq(plans.id, raw.planId));
+    if (!plan) return { ok: false, error: "Plán neexistuje." };
+    if (raw.confirmName.trim() !== plan.name) {
+      return { ok: false, error: "Název pro potvrzení nesouhlasí — plán nebyl smazán." };
+    }
+    const ids = await planTacticIds(raw.planId);
+    await db.delete(plans).where(eq(plans.id, raw.planId));
+    await log(me!.id, "plan", [
+      `Smazán plán „${plan.name}" (${periodLabel(plan.periodStart, plan.periodEnd)}), ${ids.length} taktik — nelze vrátit`,
+    ]);
+    revalidatePath("/");
+    revalidatePath("/plneni");
     return { ok: true };
   } catch (e) {
     return fail(e);

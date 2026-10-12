@@ -41,7 +41,12 @@ src/lib/actions.ts       VŠECHNY zápisy; každý projde assertCan()
 src/lib/queries.ts       čtení dat pro stránky
 src/lib/undo.ts          zásobník vrácení zpět (10 kroků na uživatele)
 src/app/kalkulacka/      Sainsburyho kalkulačka + editace koeficientů duplikace
+src/lib/dashboard.ts     data pro Přehled (/prehled): zásah v čase, investice, frekvence, bloky
+scripts/import-strategicky-plan.ts   import týdenního flowchartu BENU z Excelu
 ```
+
+**Klientská data se do repozitáře neukládají.** Import čte Excel z disku a píše
+rovnou do databáze; do produkce jen se souhlasem zadavatele.
 
 Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení → Taktika`.
 
@@ -90,7 +95,13 @@ Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení �
    Komentář agentury nesmí měnit ani na serveru (`setAccountNote`). Výhrada
    „modelový odhad, ne měření" u zásahu zůstává i v jeho pohledu.
 
-10. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
+10. **Zásah se přes měsíce ani bloky nesčítá.** Kumulativní zásah do měsíce m
+   i zásah bloku se počítají znovu z nasčítaných GRP (`src/lib/dashboard.ts`).
+   Barvy médií v Přehledu (`--m-tv`, `--m-digital`, `--m-radio`, `--m-ooh`) prošly
+   validátorem v tomhle pořadí a v obou režimech — staré `TYPE_COLOR` z panelu
+   zásahu má TV a Digital k nerozeznání, do nových grafů ho nepoužívat.
+
+11. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
    jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se
    „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.
 
@@ -187,7 +198,7 @@ Technický dluh:
   zadavatele počítá s ≤ 1. Při vysokých zásazích k > 1 narazí na strop překryvu
   a další média nepřidají nic. Rozhodnout s media specialistou, ideálně z dat.
 - Z revize (říjen 2026), zatím neřešené: ukotvené levé sloupce v ročním plánu;
-  kopie plánu na další rok nekopíruje metriky; měsíc zápisu se neověřuje proti
+  měsíc zápisu se neověřuje proti
   období plánu; žádné transakce u vícekrokových zápisů; `loadPlan` stahuje celé
   tabulky všech plánů; křivky, duplikace a cílové skupiny nejsou oddělené po
   klientech; ROLE_BASE dává PLANNER/ACCOUNT/VIEWER čtení všech klientů;

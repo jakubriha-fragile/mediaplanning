@@ -72,9 +72,21 @@ export function periodLabel(start: Month, end: Month): string {
   const a = parseMonth(start);
   const b = parseMonth(end);
   if (a.year === b.year && a.month === 1 && b.month === 12) return `Rok ${a.year}`;
-  if (a.year === b.year && quarterOf(start) === quarterOf(end)) return quarterLabel(quarterOf(start));
+  if (start === end) return `${monthLabel(start)} ${a.year}`;
+  // „Q4" jen pro celý kvartál — listopad–prosinec se dřív tvářil jako Q4
+  if (a.year === b.year && a.month % 3 === 1 && b.month === a.month + 2) return quarterLabel(quarterOf(start));
   if (a.year === b.year) return `${monthShort(start)}–${monthShort(end)} ${a.year}`;
   return `${monthShort(start)} ${a.year} – ${monthShort(end)} ${b.year}`;
+}
+
+/**
+ * Titulek plánu do hlavičky. Plán pojmenovaný podle období („Q4 2026") se
+ * ukáže jen tak; vlastní název („Vánoce 2027") dostane období do závorky,
+ * aby bylo vidět, kdy běží.
+ */
+export function planTitle(p: { name: string; periodStart: string; periodEnd: string }): string {
+  const label = periodLabel(p.periodStart, p.periodEnd);
+  return p.name === label ? label : `${p.name} (${label})`;
 }
 
 /** Posun období o daný počet let — pro založení příštího roku z letošního. */

@@ -6,7 +6,7 @@ import {
 } from "@/lib/queries";
 import { myUndoStack } from "@/lib/actions";
 import { can, seesWholePlan } from "@/lib/permissions";
-import { monthsBetween, monthLabel, quarterGroups, periodLabel, kc, pct } from "@/lib/period";
+import { planTitle, monthsBetween, monthLabel, quarterGroups, periodLabel, kc, pct } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
 import { PlanSwitcher } from "@/components/PlanSwitcher";
 import { ReachPanel } from "@/components/ReachPanel";
@@ -73,8 +73,16 @@ export default async function PlanPage({
 
   return (
     <Chrome active="plan" user={{ name: user.name, email: user.email, role: user.role }}
-      title={{ client: plan.clientName, period: periodLabel(plan.periodStart, plan.periodEnd) }}>
-      <PlanSwitcher plans={allPlans} current={planId} canCreate={canEditPlan} />
+      title={{ client: plan.clientName, period: planTitle(plan) }}>
+      <PlanSwitcher
+        plans={allPlans}
+        current={planId}
+        // zakládat plány smí jen kdo smí měnit plány napříč — stejně jako createPlan na serveru
+        canCreate={can(me, "write", { area: "plan", mediaType: null, planId: null, campaignId: null, month: null })}
+        canEdit={canEditPlan}
+        canDelete={canEditPlan && (me.role === "ADMIN" || me.role === "PLANNER")}
+        targetGroups={tgs.map((t) => ({ id: t.id, name: t.name }))}
+      />
 
       <div className="kpis">
         <div className="kpi">

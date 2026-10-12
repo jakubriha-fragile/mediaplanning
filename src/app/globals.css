@@ -418,3 +418,90 @@ td.qcol .cellbox { background: transparent; }
   font-size: 11px; color: var(--muted);
 }
 .foot b { font-weight: 500; color: var(--brand-ink); }
+
+/* ---------------------------------------------------------------- přehled
+   Inspirace: přehled media spendu (zjištění nahoře, karty, grafy se
+   „zjištěním", zdroje a předpoklady na konci). Desktop je primární. */
+:root {
+  /* média — pořadí TV, online, rádio, OOH prošlo validátorem (CVD, kontrast) */
+  --m-tv: #4a3fc4; --m-digital: #1baf7a; --m-radio: #eda100; --m-ooh: #e87ba4;
+  --m-other: #8b8b93; --m-inc: #b3adef;
+  /* bloky — žebříček Fragile modré */
+  --b1: #241d6e; --b2: #4a3fc4; --b3: #8a81e4; --b4: #b3adef; --b5: #d5d1f7;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --m-tv: #8a81e4; --m-digital: #199e70; --m-radio: #c98500; --m-ooh: #d55181;
+    --m-other: #6f6a96; --m-inc: #463f95;
+    --b1: #d5d1f7; --b2: #b3adef; --b3: #8a81e4; --b4: #6459d6; --b5: #463f95;
+  }
+}
+.db { display: grid; gap: 16px; padding-bottom: 24px; }
+.db-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 4px; }
+.db-title { font-size: 26px; font-weight: 200; letter-spacing: -.01em; margin: 0; }
+.db-meta { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+.db-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; min-width: 0; }
+.db-card h3 { margin: 0 0 4px; font-size: 14px; font-weight: 500; }
+.db-cardhead { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.db-note { margin: 0 0 10px; font-size: 12px; color: var(--muted); max-width: 90ch; }
+.db-grid2 { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.db-grid3 { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .db-grid2, .db-grid3 { grid-template-columns: 1fr; } }
+
+.db-findings { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
+.db-findings li { display: grid; grid-template-columns: 7rem 1fr; gap: 12px; padding-left: 12px;
+  border-left: 3px solid var(--brand); font-size: 13px; line-height: 1.55; }
+.db-findings li.is-alert { border-left-color: var(--bad-pure); }
+.db-findings b { font-weight: 500; }
+.db-fname { font-weight: 500; }
+
+.db-kpis { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1200px) { .db-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.db-kpi { display: grid; gap: 2px; align-content: start; padding: 14px 16px; }
+.db-kpi.is-alert { border-color: var(--bad-pure); }
+.db-kpi.is-alert .db-big { color: var(--bad); }
+.db-label { font-size: 11px; color: var(--muted); }
+.db-big { font-size: 26px; font-weight: 200; font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em; }
+.db-sub { font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+.db-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-2); margin: 4px 0 6px; }
+.db-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.db-sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
+.db-sw-line { height: 2px; width: 14px; border-radius: 1px; background: var(--ink); }
+.db-chart { position: relative; }
+.db-chart svg { display: block; overflow: visible; }
+.db-chart text { font-family: inherit; font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.db-chart .db-xlab.on { fill: var(--ink); font-weight: 500; }
+.db-grid { stroke: var(--line); stroke-width: 1; }
+.db-base { stroke: var(--line-strong); stroke-width: 1; }
+.db-hoverband { fill: var(--surface-2); }
+.db-line { stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
+.db-dot { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
+.db-threshold { stroke: var(--bad-pure); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.db-chart .db-threshold-lab { fill: var(--bad); font-weight: 500; }
+.db-tip { position: absolute; z-index: 5; min-width: 200px; pointer-events: none; background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 8px 10px; font-size: 12px;
+  box-shadow: 0 6px 18px rgba(20,18,40,.12); display: grid; gap: 3px; }
+.db-tip > div { display: flex; align-items: center; gap: 6px; }
+.db-tip span { margin-left: auto; padding-left: 12px; font-variant-numeric: tabular-nums; font-weight: 500; }
+.db-tip-sum { border-top: 1px solid var(--line); padding-top: 3px; margin-top: 2px; }
+.db-tablebtn { appearance: none; background: none; border: 0; padding: 4px 0; margin-top: 4px; font: inherit;
+  font-size: 11.5px; color: var(--brand-ink); text-decoration: underline; cursor: pointer; }
+.db-limit { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.db-limit input { width: 56px; font: inherit; font-size: 12.5px; padding: 3px 6px; text-align: right;
+  border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); }
+
+.db-tablewrap { overflow-x: auto; }
+.db-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.db-table th, .db-table td { padding: 7px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.db-table th { font-weight: 500; color: var(--muted); font-size: 11px; text-transform: none; letter-spacing: 0; background: none; }
+.db-table th:first-child, .db-table td:first-child { text-align: left; }
+.db-table tfoot td { font-weight: 500; border-bottom: 0; }
+.db-blocks td:first-child { font-weight: 500; }
+.db-blocks .db-mcol { width: 46px; text-align: center; padding: 7px 2px; }
+.db-heat { padding: 3px 2px !important; }
+.db-heat span { display: block; height: 18px; border-radius: 3px; background: var(--brand); }
+.db-warncell { color: var(--bad); }
+.db-list { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+.db-list b { font-weight: 500; color: var(--ink); }
+.db-disclaimer { margin: 0; font-size: 12px; color: var(--muted); }
