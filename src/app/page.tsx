@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
 import {
   getPlanRows, getCampaignTree, getUser, getVisiblePlans, pickPlan, getPlan,
-  getReachSummary, getTargetGroups,
+  getReachSummary, getTargetGroups, getThemes,
 } from "@/lib/queries";
 import { myUndoStack } from "@/lib/actions";
 import { can, seesWholePlan } from "@/lib/permissions";
@@ -45,12 +45,13 @@ export default async function PlanPage({
   const quarters = quarterGroups(months);
   const periodName = periodLabel(plan.periodStart, plan.periodEnd);
 
-  const [rows, allCampaigns, undo, reach, tgs] = await Promise.all([
+  const [rows, allCampaigns, undo, reach, tgs, themeList] = await Promise.all([
     getPlanRows(me, planId),
     getCampaignTree(planId),
     myUndoStack(),
     getReachSummary(me, planId),
     getTargetGroups(),
+    getThemes(plan.clientId),
   ]);
 
   // kdo vidí jen výsek plánu, nesmí ani přes prázdné bloky poznat, co dalšího
@@ -156,6 +157,7 @@ export default async function PlanPage({
         canEditPlan={canEditPlan}
         undoLabel={undo[0]?.label ?? null}
         clientView={me.role === "CLIENT"}
+        themes={themeList.map((t) => ({ id: t.id, name: t.name }))}
       />
     </Chrome>
   );

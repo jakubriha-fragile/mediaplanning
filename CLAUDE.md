@@ -49,6 +49,10 @@ scripts/import-strategicky-plan.ts   import týdenního flowchartu BENU z Excelu
 rovnou do databáze; do produkce jen se souhlasem zadavatele.
 
 Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení → Taktika`.
+Kolmo na to **tematická oblast** (`theme`, patří klientovi): Brand, Longevity,
+Probiotika… Taktika se mezi oblasti dělí podílem (`tactic_theme.share`, součet 1),
+smíšené položky typu „TV spot se 4 produkty" rovnoměrně. Částky, kontakty i GRP
+oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělených GRP.
 
 ## Invarianty — tohle nerozbíjet
 
@@ -101,7 +105,11 @@ Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení �
    validátorem v tomhle pořadí a v obou režimech — staré `TYPE_COLOR` z panelu
    zásahu má TV a Digital k nerozeznání, do nových grafů ho nepoužívat.
 
-11. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
+11. **Oblast patří klientovi plánu** — `setTacticThemes` to ověřuje na serveru.
+   Kopie plánu přenáší i oblasti. Bez řádku v `tactic_theme` je taktika
+   „Nezařazeno" a Přehled ji tak i ukazuje.
+
+12. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
    jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se
    „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.
 
@@ -194,6 +202,13 @@ Technický dluh:
 
 - Import a export XLSX (zadání §9) — data se zatím nahrávají seedem.
 - Rozhraní pro kalibraci křivek zásahu (duplikace i cílové skupiny editovatelné jsou).
+  **Výchozí křivka TV je příliš strmá** — nasytí se už kolem 300–500 TRP, takže
+  na plánu BENU 2027 vychází zásah ~92 % v každém měsíci i v každé oblasti a liší
+  se jen frekvence. Zkalibrovat podle TV reportu, až ho zadavatel pošle.
+- Strategický plán BENU 2027: cílová skupina Ženy 25–54 (potvrzeno), leden 2027
+  záměrně prázdný (zadavatel ověřuje). Chybí GRP rádia, doručení u OMK MC,
+  sponzoringu, partnerství a podcastu, rozpad online po platformách a u social
+  oddělení fee od médií.
 - **Výchozí koeficienty duplikace** jsou 1,05–1,70 (publika se překrývají), kalkulačka
   zadavatele počítá s ≤ 1. Při vysokých zásazích k > 1 narazí na strop překryvu
   a další média nepřidají nic. Rozhodnout s media specialistou, ideálně z dat.

@@ -187,6 +187,36 @@ const SOME_BLOCK: Array<[RegExp, string, Tactic["phase"]]> = [
   }
 }
 
+// ------------------------------------------------------ tematické oblasti
+//
+// Rozřazení schválil zadavatel (říjen 2026). Smíšené položky se zatím dělí
+// rovnoměrně — poměry se pak doladí v aplikaci, sloupec Oblast.
+
+const THEMES = ["Brand", "Longevity", "Probiotika", "Dermo", "Prevence & V rovnováze", "Katalogy a akce", "Privátní značky"];
+const PRODUCTS = ["Longevity", "Probiotika", "Dermo", "Prevence & V rovnováze"];
+const evenly = (names: string[]) => Object.fromEntries(names.map((n) => [n, 1 / names.length]));
+
+function themesOf(t: Tactic): Record<string, number> {
+  if (t.block === "TV – produkty") return evenly(PRODUCTS);             // spot se 4 produkty
+  if (t.block.startsWith("Online")) return evenly(["Brand", ...PRODUCTS]); // brand / longevity / produkty
+  const byBlock: Record<string, string> = {
+    "Brand": "Brand",
+    "TV – e-shop": "Brand",
+    "Social media – always-on": "Brand",
+    "Longevity": "Longevity",
+    "Probio": "Probiotika",
+    "Skineffect": "Dermo",
+    "Authea": "Dermo",
+    "Prevence & V rovnováze": "Prevence & V rovnováze",
+    "Dermokatalog & Vánoční katalog": "Katalogy a akce",
+    "Solero": "Privátní značky",
+    "Optamins": "Privátní značky",
+  };
+  const name = byBlock[t.block];
+  if (!name) throw new Error(`Blok „${t.block}" nemá přiřazenou oblast — doplňte ho do themesOf().`);
+  return { [name]: 1 };
+}
+
 // ------------------------------------------------------------ kontrola součtů
 
 const months = [...new Set(COLS.values())].sort();
@@ -196,6 +226,7 @@ const periodEnd = periodMonths[periodMonths.length - 1];
 const imported = T.reduce((a, t) => a + sum(t.cost), 0);
 const grand = sum(series(rowOf("Total Client cost", rowOf("TV + radio + online + Stezka + Mudrování+SoMe"))));
 
+T.forEach(themesOf); // neznámý blok shodí import dřív, než se cokoli zapíše
 console.log(`Období v datech: ${periodStart} – ${periodEnd} (${periodMonths.length} měsíců)`);
 const empty = months.filter((m) => !periodMonths.includes(m));
 if (empty.length) console.log(`Měsíce bez jediné hodnoty: ${empty.join(", ")}`);
@@ -218,6 +249,15 @@ async function main() {
       clientId: client.id, name: TG_NAME, universe: 2_050_000,
       source: "Předpoklad — ověřit proti cílové skupině TRP z nákupu TV",
     }).returning();
+  }
+
+  // oblasti klienta — existující se nepřepisují, chybějící se doplní.
+  // Dřív než se smaže starý plán: když tohle selže, plán zůstane, jak byl.
+  const themeIds: Record<string, string> = {};
+  for (const [i, name] of THEMES.entries()) {
+    let [th] = await db.select().from(s.themes).where(and(eq(s.themes.clientId, client.id), eq(s.themes.name, name)));
+    if (!th) [th] = await db.insert(s.themes).values({ clientId: client.id, name, position: i }).returning();
+    themeIds[name] = th.id;
   }
 
   const [existing] = await db.select().from(s.plans)
@@ -255,6 +295,10 @@ async function main() {
         }
         return { tacticId: tac.id, month: m, planned: Math.round(cost), driver: "budget" as const, driverValue: cost, unitPrice: 0 };
       }));
+
+      await db.insert(s.tacticThemes).values(
+        Object.entries(themesOf(t)).map(([name, share]) => ({ tacticId: tac.id, themeId: themeIds[name], share })),
+      );
 
       const brand = t.phase === "Awareness";
       await db.insert(s.metrics).values([

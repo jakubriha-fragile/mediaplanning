@@ -15,7 +15,7 @@ import { and, eq, desc, asc, sql, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
-  tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, duplications,
+  tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, duplications, themes, tacticThemes,
   metrics, metricTargets, actualSpends, metricActuals, accountNotes, grants,
   users, changeLog,
   channelTypeEnum, planUnitEnum, mediaTypeEnum,
@@ -1042,6 +1042,7 @@ async function assertCanUndo(me: NonNullable<Awaited<ReturnType<typeof currentPr
         await line(op.messageLineId);
         break;
       case "dropTactic": await tactic(op.id, "plan", null); break;
+      case "themes": await tactic(op.tacticId, "plan", null); break;
       case "positions": for (const it of op.items) await tactic(it.id, "plan", null); break;
       case "line": case "dropLine": await line(op.id); break;
       case "campaignPositions": for (const it of op.items) await campaign(it.id); break;
@@ -1192,6 +1193,11 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
               await db.insert(metrics).values(
                 srcMetrics.map((m) => ({ tacticId: nt.id, name: m.name, kind: m.kind, unit: m.unit, slot: m.slot })),
               );
+            }
+            // tematické oblasti jsou struktura, ne čísla — přenáší se taky
+            const srcThemes = await db.select().from(tacticThemes).where(eq(tacticThemes.tacticId, t.id));
+            if (srcThemes.length) {
+              await db.insert(tacticThemes).values(srcThemes.map((x) => ({ tacticId: nt.id, themeId: x.themeId, share: x.share })));
             }
             copied++;
           }
@@ -1406,6 +1412,79 @@ export async function deletePlan(raw: { planId: string; confirmName: string }): 
     revalidatePath("/");
     revalidatePath("/plneni");
     return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ------------------------------------------------------ tematické oblasti
+
+const sharesInput = z.object({
+  tacticId: z.string().min(1),
+  shares: z.array(z.object({ themeId: z.string().min(1), share: z.number().min(0).max(1) })).max(20),
+});
+
+/**
+ * Rozdělení taktiky mezi tematické oblasti. Podíly se normalizují na součet 1 —
+ * plánovač zadává procenta a zaokrouhlení (33 + 33 + 33) nesmí rozbít součty.
+ * Prázdný seznam = taktika není zařazená.
+ */
+export async function setTacticThemes(raw: z.input<typeof sharesInput>): Promise<Result> {
+  try {
+    const data = sharesInput.parse(raw);
+    const me = await currentPrincipal();
+    const c = await tacticCoords(data.tacticId);
+    assertCan(me, "write", { area: "plan", mediaType: c.mediaType, planId: c.planId, campaignId: c.campaignId, month: null });
+
+    // oblast musí patřit stejnému klientovi jako plán
+    const [plan] = await db.select({ clientId: plans.clientId }).from(plans).where(eq(plans.id, c.planId));
+    const ids = data.shares.filter((x) => x.share > 0).map((x) => x.themeId);
+    if (ids.length) {
+      const own = await db.select({ id: themes.id }).from(themes)
+        .where(and(eq(themes.clientId, plan.clientId), inArray(themes.id, ids)));
+      if (own.length !== new Set(ids).size) throw new PermissionError("Oblast nepatří klientovi tohoto plánu.");
+    }
+
+    const total = data.shares.reduce((a, x) => a + x.share, 0);
+    const next = total > 0
+      ? data.shares.filter((x) => x.share > 0).map((x) => ({ themeId: x.themeId, share: x.share / total }))
+      : [];
+
+    const before = await db.select({ themeId: tacticThemes.themeId, share: tacticThemes.share })
+      .from(tacticThemes).where(eq(tacticThemes.tacticId, data.tacticId));
+    await pushUndo(me!.id, `Oblasti taktiky „${c.channel}"`, [{ t: "themes", tacticId: data.tacticId, shares: before }]);
+
+    await db.delete(tacticThemes).where(eq(tacticThemes.tacticId, data.tacticId));
+    if (next.length) await db.insert(tacticThemes).values(next.map((x) => ({ tacticId: data.tacticId, ...x })));
+
+    const names = next.length
+      ? (await db.select().from(themes).where(inArray(themes.id, next.map((x) => x.themeId))))
+          .map((t) => `${t.name} ${Math.round((next.find((x) => x.themeId === t.id)!.share) * 100)} %`).join(", ")
+      : "nezařazeno";
+    await log(me!.id, "plan", [`Oblasti taktiky „${c.channel}": ${names}`]);
+    revalidatePath("/");
+    revalidatePath("/prehled");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Nová tematická oblast klienta — zakládá se z editoru oblastí u taktiky. */
+export async function createTheme(raw: { planId: string; name: string }): Promise<Result & { themeId?: string }> {
+  try {
+    const data = z.object({ planId: z.string().min(1), name: z.string().trim().min(1).max(60) }).parse(raw);
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, planId: data.planId, campaignId: null, month: null });
+    const [plan] = await db.select({ clientId: plans.clientId }).from(plans).where(eq(plans.id, data.planId));
+    if (!plan) return { ok: false, error: "Plán neexistuje." };
+    const [dup] = await db.select().from(themes).where(and(eq(themes.clientId, plan.clientId), eq(themes.name, data.name)));
+    if (dup) return { ok: true, themeId: dup.id };
+    const [{ max }] = await db.select({ max: sql<number>`coalesce(max(${themes.position}), -1)` })
+      .from(themes).where(eq(themes.clientId, plan.clientId));
+    const [t] = await db.insert(themes).values({ clientId: plan.clientId, name: data.name, position: Number(max) + 1 }).returning();
+    await log(me!.id, "plan", [`Založena tematická oblast „${data.name}"`]);
+    return { ok: true, themeId: t.id };
   } catch (e) {
     return fail(e);
   }

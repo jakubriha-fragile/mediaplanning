@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
+  setTacticThemes, createTheme,
 } from "@/lib/actions";
+import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
 import { Combo, type ComboOption } from "@/components/Combo";
 import { isGrpPriced, priceLabel, priceHint, UNIT_LABEL } from "@/lib/crossmedia";
 import type { ChannelType, PlanUnit } from "@/db/schema";
@@ -22,6 +24,8 @@ export type PlanRow = {
   mediaType: "Paid" | "Owned" | "Earned";
   channelType: ChannelType;
   targetGroupId: string | null;
+  /** tematické oblasti a podíly (součet 1); prázdné = nezařazeno */
+  themes: ThemeShare[];
   universe: number;
   /** dopočítané jednotky za každý měsíc — rozpočet, GRP, impressions, zásah */
   cells: Record<string, {
@@ -61,12 +65,13 @@ type Col =
 
 // úchyt, sdělení, fáze, cílení, typ, kanál, nosič, jednotka, cena — klient nevidí
 // jednotku ani cenu, ty jsou pro něj agenturní kuchyně
-const LEFT_COLS_AGENCY = 9;
-const LEFT_COLS_CLIENT = 7;
+const LEFT_COLS_AGENCY = 10; // + oblast
+const LEFT_COLS_CLIENT = 8;
 const RIGHT_COLS = 3;  // celkem, podíl, smazat
 
 export function PlanTable({
   rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel, clientView = false,
+  themes = [],
 }: {
   rows: PlanRow[];
   campaigns: CampaignInfo[];
@@ -79,9 +84,12 @@ export function PlanTable({
   undoLabel: string | null;
   /** pohled klienta: bez agenturních sloupců a dopočtů v buňkách */
   clientView?: boolean;
+  /** tematické oblasti klienta */
+  themes?: ThemeOption[];
 }) {
   const leftCols = clientView ? LEFT_COLS_CLIENT : LEFT_COLS_AGENCY;
   const [data, setData] = useState(rows);
+  const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -285,6 +293,7 @@ export function PlanTable({
               <th>Cílení</th>
               <th>Typ</th>
               <th>Kanál</th>
+              <th title="Na kterou tematickou oblast položka míří — u smíšených podíl v %">Oblast</th>
               <th>Nosič</th>
               {!clientView && <th>Jednotka</th>}
               {!clientView && <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc kontaktů)">Cena (Kč)</th>}
@@ -474,6 +483,25 @@ export function PlanTable({
                               if (v === r.channel) return;
                               run(() => patchRow(r.id, { channel: v }), () => patchRow(r.id, { channel: r.channel }),
                                   () => updateTactic({ tacticId: r.id, channel: v }));
+                            }} />
+                        </td>
+
+                        <td style={{ minWidth: 130 }}>
+                          <ThemeCell
+                            value={r.themes}
+                            themes={themeList}
+                            disabled={!canEditPlan}
+                            onSave={(shares) => {
+                              const total = shares.reduce((a, x) => a + x.share, 0) || 1;
+                              const norm = shares.map((x) => ({ ...x, share: x.share / total }));
+                              run(() => patchRow(r.id, { themes: norm }), () => patchRow(r.id, { themes: r.themes }),
+                                  () => setTacticThemes({ tacticId: r.id, shares: norm }));
+                            }}
+                            onCreate={async (name) => {
+                              const res = await createTheme({ planId, name });
+                              if (!res.ok || !res.themeId) { setError(res.ok ? "Oblast se nepodařilo založit." : res.error); return null; }
+                              setThemeList((l) => l.some((t) => t.id === res.themeId) ? l : [...l, { id: res.themeId!, name }]);
+                              return res.themeId;
                             }} />
                         </td>
 

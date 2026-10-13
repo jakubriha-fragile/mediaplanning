@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Dashboard } from "@/lib/dashboard";
+import type { Dashboard, ThemeSummary } from "@/lib/dashboard";
 import { StackedBars, Legend, type Series } from "./Charts";
 
 const MEDIA: Array<{ key: string; label: string; color: string }> = [
@@ -89,6 +89,16 @@ export function Overview({
       alert: true,
       text: <>U <b>{mil(noDelCost)} Kč ({pct0(noDelCost / total.cost)})</b> chybí GRP nebo imprese ({noDelTypes.join(", ")}).
         Do zásahu se nepočítají, takže skutečný zásah je spíš vyšší.</>,
+    }] : []),
+    ...(data.themes.length ? [{
+      title: "Oblasti",
+      alert: data.themes.some((t) => t.name === "Nezařazeno"),
+      text: <>{[...data.themes].filter((t) => t.name !== "Nezařazeno").sort((a, b) => b.cost - a.cost).slice(0, 3)
+          .map((t, i) => <span key={t.id}>{i ? ", " : ""}<b>{t.name}</b> {pct0(t.cost / (total.cost || 1))}</span>)}
+        {" "}rozpočtu
+        {data.themes.some((t) => t.name === "Nezařazeno")
+          ? <> — {mil(data.themes.find((t) => t.name === "Nezařazeno")!.cost)} Kč zatím není zařazeno do žádné oblasti.</>
+          : "."}</>,
     }] : []),
     ...(noTv.length ? [{
       title: "Pauza TV",
@@ -222,6 +232,22 @@ export function Overview({
         </section>
       </div>
 
+      {data.themes.length > 0 && (
+        <section className="db-card">
+          <h3>Tematické oblasti</h3>
+          <p className="db-note">
+            Investice po měsících pro každou oblast — všechny karty mají stejnou osu, takže jdou porovnat.
+            Smíšené položky (např. TV spot se čtyřmi produkty) se dělí podílem nastaveným v Plánu, sloupec Oblast.
+          </p>
+          <div className="db-themes">
+            {data.themes.map((t) => (
+              <ThemeCard key={t.id} t={t} months={points.map((p) => p.month)} monthLabels={monthLabels}
+                max={Math.max(1, ...data.themes.flatMap((x) => Object.values(x.costByMonth)))} total={total.cost} />
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="db-card">
         <h3>Kontakty po blocích</h3>
         <p className="db-note">
@@ -321,6 +347,47 @@ function Kpi({ label, value, unit, sub, alert }: { label: string; value: string;
       <span className="db-label">{label}</span>
       <span className="db-big">{value}{unit && <span className="cur">{unit}</span>}</span>
       {sub && <span className="db-sub">{sub}</span>}
+    </div>
+  );
+}
+
+/** Malý graf jedné oblasti. Stejná osa napříč kartami — jinak by malé oblasti vypadaly jako velké. */
+function ThemeCard({
+  t, months, monthLabels, max, total,
+}: { t: ThemeSummary; months: string[]; monthLabels: Record<string, string>; max: number; total: number }) {
+  const W = 260, H = 64, gap = 3;
+  const bw = (W - gap * (months.length - 1)) / months.length;
+  const unassigned = t.name === "Nezařazeno";
+  return (
+    <div className={`db-theme ${unassigned ? "is-alert" : ""}`}>
+      <div className="db-theme-head">
+        <b>{t.name}</b>
+        <span className="db-sub">{pct0(t.cost / (total || 1))}</span>
+      </div>
+      <div className="db-big" style={{ fontSize: 20 }}>{mil(t.cost)}<span className="cur">Kč</span></div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img"
+        aria-label={`${t.name}: investice po měsících`} style={{ height: H, display: "block", margin: "6px 0 2px" }}>
+        <line x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} className="db-base" />
+        {months.map((m, i) => {
+          const v = t.costByMonth[m] ?? 0;
+          const h = (v / max) * (H - 2);
+          return (
+            <rect key={m} x={i * (bw + gap)} y={H - h} width={bw} height={h} rx={1.5}
+              style={{ fill: unassigned ? "var(--m-other)" : "var(--m-tv)" }}>
+              <title>{`${monthLabels[m]}: ${kc(v)} Kč`}</title>
+            </rect>
+          );
+        })}
+      </svg>
+      <div className="db-theme-axis"><span>{monthLabels[months[0]]}</span><span>{monthLabels[months[months.length - 1]]}</span></div>
+      <dl className="db-theme-stats">
+        <div><dt>Zásah</dt><dd>{t.net ? pct(t.net) : "—"}</dd></div>
+        <div><dt>Frekvence</dt><dd>{freq(t.frequency)}</dd></div>
+        <div><dt>Kontakty</dt><dd>{t.contacts ? mil(t.contacts) : "—"}</dd></div>
+      </dl>
+      {t.costWithoutDelivery > 0 && (
+        <div className="db-sub" style={{ color: "var(--bad)" }}>bez dat o zásahu {mil(t.costWithoutDelivery)} Kč</div>
+      )}
     </div>
   );
 }

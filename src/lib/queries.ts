@@ -3,7 +3,7 @@ import { db } from "@/db";
 import {
   campaigns, messageLines, tactics, tacticBudgets, actualSpends,
   accountNotes, metrics, metricTargets, metricActuals, users,
-  clients, plans, targetGroups, reachCurves, duplications, channelTypeEnum,
+  clients, plans, targetGroups, reachCurves, duplications, channelTypeEnum, themes, tacticThemes,
   type ChannelType, type PlanUnit,
 } from "@/db/schema";
 import { monthsBetween } from "@/lib/period";
@@ -113,6 +113,24 @@ export async function crossContext(planTargetGroupId: string | null): Promise<Cr
   };
 }
 
+// ---------------------------------------------------- tematické oblasti
+
+/** Oblasti klienta v pořadí, jak se mají zobrazovat. */
+export async function getThemes(clientId: string) {
+  return db.select().from(themes).where(eq(themes.clientId, clientId)).orderBy(asc(themes.position), asc(themes.name));
+}
+
+/** Podíly oblastí po taktikách — mapa tacticId → [{themeId, share}]. */
+export function sharesByTactic(rows: Array<{ tacticId: string; themeId: string; share: number }>) {
+  const m = new Map<string, Array<{ themeId: string; share: number }>>();
+  for (const r of rows) {
+    const list = m.get(r.tacticId) ?? [];
+    list.push({ themeId: r.themeId, share: r.share });
+    m.set(r.tacticId, list);
+  }
+  return m;
+}
+
 // --------------------------------------------------- koeficienty duplikace
 
 export type DuplicationRow = {
@@ -183,8 +201,10 @@ export async function loadPlan(planId: string) {
   ]);
 
   const ids = new Set(rows.map((r) => r.tacticId));
+  const shares = (await db.select().from(tacticThemes)).filter((x) => ids.has(x.tacticId));
   return {
     rows,
+    themeShares: shares,
     budgets: budgets.filter((b) => ids.has(b.tacticId)),
     spends: spends.filter((s) => ids.has(s.tacticId)),
     notes: notes.filter((n) => ids.has(n.tacticId)),
@@ -206,6 +226,7 @@ export async function getPlanRows(me: Principal, planId: string) {
   const ctx = await crossContext(plan.targetGroupId);
   const loaded = await loadPlan(planId);
   const { budgets, spends } = loaded;
+  const themeMap = sharesByTactic(loaded.themeShares);
   const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }));
 
   return rows.map((r) => {
@@ -242,6 +263,7 @@ export async function getPlanRows(me: Principal, planId: string) {
       mediaType: r.mediaType,
       channelType: r.channelType,
       targetGroupId: r.targetGroupId,
+      themes: themeMap.get(r.tacticId) ?? [],
       universe,
       cells,
       budgets: Object.fromEntries(months.map((m) => [m, cells[m].budget])),

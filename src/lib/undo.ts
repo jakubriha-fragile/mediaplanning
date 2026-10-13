@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  undoEntries, tactics, tacticBudgets, messageLines, metrics, metricTargets,
+  undoEntries, tactics, tacticBudgets, messageLines, metrics, metricTargets, tacticThemes,
   actualSpends, metricActuals, accountNotes, campaigns,
   type PlanUnit,
 } from "@/db/schema";
@@ -23,6 +23,7 @@ export type UndoOp =
   | { t: "positions"; items: Array<{ id: string; position: number; messageLineId: string }> }
   | { t: "dropTactic"; id: string }
   | { t: "dropLine"; id: string }
+  | { t: "themes"; tacticId: string; shares: Array<{ themeId: string; share: number }> }
   | { t: "campaignPositions"; items: Array<{ id: string; position: number }> }
   | { t: "dropCampaign"; id: string };
 
@@ -109,6 +110,11 @@ export async function applyOps(ops: UndoOp[]) {
         break;
       case "dropTactic":
         await db.delete(tactics).where(eq(tactics.id, op.id));
+        break;
+      case "themes":
+        // původní rozdělení se zapíše celé znovu — i když bylo prázdné
+        await db.delete(tacticThemes).where(eq(tacticThemes.tacticId, op.tacticId));
+        if (op.shares.length) await db.insert(tacticThemes).values(op.shares.map((x) => ({ tacticId: op.tacticId, ...x })));
         break;
       case "dropLine":
         await db.delete(messageLines).where(eq(messageLines.id, op.id));

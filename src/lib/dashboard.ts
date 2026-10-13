@@ -2,7 +2,7 @@ import type { ChannelType, PlanUnit } from "@/db/schema";
 import { derive, combineReach, reachFromGrp } from "@/lib/crossmedia";
 import { monthsBetween } from "@/lib/period";
 import { canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
-import { getPlan, loadPlan, crossContext, type CrossContext } from "@/lib/queries";
+import { getPlan, loadPlan, crossContext, getThemes, sharesByTactic, type CrossContext } from "@/lib/queries";
 
 /**
  * Data pro přehled plánu — jedno načtení, všechny pohledy z něj.
@@ -41,8 +41,23 @@ export type BlockSummary = {
   costWithoutDelivery: number;
 };
 
+/** Tematická oblast — částky, kontakty i GRP taktiky se dělí jejím podílem. */
+export type ThemeSummary = {
+  id: string;
+  name: string;
+  cost: number;
+  costByMonth: Record<string, number>;
+  contacts: number;
+  net: number;
+  frequency: number;
+  costWithoutDelivery: number;
+};
+
+export const UNASSIGNED = "__nezarazeno";
+
 export type Dashboard = {
   months: string[];
+  themes: ThemeSummary[];
   universe: number;
   points: MonthPoint[];
   blocks: BlockSummary[];
@@ -144,6 +159,42 @@ export async function getDashboard(me: Principal, planId: string): Promise<Dashb
     };
   });
 
+  // ---------------------------------------------------- tematické oblasti
+  const themeList = await getThemes(plan.clientId);
+  const shareMap = sharesByTactic(loaded.themeShares);
+  const sharesOf = (tacticId: string) => {
+    const s = shareMap.get(tacticId);
+    return s && s.length ? s : [{ themeId: UNASSIGNED, share: 1 }];
+  };
+  const themeIds = [...new Set(cells.flatMap((c) => sharesOf(c.row.tacticId).map((x) => x.themeId)))];
+  const themeSummaries: ThemeSummary[] = themeIds.map((id) => {
+    const g = new Map<ChannelType, number>();
+    const costByMonth: Record<string, number> = {};
+    let cost = 0, contacts = 0, noDelivery = 0;
+    for (const c of cells) {
+      const sh = sharesOf(c.row.tacticId).find((x) => x.themeId === id)?.share ?? 0;
+      if (!sh) continue;
+      cost += c.cost * sh;
+      contacts += c.impressions * sh;
+      if (!c.delivered) noDelivery += c.cost * sh;
+      costByMonth[c.month] = (costByMonth[c.month] ?? 0) + c.cost * sh;
+      // GRP se dělí podílem: polovina spotu pro oblast = polovina jeho tlaku
+      if (c.grp > 0) g.set(c.row.channelType, (g.get(c.row.channelType) ?? 0) + c.grp * sh);
+    }
+    const net = netFromGrp(g, ctx);
+    const grp = [...g.values()].reduce((a, b) => a + b, 0);
+    return {
+      id,
+      name: id === UNASSIGNED ? "Nezařazeno" : themeList.find((t) => t.id === id)?.name ?? "?",
+      cost, costByMonth, contacts,
+      net: net.net,
+      frequency: net.net > 0 ? grp / 100 / net.net : 0,
+      costWithoutDelivery: noDelivery,
+    };
+  });
+  const order = (id: string) => id === UNASSIGNED ? 1e9 : themeList.findIndex((t) => t.id === id);
+  themeSummaries.sort((a, b) => order(a.id) - order(b.id));
+
   const totalGrp = grpUpTo(() => true);
   const total = netFromGrp(totalGrp, ctx);
   const grpSum = [...totalGrp.values()].reduce((a, b) => a + b, 0);
@@ -163,6 +214,7 @@ export async function getDashboard(me: Principal, planId: string): Promise<Dashb
 
   return {
     months,
+    themes: themeSummaries,
     universe,
     points,
     blocks: blocks.sort((a, b) => b.cost - a.cost),

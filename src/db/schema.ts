@@ -223,6 +223,37 @@ export const tactics = pgTable(
   (t) => ({ idx: index("tactic_line_idx").on(t.messageLineId) }),
 );
 
+/**
+ * Tematická oblast = na co komunikace míří (Brand, Longevity, Probiotika…).
+ * Je kolmá na blok: blok popisuje, jak je plán poskládaný, oblast, co podporuje.
+ * Patří klientovi, ne plánu — stejné oblasti se sledují napříč roky.
+ */
+export const themes = pgTable(
+  "theme",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => ({ uq: uniqueIndex("theme_uq").on(t.clientId, t.name) }),
+);
+
+/**
+ * Podíl taktiky na oblasti (0–1). Taktika míří buď na jednu oblast (1,0),
+ * nebo se rozdělí — např. TV spot se čtyřmi produkty po 0,25. Součet podílů
+ * jedné taktiky je 1; bez řádku je taktika „nezařazená".
+ */
+export const tacticThemes = pgTable(
+  "tactic_theme",
+  {
+    tacticId: text("tactic_id").notNull().references(() => tactics.id, { onDelete: "cascade" }),
+    themeId: text("theme_id").notNull().references(() => themes.id, { onDelete: "cascade" }),
+    share: doublePrecision("share").notNull().default(1),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.tacticId, t.themeId] }) }),
+);
+
 export const tacticBudgets = pgTable(
   "tactic_budget",
   {

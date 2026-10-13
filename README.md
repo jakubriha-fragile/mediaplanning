@@ -161,6 +161,14 @@ kumulativní zásah), **investice po měsících** podle média, **frekvence s n
 hranicí přehlcení**, **kontakty po blocích** a tabulka bloků jako flowchart. Na konci
 zdroje, předpoklady a otevřené body. Každý graf jde přepnout na tabulku.
 
+### Tematické oblasti
+
+Na co komunikace míří — Brand, Longevity, Probiotika, Dermo, Prevence & V rovnováze,
+Katalogy a akce, Privátní značky. V Plánu je sloupec **Oblast**: klik otevře rozdělení
+v procentech (součet se při uložení přepočte na 100 %, tlačítko *Rovnoměrně*, nová
+oblast se dá založit rovnou tam). Přehled ukazuje každou oblast jako malý graf
+investic se stejnou osou, se zásahem, frekvencí a kontakty.
+
 ### Import strategického plánu z Excelu
 
 ```bash
