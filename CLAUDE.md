@@ -187,6 +187,11 @@ v interaktivním terminálu, ne přes `!` v Claude Code (nemá stdin).
 2. Teprve pak `git push` na `main`. Vercel staví sám přes webhook.
 3. Nové sloupce staré verzi nevadí, obráceně ano — proto tohle pořadí.
 
+**Seed (`npm run db:seed`) na produkci už NEPOUŠTĚT.** Maže všechna plánovací data
+klienta včetně importovaného Strategického plánu 2027 a zakládá ukázkové plány
+Q4 2026 a Rok 2027, které zadavatel nechal smazat (říjen 2026, `scripts/smazat-plany.ts`).
+Seed je jen pro lokální testy.
+
 Co se automaticky **nestane**: migrace, seed, a propsání změněných proměnných
 prostředí (ty se projeví až po redeploy).
 

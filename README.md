@@ -81,7 +81,9 @@ DATABASE_URL="<produkční connection string>" npm run db:push
 DATABASE_URL="<produkční connection string>" npm run db:seed
 ```
 
-`db:seed` smaže a znovu naplní data — v produkci ho pouštějte jen jednou na začátku.
+`db:seed` smaže a znovu naplní data — **v produkci ho už nepouštějte**, smazal by i importovaný
+strategický plán. Ukázkové plány ze seedu jdou z produkce uklidit skriptem
+`scripts/smazat-plany.ts` (bez `--potvrdit` jen vypíše, co by smazal).
 
 **6. První administrátor.** Seed založí `admin@fragile.cz`. Změňte e-mail
 na svůj v `scripts/seed.ts`, nebo po nasazení v databázi.
