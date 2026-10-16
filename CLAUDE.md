@@ -222,7 +222,7 @@ Technický dluh:
   na plánu BENU 2027 vychází zásah ~92 % v každém měsíci i v každé oblasti a liší
   se jen frekvence. Zkalibrovat podle TV reportu, až ho zadavatel pošle.
 - Strategický plán BENU 2027: cílová skupina Ženy 25–54 (potvrzeno), leden 2027
-  záměrně prázdný (zadavatel ověřuje). Chybí GRP rádia, doručení u OMK MC,
+  zatím prázdný (rozhodnutí zadavatele, říjen 2026). Chybí GRP rádia, doručení u OMK MC,
   sponzoringu, partnerství a podcastu, rozpad online po platformách a u social
   oddělení fee od médií.
 - **Výchozí koeficienty duplikace** jsou 1,05–1,70 (publika se překrývají), kalkulačka
