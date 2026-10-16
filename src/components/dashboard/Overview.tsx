@@ -1,393 +1,312 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { Dashboard, ThemeSummary } from "@/lib/dashboard";
-import { StackedBars, Legend, type Series } from "./Charts";
+import { useState, useTransition } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import type { Dashboard } from "@/lib/dashboard";
+import { SCENARIO_CUT, UNASSIGNED } from "@/lib/dashboardShared";
+import { updatePlan } from "@/lib/actions";
+import type { ChannelType } from "@/db/schema";
+import { ReachFrequency } from "./Charts";
 
-const MEDIA: Array<{ key: string; label: string; color: string }> = [
-  // pořadí je součást validace palety (sousední dvojice) — neměnit bez nového běhu validátoru
-  { key: "TV", label: "TV", color: "var(--m-tv)" },
-  { key: "Digital", label: "Online", color: "var(--m-digital)" },
-  { key: "Rádio", label: "Rádio", color: "var(--m-radio)" },
-  { key: "OOH", label: "OOH a partnerství", color: "var(--m-ooh)" },
-  { key: "other", label: "Ostatní", color: "var(--m-other)" },
-];
-const BLOCK_COLORS = ["var(--b1)", "var(--b2)", "var(--b3)", "var(--b4)", "var(--b5)"];
+const TYPE_LABEL: Partial<Record<ChannelType, string>> = {
+  TV: "TV", Digital: "Online a social", Rádio: "Rádio", OOH: "OOH a partnerství",
+  Print: "Tisk", Kino: "Kino", Vlastní: "Vlastní kanály", PR: "PR",
+};
+const tl = (t: ChannelType) => TYPE_LABEL[t] ?? t;
 
 const mil = (n: number) => (n / 1e6).toLocaleString("cs-CZ", { maximumFractionDigits: n >= 1e7 ? 0 : 1 }) + " mil.";
 const kc = (n: number) => Math.round(n).toLocaleString("cs-CZ");
 const pct = (n: number) => (n * 100).toFixed(1).replace(".", ",") + " %";
 const pct0 = (n: number) => Math.round(n * 100) + " %";
-const pp = (n: number) => (n * 100).toFixed(1).replace(".", ",") + " p.b.";
+const pp = (n: number) => `${n < 0 ? "−" : ""}${Math.abs(n * 100).toFixed(1).replace(".", ",")} p.b.`;
 const freq = (n: number) => (n ? n.toFixed(1).replace(".", ",") + "×" : "—");
-const LIMIT_KEY = "prehled.frekvence";
+
+/** Pojem s vysvětlením za otazníkem — na stránce nezabírá místo. */
+function Help({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="db-help" tabIndex={0} aria-label="Vysvětlení">
+      ?<span role="tooltip">{children}</span>
+    </span>
+  );
+}
 
 export function Overview({
-  data, monthLabels, planId, tgName, periodName, showCalculator,
+  data, monthLabels, planId, tgName, periodName, themes, canEdit, filter,
 }: {
   data: Dashboard;
   monthLabels: Record<string, string>;
   planId: string;
   tgName: string;
   periodName: string;
-  showCalculator: boolean;
+  themes: Array<{ id: string; name: string }>;
+  canEdit: boolean;
+  filter: { themeId: string | null; channelType: ChannelType | null };
 }) {
-  // Hranice přehlcení je rozhodnutí plánovače, ne konstanta — pamatuje se
-  // jen v prohlížeči (pohodlí jednoho uživatele, ne sdílené nastavení).
-  const [limit, setLimit] = useState(10);
-  useEffect(() => {
-    try { const v = Number(localStorage.getItem(LIMIT_KEY)); if (v > 0) setLimit(v); } catch { /* bez úložiště */ }
-  }, []);
-  const saveLimit = (v: number) => {
-    setLimit(v);
-    try { localStorage.setItem(LIMIT_KEY, String(v)); } catch { /* bez úložiště */ }
+  const router = useRouter();
+  const path = usePathname();
+  const sp = useSearchParams();
+  const [pending, start] = useTransition();
+  const [limitDraft, setLimitDraft] = useState(String(data.freqLimit));
+
+  const setFilter = (key: "oblast" | "medium", value: string | null) => {
+    const q = new URLSearchParams(sp.toString());
+    if (value) q.set(key, value); else q.delete(key);
+    router.push(`${path}?${q}`, { scroll: false });
+  };
+  const saveLimit = () => {
+    const v = Math.round(Number(limitDraft.replace(",", ".")));
+    if (!v || v < 1 || v === data.freqLimit) { setLimitDraft(String(data.freqLimit)); return; }
+    start(async () => { await updatePlan({ planId, freqLimit: v }); router.refresh(); });
   };
 
-  const { points, total, blocks } = data;
+  const { points, total, freqLimit: limit } = data;
   const live = points.filter((p) => p.cost > 0);
   const labels = points.map((p) => monthLabels[p.month]);
-
-  // ---------------------------------------------------------- hlavní zjištění
-  const noDelCost = data.noDelivery.reduce((a, x) => a + x.cost, 0);
-  const noDelTypes = [...new Set(data.noDelivery.map((x) => x.type === "Digital" ? "online a social" : x.type === "OOH" ? "partnerství a OOH" : x.type === "TV" ? "TV bez TRP" : x.type.toLowerCase()))];
-  const withTv = points.filter((p) => p.tvReach > 0);
-  const avgInc = withTv.length ? withTv.reduce((a, p) => a + (p.net - p.tvReach), 0) / withTv.length : 0;
-  const peak = points.reduce((m, p) => (p.frequency > m.frequency ? p : m), points[0]);
   const over = points.filter((p) => p.frequency > limit);
-  const noTv = live.filter((p) => p.tvReach === 0).map((p) => monthLabels[p.month]);
-  const firstCum = points.find((p) => p.cumNet > 0)?.cumNet ?? 0;
+  const media = total.cost - total.fee;
+  const coverage = media > 0 ? total.delivered / media : 1;
+  const themeName = themes.find((t) => t.id === filter.themeId)?.name;
+  const subject = themeName ? `Oblast ${themeName}` : filter.channelType ? tl(filter.channelType) : "Kampaň";
+  const topTypes = data.costByType.slice(0, 3).map((x) => `${tl(x.type)} ${pct0(x.cost / (total.cost || 1))}`).join(" · ");
 
-  const findings: Array<{ title: string; text: React.ReactNode; alert?: boolean }> = [
-    {
-      title: "Rozpočet",
-      text: <>Plán {periodName} stojí <b>{mil(total.cost)} Kč</b> včetně fee. <b>{pct0(total.tvShare)}</b> jde do TV —
-        celý plán stojí na televizi a ostatní média ji doplňují.</>,
-    },
-    {
-      title: "Zásah",
-      text: <>Model odhaduje čistý zásah <b>{pct(total.net)}</b> cílové skupiny ({tgName}) za celé období.
-        Už v prvním měsíci je to {pct(firstCum)}
-        {firstCum >= total.net * 0.85 ? " — další měsíce tedy přidávají hlavně frekvenci, ne nové lidi." : "."}</>,
-    },
-    {
-      title: "Frekvence",
-      alert: over.length > 0,
-      text: over.length
-        ? <>V <b>{over.length} z {live.length} měsíců</b> přesahuje průměrná frekvence hranici {limit}×,
-            nejvíc v měsíci {monthLabels[peak.month]} ({freq(peak.frequency)}). Tady je prostor ubrat tlak
-            nebo ho přesunout do slabších měsíců.</>
-        : <>Průměrná frekvence nepřekročí hranici {limit}× v žádném měsíci; nejvyšší je {monthLabels[peak.month]} ({freq(peak.frequency)}).</>,
-    },
-    {
-      title: "Přírůstek",
-      alert: withTv.length > 0 && avgInc < 0.02,
-      text: <>Ostatní média přidávají k TV v průměru <b>+{pp(avgInc)}</b> čistého zásahu za měsíc
-        {avgInc < 0.02 ? " — TV už cílovku pokrývá skoro celou, nebo ostatním médiím chybí data o doručení (viz níže)." : "."}</>,
-    },
-    ...(noDelCost > 0 ? [{
-      title: "Chybí data",
+  // -------------------------------------------------------------- co s tím
+  type Todo = { title: string; text: React.ReactNode; alert?: boolean; href?: string; cta?: string };
+  const todos: Todo[] = [];
+  const sc = data.scenario;
+  if (sc) {
+    todos.push({
       alert: true,
-      text: <>U <b>{mil(noDelCost)} Kč ({pct0(noDelCost / total.cost)})</b> chybí GRP nebo imprese ({noDelTypes.join(", ")}).
-        Do zásahu se nepočítají, takže skutečný zásah je spíš vyšší.</>,
-    }] : []),
-    ...(data.themes.length ? [{
-      title: "Oblasti",
-      alert: data.themes.some((t) => t.name === "Nezařazeno"),
-      text: <>{[...data.themes].filter((t) => t.name !== "Nezařazeno").sort((a, b) => b.cost - a.cost).slice(0, 3)
-          .map((t, i) => <span key={t.id}>{i ? ", " : ""}<b>{t.name}</b> {pct0(t.cost / (total.cost || 1))}</span>)}
-        {" "}rozpočtu
-        {data.themes.some((t) => t.name === "Nezařazeno")
-          ? <> — {mil(data.themes.find((t) => t.name === "Nezařazeno")!.cost)} Kč zatím není zařazeno do žádné oblasti.</>
-          : "."}</>,
-    }] : []),
-    ...(noTv.length ? [{
-      title: "Pauza TV",
-      text: <>Bez TV: {noTv.join(", ")}. V těchto měsících drží zásah jen ostatní média.</>,
-    }] : []),
-  ];
+      title: `Ubrat TV v ${sc.months.length} ${sc.months.length === 1 ? "přetíženém měsíci" : "přetížených měsících"}`,
+      text: <>Uvidí ji v průměru {freq(sc.freqBefore)}. Model: o {Math.round(SCENARIO_CUT * 100)} % méně TRP v těchto měsících
+        uvolní <b>{mil(sc.saving)} Kč</b>, frekvence klesne na {freq(sc.freqAfter)} a zásah
+        {Math.abs(sc.netAfter - sc.netBefore) < 0.0005 ? " zůstane prakticky stejný" : ` se změní o ${pp(sc.netAfter - sc.netBefore)}`}.</>,
+      href: `/kalkulacka?plan=${planId}`, cta: "Ověřit v kalkulačce",
+    });
+  }
+  const hasTv = data.costByType.some((x) => x.type === "TV");
+  const hasOther = data.costByType.some((x) => x.type !== "TV" && x.cost > 0);
+  if (hasTv && hasOther && total.avgIncrement < 0.01) {
+    todos.push({
+      alert: true,
+      title: "Ostatní média k TV skoro nic nepřidávají",
+      text: <>Navíc jen {pp(total.avgIncrement)} za měsíc. Buď TV už cílovku pokrývá, nebo je překryv TV s ostatními
+        médii v modelu nastavený příliš přísně.</>,
+      href: `/kalkulacka?plan=${planId}`, cta: "Zkontrolovat koeficienty",
+    });
+  }
+  if (total.mediaNoData > 0) {
+    todos.push({
+      title: `Doplnit doručení k ${mil(total.mediaNoData)} Kč`,
+      text: <>Bez GRP nebo impresí se do zásahu nepočítají: {data.missing.slice(0, 3).map((m) => m.channel).join(", ")}
+        {data.missing.length > 3 ? ` a dalších ${data.missing.length - 3}` : ""}.</>,
+      href: `/?plan=${planId}`, cta: "Otevřít plán",
+    });
+  }
+  if (over.length && live.length > over.length) {
+    const calm = live.filter((p) => p.frequency <= limit && p.frequency > 0).sort((a, b) => a.frequency - b.frequency)[0];
+    if (calm) todos.push({
+      title: `${monthLabels[calm.month]} je nejklidnější měsíc (${freq(calm.frequency)})`,
+      text: <>Sem jde přesunout tlak z přetížených měsíců, aniž by se překročila hranice {limit}×.</>,
+    });
+  }
+  const unassigned = data.matrix.find((m) => m.name === "Nezařazeno");
+  if (unassigned && unassigned.cost > 0) {
+    todos.push({
+      title: `${mil(unassigned.cost)} Kč bez tematické oblasti`,
+      text: <>V matici níž se nepočítají k žádné oblasti. Doplňte je v Plánu, sloupec Oblast.</>,
+      href: `/?plan=${planId}`, cta: "Otevřít plán",
+    });
+  }
 
-  // ------------------------------------------------------------------- grafy
-  const presentTypes = new Set(data.costByType.map((x) => x.type as string));
-  const mediaSeries: Series[] = MEDIA.filter((m) => m.key === "other"
-    ? data.costByType.some((x) => !MEDIA.some((mm) => mm.key === x.type))
-    : presentTypes.has(m.key));
-  const costBars = points.map((p, i) => {
-    const values: Record<string, number> = {};
-    for (const [t, v] of Object.entries(p.costByType)) {
-      const k = MEDIA.some((m) => m.key === t) ? t : "other";
-      values[k] = (values[k] ?? 0) + (v ?? 0);
-    }
-    return { label: labels[i], values };
-  });
-
-  const reachSeries: Series[] = [
-    { key: "tv", label: "Zásah TV", color: "var(--m-tv)" },
-    { key: "inc", label: "Přírůstek ostatních médií", color: "var(--m-inc)" },
-  ];
-  const reachBars = points.map((p, i) => ({ label: labels[i], values: { tv: p.tvReach, inc: Math.max(0, p.net - p.tvReach) } }));
-
-  const freqSeries: Series[] = [
-    { key: "ok", label: "Průměrná frekvence", color: "var(--m-tv)" },
-    { key: "over", label: `Nad hranicí ${limit}× (čárkovaná čára)`, color: "var(--bad-pure)" },
-  ];
-  const freqBars = points.map((p, i) => ({
-    label: labels[i],
-    values: (p.frequency > limit ? { over: p.frequency } : { ok: p.frequency }) as Record<string, number>,
-  }));
-
-  const contactBlocks = blocks.filter((b) => b.contacts > 0).sort((a, b) => b.contacts - a.contacts);
-  const shownBlocks = contactBlocks.slice(0, 4);
-  const blockSeries: Series[] = [
-    ...shownBlocks.map((b, i) => ({ key: b.id, label: b.name, color: BLOCK_COLORS[i] })),
-    ...(contactBlocks.length > 4 ? [{ key: "rest", label: "Ostatní bloky", color: BLOCK_COLORS[4] }] : []),
-  ];
-  const contactBars = points.map((p, i) => {
-    const values: Record<string, number> = {};
-    for (const [id, v] of Object.entries(p.contactsByBlock)) {
-      const k = shownBlocks.some((b) => b.id === id) ? id : "rest";
-      values[k] = (values[k] ?? 0) + v;
-    }
-    return { label: labels[i], values };
-  });
-  const blocksWithoutContacts = blocks.filter((b) => b.contacts === 0 && b.cost > 0);
-
-  const maxBlockMonth = Math.max(1, ...blocks.flatMap((b) => Object.values(b.costByMonth)));
+  const maxCell = Math.max(1, ...data.matrix.flatMap((r) => Object.values(r.byType).map((v) => v ?? 0)));
 
   return (
-    <div className="db">
-      <section className="db-head">
-        <div>
-          <h2 className="db-title">Přehled plánu</h2>
-          <p className="db-meta">
-            {periodName} · {tgName} · universum {mil(data.universe)} osob · {blocks.length} bloků
-          </p>
-        </div>
-        {showCalculator && (
-          <a className="btn" href={`/kalkulacka?plan=${planId}`}>Otevřít v kalkulačce zásahu</a>
+    <div className={`db ${pending ? "db-pending" : ""}`}>
+      {/* filtry a úplnost dat */}
+      <div className="db-bar">
+        <label className="db-filter">Oblast
+          <select value={filter.themeId ?? ""} onChange={(e) => setFilter("oblast", e.target.value || null)}>
+            <option value="">všechny</option>
+            {themes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </label>
+        <label className="db-filter">Médium
+          <select value={filter.channelType ?? ""} onChange={(e) => setFilter("medium", e.target.value || null)}>
+            <option value="">všechna</option>
+            {data.matrixTypes.map((t) => <option key={t} value={t}>{tl(t)}</option>)}
+          </select>
+        </label>
+        {(filter.themeId || filter.channelType) && (
+          <button className="db-clear" onClick={() => router.push(`${path}?plan=${planId}`, { scroll: false })}>Zrušit filtr</button>
         )}
-      </section>
-
-      <section className="db-card">
-        <h3>Hlavní zjištění</h3>
-        <ul className="db-findings">
-          {findings.map((f) => (
-            <li key={f.title} className={f.alert ? "is-alert" : ""}>
-              <span className="db-fname">{f.title}</span>
-              <span>{f.text}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="db-kpis">
-        <Kpi label="Rozpočet vč. fee" value={mil(total.cost)} unit="Kč" sub={`${live.length} měsíců s aktivitou`} />
-        <Kpi label="Podíl TV" value={pct0(total.tvShare)} sub={`${mil(total.cost * total.tvShare)} Kč`} />
-        <Kpi label="Čistý zásah za období" value={pct(total.net)} sub={`${mil(total.net * data.universe)} osob · model`} />
-        <Kpi label="Nejvyšší frekvence v měsíci" value={freq(peak.frequency)} sub={monthLabels[peak.month]} alert={peak.frequency > limit} />
-        <Kpi label="Kontakty celkem" value={mil(total.contacts)} sub="TV v TRP + online imprese" />
-        <Kpi label="Bez dat o zásahu" value={mil(noDelCost)} unit="Kč" sub={total.cost ? `${pct0(noDelCost / total.cost)} rozpočtu` : ""} alert={noDelCost > 0} />
-      </section>
-
-      <section className="db-card">
-        <div className="db-cardhead">
-          <div>
-            <h3>Zásah v čase</h3>
-            <p className="db-note">Čistý zásah po Sainsburyho skládání médií: tmavě TV, světle co k ní přidají ostatní média.
-              Čára je kumulativní zásah od začátku období.</p>
-          </div>
+        <div className="db-coverage" title="Podíl mediálního rozpočtu, ke kterému má plán GRP nebo imprese. Agenturní práce se nepočítá.">
+          Model počítá se <b>{pct0(coverage)}</b> mediálního rozpočtu
+          <span className="db-meter"><i style={{ width: `${Math.round(coverage * 100)}%` }} /></span>
+          {total.mediaNoData > 0 && <a href={`/?plan=${planId}`}>Doplnit data →</a>}
         </div>
-        <Legend series={reachSeries} extra={<span><i className="db-sw db-sw-line" />Kumulativní zásah</span>} />
-        <StackedBars
-          caption="Měsíční čistý zásah: TV a přírůstek ostatních médií, s kumulativním zásahem"
-          bars={reachBars} series={reachSeries} format={pct} axisFormat={pct0} maxValue={1} totalLabel="Čistý zásah"
-          line={{ label: "Kumulativní zásah", values: points.map((p) => p.cumNet) }}
-          tooltipExtra={(i) => <div className="db-tip-sum">Frekvence<span>{freq(points[i].frequency)}</span></div>}
-        />
+      </div>
+
+      {/* první obrazovka: věta + tři čísla */}
+      <section className="db-hero">
+        <div className="db-card db-lead">
+          <p>
+            {subject} zasáhne <b>{pct0(total.net)}</b> {tgName.toLowerCase().startsWith("ženy") ? "žen" : "lidí z cílové skupiny"}
+            {" "}{tgName.replace(/^Ženy\s*/, "")}
+            <span className="db-muted"> ({mil(total.people)})</span>.
+            {" "}Zasažená {tgName.toLowerCase().startsWith("ženy") ? "žena" : "osoba"} ji uvidí v průměru
+            {" "}<b>{freq(total.avgMonthlyFrequency)} za měsíc</b>.
+          </p>
+          <span className="db-sub">{periodName} · modelový odhad <Help>Zásah = kolik lidí z cílové skupiny uvidí reklamu aspoň jednou.
+            Lidé, kteří vidí víc médií, se počítají jen jednou. Frekvence = kolikrát ji zasažený člověk uvidí za měsíc.</Help></span>
+        </div>
+        <div className="db-card db-kpi">
+          <span className="db-label">Rozpočet včetně fee</span>
+          <span className="db-big">{mil(total.cost)}<span className="cur">Kč</span></span>
+          <span className="db-sub">{topTypes}</span>
+        </div>
+        <div className="db-card db-kpi">
+          <span className="db-label">Náklad na zasaženou osobu <Help>Celý rozpočet včetně fee děleno počtem
+            zasažených lidí za období. Nejlepší číslo pro srovnání oblastí a médií mezi sebou.</Help></span>
+          <span className="db-big">{total.costPerPerson ? kc(total.costPerPerson) : "—"}<span className="cur">Kč</span></span>
+          <span className="db-sub">za celé období</span>
+        </div>
+        <div className={`db-card db-kpi ${over.length ? "is-alert" : ""}`}>
+          <span className="db-label">Měsíce s přehlcením</span>
+          <span className="db-big">{over.length} z {live.length}</span>
+          <span className="db-sub">frekvence nad {limit}× za měsíc</span>
+        </div>
       </section>
 
-      <div className="db-grid2">
-        <section className="db-card">
-          <h3>Investice po měsících</h3>
-          <p className="db-note">Náklady včetně fee podle média.</p>
-          <Legend series={mediaSeries} />
-          <StackedBars caption="Měsíční investice podle média" bars={costBars} series={mediaSeries}
-            format={(v) => `${kc(v)} Kč`} axisFormat={(v) => (v ? mil(v) : "0")} />
-        </section>
-
+      <div className="db-main">
         <section className="db-card">
           <div className="db-cardhead">
             <div>
-              <h3>Frekvence a přehlcení</h3>
-              <p className="db-note">Průměrný počet kontaktů na zasaženého za měsíc, přes všechna sdělení.</p>
+              <h3>Zásah a frekvence po měsících</h3>
+              <p className="db-note">Nahoře kolik lidí reklama zasáhne, dole kolikrát ji uvidí. Šedý pás je rozumná frekvence,
+                oranžově kontakty navíc.</p>
             </div>
-            <label className="db-limit">
-              Hranice
-              <input type="number" min={1} max={50} value={limit} onChange={(e) => saveLimit(Math.max(1, Number(e.target.value) || 1))} />×
+            <label className="db-limit">Rozumná frekvence do
+              {canEdit ? (
+                <input value={limitDraft} inputMode="numeric" onChange={(e) => setLimitDraft(e.target.value)}
+                  onBlur={saveLimit} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              ) : <b>{limit}</b>}×
+              <Help>Hranici nastavuje plánovač pro celý plán, všichni pak vidí stejná doporučení.</Help>
             </label>
           </div>
-          <Legend series={freqSeries} />
-          <StackedBars caption="Měsíční frekvence s hranicí přehlcení" bars={freqBars} series={freqSeries}
-            format={freq} axisFormat={(v) => `${Math.round(v)}×`}
-            threshold={{ value: limit, label: `hranice ${limit}×` }} />
+          <div className="db-legend">
+            <span><i className="db-sw" style={{ background: "var(--m-tv)" }} />Zasáhne TV</span>
+            <span><i className="db-sw" style={{ background: "var(--m-inc)" }} />Navíc díky ostatním médiím</span>
+            <span><i className="db-sw db-sw-line" />Od začátku plánu</span>
+            <span><i className="db-sw" style={{ background: "var(--bad-pure)" }} />Kontakty nad rozumnou frekvencí</span>
+          </div>
+          <ReachFrequency
+            caption="Zásah a frekvence po měsících"
+            labels={labels}
+            tv={points.map((p) => p.tvReach)}
+            inc={points.map((p) => Math.max(0, p.net - p.tvReach))}
+            cum={points.map((p) => p.cumNet)}
+            freq={points.map((p) => p.frequency)}
+            limit={limit}
+            formatPct={pct}
+          />
+        </section>
+
+        <section className="db-card">
+          <h3>Co s tím</h3>
+          <p className="db-note">Doporučení se počítají z plánu a modelu zásahu.</p>
+          {todos.length ? (
+            <ul className="db-todos">
+              {todos.map((t) => (
+                <li key={t.title} className={t.alert ? "is-alert" : ""}>
+                  <b>{t.title}</b>
+                  <span>{t.text}</span>
+                  {t.href && <a href={t.href}>{t.cta} →</a>}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="db-note">Plán je vyvážený: žádné přetížení ani chybějící data.</p>}
         </section>
       </div>
 
-      {data.themes.length > 0 && (
-        <section className="db-card">
-          <h3>Tematické oblasti</h3>
-          <p className="db-note">
-            Investice po měsících pro každou oblast — všechny karty mají stejnou osu, takže jdou porovnat.
-            Smíšené položky (např. TV spot se čtyřmi produkty) se dělí podílem nastaveným v Plánu, sloupec Oblast.
-          </p>
-          <div className="db-themes">
-            {data.themes.map((t) => (
-              <ThemeCard key={t.id} t={t} months={points.map((p) => p.month)} monthLabels={monthLabels}
-                max={Math.max(1, ...data.themes.flatMap((x) => Object.values(x.costByMonth)))} total={total.cost} />
-            ))}
-          </div>
-        </section>
-      )}
-
       <section className="db-card">
-        <h3>Kontakty po blocích</h3>
-        <p className="db-note">
-          Imprese, u TV přepočtené z TRP. Brand a produktové řady jdou rozlišit jen tam, kde má plán doručení po blocích.
-          {blocksWithoutContacts.length > 0 && <> Bez údaje o kontaktech: {blocksWithoutContacts.map((b) => b.name).join(", ")}.</>}
-        </p>
-        <Legend series={blockSeries} />
-        <StackedBars caption="Měsíční kontakty podle bloku" bars={contactBars} series={blockSeries}
-          format={(v) => `${mil(v)} kontaktů`} axisFormat={(v) => (v ? mil(v) : "0")} />
-      </section>
-
-      <section className="db-card">
-        <h3>Bloky a produktové řady</h3>
-        <p className="db-note">Náklady po měsících jako flowchart — sytější buňka, vyšší investice. Zásah a frekvence za celé období, jen z médií s doručením.</p>
+        <h3>Kam jdou peníze</h3>
+        <p className="db-note">Tematické oblasti × média. Klik na oblast vyfiltruje celý přehled.</p>
         <div className="db-tablewrap">
-          <table className="db-table db-blocks">
+          <table className="db-table db-matrix">
             <thead>
               <tr>
-                <th>Blok</th><th>Náklady</th><th>Podíl</th>
-                {points.map((p) => <th key={p.month} className="db-mcol">{monthLabels[p.month]}</th>)}
-                <th>Kontakty</th><th>Zásah za období</th><th>Frekvence za období</th><th>Bez dat o zásahu</th>
+                <th>Oblast</th>
+                {data.matrixTypes.map((t) => <th key={t}>{tl(t)}</th>)}
+                <th>Celkem</th><th>Podíl</th>
+                <th>Zásah <Help>Za celé období, jen z médií s doručením.</Help></th>
+                <th>Frekvence za měsíc</th>
               </tr>
             </thead>
             <tbody>
-              {blocks.map((b) => (
-                <tr key={b.id}>
-                  <td>{b.name}</td>
-                  <td>{kc(b.cost)}</td>
-                  <td>{pct0(b.cost / (total.cost || 1))}</td>
-                  {points.map((p) => {
-                    const v = b.costByMonth[p.month] ?? 0;
-                    const a = v / maxBlockMonth;
+              {data.matrix.map((r) => (
+                <tr key={r.id} className={filter.themeId === r.id ? "is-on" : ""}
+                  onClick={() => r.id !== UNASSIGNED && setFilter("oblast", filter.themeId === r.id ? null : r.id)}>
+                  <td><b>{r.name}</b></td>
+                  {data.matrixTypes.map((t) => {
+                    const v = r.byType[t] ?? 0;
+                    const a = v / maxCell;
                     return (
-                      <td key={p.month} className="db-heat" title={v ? `${b.name} · ${monthLabels[p.month]}: ${kc(v)} Kč` : undefined}>
-                        {v > 0 && <span style={{ opacity: 0.15 + 0.85 * Math.sqrt(a) }} />}
+                      <td key={t} className="db-cell">
+                        {v > 0 ? <span style={{ background: `color-mix(in srgb, var(--m-tv) ${Math.round(8 + 72 * a)}%, transparent)`,
+                          color: a > 0.55 ? "#fff" : undefined }}>{mil(v)}</span> : <span className="db-muted">—</span>}
                       </td>
                     );
                   })}
-                  <td>{b.contacts ? mil(b.contacts) : "—"}</td>
-                  <td>{b.net ? pct(b.net) : "—"}</td>
-                  <td>{freq(b.frequency)}</td>
-                  <td className={b.costWithoutDelivery ? "db-warncell" : ""}>{b.costWithoutDelivery ? kc(b.costWithoutDelivery) : "—"}</td>
+                  <td><b>{mil(r.cost)}</b></td>
+                  <td>{pct0(r.cost / (total.cost || 1))}</td>
+                  <td>{r.net ? pct0(r.net) : "—"}</td>
+                  <td className={r.monthlyFrequency > limit ? "db-warncell" : ""}>{freq(r.monthlyFrequency)}</td>
                 </tr>
               ))}
             </tbody>
-            <tfoot>
-              <tr>
-                <td>Celkem</td><td>{kc(total.cost)}</td><td>100 %</td>
-                {points.map((p) => <td key={p.month} className="db-mcol">{p.cost ? mil(p.cost) : "—"}</td>)}
-                <td>{mil(total.contacts)}</td><td>{pct(total.net)}</td><td>{freq(total.frequency)}</td><td>{kc(noDelCost)}</td>
-              </tr>
-            </tfoot>
           </table>
         </div>
       </section>
 
-      <div className="db-grid3">
-        <section className="db-card">
-          <h3>Odkud jsou čísla</h3>
-          <ul className="db-list">
-            <li>Náklady jsou <b>včetně agenturního fee</b>, tak jak jsou v plánu.</li>
-            <li>Kontakty: TV z TRP v cílové skupině kampaně, online z plánovaných impresí.</li>
-            <li>Zásah: křivka zásahu každého média a Sainsburyho skládání s koeficienty duplikace.</li>
-          </ul>
-        </section>
-        <section className="db-card">
-          <h3>Předpoklady</h3>
-          <ul className="db-list">
-            <li>Cílová skupina <b>{tgName}</b>, universum {mil(data.universe)} osob.</li>
-            <li>Křivky zásahu a koeficienty duplikace jsou výchozí odhady, ne kalibrovaná data.</li>
-            <li>Frekvence je průměr za měsíc; skutečné rozdělení kontaktů bývá nerovnoměrnější.</li>
-          </ul>
-        </section>
-        <section className="db-card">
-          <h3>Otevřené body</h3>
-          <ul className="db-list">
-            {data.noDelivery.slice(0, 4).map((x) => (
-              <li key={x.channel}><b>{x.channel}</b>: chybí GRP nebo imprese ({mil(x.cost)} Kč).</li>
-            ))}
-            {data.noDelivery.length > 4 && <li>…a dalších {data.noDelivery.length - 4} položek bez doručení.</li>}
-            <li>Zkalibrovat křivku TV na reálný report zásahu.</li>
-          </ul>
-        </section>
-      </div>
-
-      <p className="db-disclaimer">
-        <b>Modelový odhad, ne měření.</b> Přesná deduplikace vyžaduje single-source panelová data.
-        Před sdílením s klientem patří čísla validovat media specialistou.
-      </p>
-    </div>
-  );
-}
-
-function Kpi({ label, value, unit, sub, alert }: { label: string; value: string; unit?: string; sub?: string; alert?: boolean }) {
-  return (
-    <div className={`db-card db-kpi ${alert ? "is-alert" : ""}`}>
-      <span className="db-label">{label}</span>
-      <span className="db-big">{value}{unit && <span className="cur">{unit}</span>}</span>
-      {sub && <span className="db-sub">{sub}</span>}
-    </div>
-  );
-}
-
-/** Malý graf jedné oblasti. Stejná osa napříč kartami — jinak by malé oblasti vypadaly jako velké. */
-function ThemeCard({
-  t, months, monthLabels, max, total,
-}: { t: ThemeSummary; months: string[]; monthLabels: Record<string, string>; max: number; total: number }) {
-  const W = 260, H = 64, gap = 3;
-  const bw = (W - gap * (months.length - 1)) / months.length;
-  const unassigned = t.name === "Nezařazeno";
-  return (
-    <div className={`db-theme ${unassigned ? "is-alert" : ""}`}>
-      <div className="db-theme-head">
-        <b>{t.name}</b>
-        <span className="db-sub">{pct0(t.cost / (total || 1))}</span>
-      </div>
-      <div className="db-big" style={{ fontSize: 20 }}>{mil(t.cost)}<span className="cur">Kč</span></div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img"
-        aria-label={`${t.name}: investice po měsících`} style={{ height: H, display: "block", margin: "6px 0 2px" }}>
-        <line x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} className="db-base" />
-        {months.map((m, i) => {
-          const v = t.costByMonth[m] ?? 0;
-          const h = (v / max) * (H - 2);
-          return (
-            <rect key={m} x={i * (bw + gap)} y={H - h} width={bw} height={h} rx={1.5}
-              style={{ fill: unassigned ? "var(--m-other)" : "var(--m-tv)" }}>
-              <title>{`${monthLabels[m]}: ${kc(v)} Kč`}</title>
-            </rect>
-          );
-        })}
-      </svg>
-      <div className="db-theme-axis"><span>{monthLabels[months[0]]}</span><span>{monthLabels[months[months.length - 1]]}</span></div>
-      <dl className="db-theme-stats">
-        <div><dt>Zásah</dt><dd>{t.net ? pct(t.net) : "—"}</dd></div>
-        <div><dt>Frekvence</dt><dd>{freq(t.frequency)}</dd></div>
-        <div><dt>Kontakty</dt><dd>{t.contacts ? mil(t.contacts) : "—"}</dd></div>
-      </dl>
-      {t.costWithoutDelivery > 0 && (
-        <div className="db-sub" style={{ color: "var(--bad)" }}>bez dat o zásahu {mil(t.costWithoutDelivery)} Kč</div>
-      )}
+      <details className="db-card db-drawer">
+        <summary>Jak to počítáme, předpoklady a slovníček</summary>
+        <div className="db-grid3">
+          <div>
+            <h4>Odkud jsou čísla</h4>
+            <ul className="db-list">
+              <li>Náklady jsou včetně agenturního fee. Agenturní práce ({mil(total.fee)} Kč) zásah nemá a do „chybějících dat" se nepočítá.</li>
+              <li>TV z TRP v cílové skupině kampaně, online z plánovaných impresí.</li>
+              <li>Zásah: křivka zásahu každého média a Sainsburyho skládání s koeficienty překryvu.</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Předpoklady</h4>
+            <ul className="db-list">
+              <li>Cílová skupina {tgName}, {mil(data.universe)} osob.</li>
+              <li>Křivky zásahu a koeficienty překryvu jsou výchozí odhady, ne kalibrovaná data.</li>
+              <li>Frekvence je průměr za měsíc; skutečné kontakty bývají rozložené nerovnoměrněji.</li>
+            </ul>
+          </div>
+          <div>
+            <h4>Chybí doručení</h4>
+            <ul className="db-list">
+              {data.missing.slice(0, 6).map((m) => (
+                <li key={m.channel}>{m.channel} <span className="db-muted">({mil(m.cost)} Kč{m.kind === "mixed" ? ", práce i média dohromady" : ""})</span></li>
+              ))}
+              {!data.missing.length && <li>Nic — všechna média mají GRP nebo imprese.</li>}
+            </ul>
+          </div>
+        </div>
+        <h4>Slovníček</h4>
+        <dl className="db-gloss">
+          <dt>Zásah</dt><dd>Kolik procent cílové skupiny reklamu uvidí aspoň jednou.</dd>
+          <dt>Frekvence</dt><dd>Kolikrát ji zasažený člověk v průměru uvidí.</dd>
+          <dt>TRP / GRP</dt><dd>Součet sledovanosti spotů v procentech cílové skupiny. 100 TRP = tolik kontaktů, kolik má cílová skupina lidí.</dd>
+          <dt>Překryv</dt><dd>Lidé, kteří vidí víc médií. Model je počítá jen jednou.</dd>
+        </dl>
+        <p className="db-disclaimer"><b>Modelový odhad, ne měření.</b> Přesná deduplikace vyžaduje single-source panelová data.
+          Před sdílením s klientem patří čísla validovat media specialistou.</p>
+      </details>
     </div>
   );
 }

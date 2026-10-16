@@ -121,6 +121,9 @@ export const plans = pgTable(
     currency: text("currency").notNull().default("CZK"),
     /** Výchozí cílová skupina plánu — taktika ji může přebít vlastní. */
     targetGroupId: text("target_group_id"),
+    /** Hranice přehlcení — průměrná měsíční frekvence, nad kterou Přehled hlásí
+     *  přetížení. U plánu, ne v prohlížeči: všichni mají vidět stejná doporučení. */
+    freqLimit: integer("freq_limit").notNull().default(10),
     position: integer("position").notNull().default(0),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },

@@ -1243,6 +1243,7 @@ const planPatch = z.object({
   targetGroupId: z.string().min(1).nullable().optional(),
   periodStart: monthSchema.optional(),
   periodEnd: monthSchema.optional(),
+  freqLimit: z.number().int().min(1).max(60).optional(),
 });
 
 function periodOk(start: string, end: string) {
@@ -1323,6 +1324,10 @@ export async function updatePlan(raw: z.input<typeof planPatch>): Promise<Result
       patch.targetGroupId = data.targetGroupId;
       items.push(`Plán ${before.name}: změněna výchozí cílová skupina`);
     }
+    if (data.freqLimit !== undefined && data.freqLimit !== before.freqLimit) {
+      patch.freqLimit = data.freqLimit;
+      items.push(`Plán ${before.name}: hranice přehlcení ${before.freqLimit}× → ${data.freqLimit}×`);
+    }
     if (patch.name && (await planNameTaken(before.clientId, data.name!, before.id))) {
       return { ok: false, error: `Plán „${data.name}" už u tohoto klienta existuje — zvolte jiný název.` };
     }
@@ -1359,6 +1364,7 @@ export async function updatePlan(raw: z.input<typeof planPatch>): Promise<Result
       revalidatePath("/plneni");
     }
     await log(me!.id, "plan", items);
+    revalidatePath("/prehled");
     revalidatePath("/");
     return { ok: true };
   } catch (e) {

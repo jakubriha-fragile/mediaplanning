@@ -154,12 +154,13 @@ jednotlivým médiem a sto procenty.
 
 ### Přehled
 
-První záložka pro agenturu (klient ji nevidí). Nahoře **hlavní zjištění** dopočítaná
-z dat (rozpočet, zásah, frekvence, přírůstek ostatních médií k TV, kolik rozpočtu
-nemá data o doručení), pod nimi KPI, **zásah v čase** (TV + přírůstek ostatních médií,
-kumulativní zásah), **investice po měsících** podle média, **frekvence s nastavitelnou
-hranicí přehlcení**, **kontakty po blocích** a tabulka bloků jako flowchart. Na konci
-zdroje, předpoklady a otevřené body. Každý graf jde přepnout na tabulku.
+První záložka pro agenturu (klient ji nevidí). Úvodní obrazovka odpoví bez rolování:
+jedna věta se zásahem a frekvencí, rozpočet, náklad na zasaženou osobu a počet přetížených
+měsíců; pod tím zásah a frekvence v jednom grafu se společnou osou měsíců a vpravo
+**Co s tím** — doporučení spočítaná modelem (např. kolik uvolní −30 % TRP v přetížených
+měsících). Níž matice **oblasti × média** (klik na oblast filtruje celý přehled) a sbalený
+panel s metodikou, předpoklady a slovníčkem. Pojmy jsou vysvětlené za otazníkem.
+Hranici přehlcení nastavuje plánovač u plánu.
 
 ### Tematické oblasti
 

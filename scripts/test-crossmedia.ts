@@ -10,6 +10,7 @@ import {
   effectiveReach, duplicationOf, DEFAULT_CURVE, isGrpPriced, kFromMeasured,
 } from "../src/lib/crossmedia";
 import { periodLabel } from "../src/lib/period";
+import { costKind } from "../src/lib/costKind";
 
 let failed = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -171,6 +172,16 @@ console.log("\nNázvy období");
   ok("listopad–prosinec NENÍ Q4", periodLabel("2027-11", "2027-12") === "Lis–Pro 2027", periodLabel("2027-11", "2027-12"));
   ok("jeden měsíc = Prosinec 2027", periodLabel("2027-12", "2027-12") === "Prosinec 2027", periodLabel("2027-12", "2027-12"));
   ok("přes přelom roku", periodLabel("2027-11", "2028-02") === "Lis 2027 – Úno 2028", periodLabel("2027-11", "2028-02"));
+}
+
+console.log("\nTyp nákladu (agenturní práce vs. média)");
+{
+  ok("„Always-on Social Media fee“ je honorář", costKind("Always-on Social Media fee") === "fee");
+  ok("„TikTok always on (médiá)“ jsou média", costKind("TikTok always on (médiá)") === "media");
+  ok("„Gen Z obsah - always-on (ag. práce)“ je honorář", costKind("Gen Z obsah - always-on (ag. práce)") === "fee");
+  ok("„SOLERO (ag. práce, influ & CC, médiá)“ je smíšené", costKind("SOLERO (ag. práce, influ & CC, médiá)") === "mixed");
+  ok("ambasador je honorář", costKind("BENU Longevity - ambasádor") === "fee");
+  ok("TV spot jsou média", costKind("TV – hlavní brandový spot") === "media");
 }
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");

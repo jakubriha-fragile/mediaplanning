@@ -41,7 +41,9 @@ src/lib/actions.ts       VŠECHNY zápisy; každý projde assertCan()
 src/lib/queries.ts       čtení dat pro stránky
 src/lib/undo.ts          zásobník vrácení zpět (10 kroků na uživatele)
 src/app/kalkulacka/      Sainsburyho kalkulačka + editace koeficientů duplikace
-src/lib/dashboard.ts     data pro Přehled (/prehled): zásah v čase, investice, frekvence, bloky
+src/lib/dashboard.ts     data pro Přehled (/prehled): zásah a frekvence v čase, matice oblasti × média,
+                         filtry (?oblast, ?medium), modelový scénář „méně TV v přetížení"
+src/lib/costKind.ts      média / agenturní práce / smíšené — podle názvu položky
 scripts/import-strategicky-plan.ts   import týdenního flowchartu BENU z Excelu
 ```
 
@@ -109,7 +111,13 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    Kopie plánu přenáší i oblasti. Bez řádku v `tactic_theme` je taktika
    „Nezařazeno" a Přehled ji tak i ukazuje.
 
-12. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
+12. **Agenturní práce není „chybějící data".** `costKind()` ji pozná z názvu
+   (ag. práce, fee, natáčení, ambasador…) a Přehled ji z pokrytí modelu vyřazuje.
+   Hranice přehlcení je u plánu (`plan.freq_limit`), ne v prohlížeči — doporučení
+   musí vidět všichni stejná. Doporučení „ubrat TV" je spočítané modelem
+   (SCENARIO_CUT), ne odhadnuté.
+
+13. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
    jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se
    „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.
 

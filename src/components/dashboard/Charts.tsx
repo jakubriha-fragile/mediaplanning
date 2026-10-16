@@ -191,3 +191,110 @@ export function StackedBars({
     </div>
   );
 }
+
+/**
+ * Zásah a frekvence pod sebou se SPOLEČNOU časovou osou. Nejde o dvě osy
+ * v jednom grafu: jsou to dva grafy nad stejnými měsíci, každý se svou
+ * jednotkou. Příběh plánu je obvykle „zásah stojí, roste jen frekvence"
+ * a ten je vidět jen vedle sebe. Najetí myší zvýrazní měsíc v obou.
+ */
+export function ReachFrequency({
+  labels, tv, inc, cum, freq, limit, formatPct, caption,
+}: {
+  labels: string[];
+  tv: number[];
+  inc: number[];
+  cum: number[];
+  freq: number[];
+  limit: number;
+  formatPct: (v: number) => string;
+  caption: string;
+}) {
+  const [ref, W] = useWidth<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const [table, setTable] = useState(false);
+  const RH = 150, FH = 150, GAP = 34, L = 48, R = 12, T = 8;
+  const H = T + RH + GAP + FH + 6;
+  const iw = W - L - R;
+  const band = iw / Math.max(1, labels.length);
+  const bw = Math.min(40, band * 0.58);
+  const yR = (v: number) => T + RH - v * RH;
+  const fMax = Math.max(limit * 1.5, ...freq) * 1.08;
+  const fTicks = ticks(fMax, 3);
+  const fTop = fTicks[fTicks.length - 1];
+  const f0 = T + RH + GAP;
+  const yF = (v: number) => f0 + FH - (v / fTop) * FH;
+  const fmtF = (v: number) => (v ? v.toFixed(1).replace(".", ",") + "×" : "—");
+  const lowBand = Math.min(3, limit);
+
+  return (
+    <div className="db-chart" ref={ref}>
+      <svg width={W} height={H} role="img" aria-label={caption} onMouseLeave={() => setHover(null)}>
+        {/* zásah */}
+        {[0, 0.5, 1].map((t) => (
+          <g key={`r${t}`}>
+            <line x1={L} x2={W - R} y1={yR(t)} y2={yR(t)} className={t === 0 ? "db-base" : "db-grid"} />
+            <text x={L - 8} y={yR(t)} dy="0.32em" textAnchor="end">{Math.round(t * 100)} %</text>
+          </g>
+        ))}
+        {/* frekvence: pásmo rozumné frekvence a osa */}
+        <rect x={L} width={iw} y={yF(limit)} height={yF(lowBand) - yF(limit)} className="db-band" />
+        {fTicks.map((t) => (
+          <g key={`f${t}`}>
+            <line x1={L} x2={W - R} y1={yF(t)} y2={yF(t)} className={t === 0 ? "db-base" : "db-grid"} />
+            <text x={L - 8} y={yF(t)} dy="0.32em" textAnchor="end">{Math.round(t)}×</text>
+          </g>
+        ))}
+        <line x1={L} x2={W - R} y1={yF(limit)} y2={yF(limit)} className="db-threshold" />
+
+        {labels.map((lab, i) => {
+          const x = L + band * i + band / 2 - bw / 2;
+          const tvH = tv[i] * RH, incH = inc[i] * RH;
+          const f = freq[i], base = Math.min(f, limit);
+          return (
+            <g key={lab}>
+              {hover === i && <rect x={L + band * i} y={T} width={band} height={H - T - 6} className="db-hoverband" />}
+              {tvH > 0 && <path d={topRounded(x, yR(tv[i]) + (incH > 0 ? 2 : 0), bw, tvH - (incH > 0 ? 2 : 0))} style={{ fill: "var(--m-tv)" }} />}
+              {incH > 0 && <path d={topRounded(x, yR(tv[i] + inc[i]), bw, incH)} style={{ fill: "var(--m-inc)" }} />}
+              {f > 0 && <path d={topRounded(x, yF(base) + (f > limit ? 2 : 0), bw, yF(0) - yF(base) - (f > limit ? 2 : 0))} style={{ fill: "var(--m-tv)" }} />}
+              {f > limit && <path d={topRounded(x, yF(f), bw, yF(limit) - yF(f))} style={{ fill: "var(--bad-pure)" }} />}
+              {f > 0 && <text x={x + bw / 2} y={yF(f) - 6} textAnchor="middle" className="db-vlab">{fmtF(f)}</text>}
+              <text x={x + bw / 2} y={T + RH + 20} textAnchor="middle" className={hover === i ? "db-xlab on" : "db-xlab"}>{lab}</text>
+              <rect x={L + band * i} y={T} width={band} height={H - T} fill="transparent" onMouseEnter={() => setHover(i)} />
+            </g>
+          );
+        })}
+        <polyline className="db-line" fill="none" pointerEvents="none"
+          points={cum.map((v, i) => `${L + band * i + band / 2},${yR(v)}`).join(" ")} />
+      </svg>
+
+      {hover !== null && (
+        <div className="db-tip" style={{ left: Math.min(W - 220, Math.max(0, L + band * hover + band / 2 + 16)), top: 8 }}>
+          <b>{labels[hover]}</b>
+          <div><i className="db-sw" style={{ background: "var(--m-tv)" }} />Zasáhne TV<span>{formatPct(tv[hover])}</span></div>
+          <div><i className="db-sw" style={{ background: "var(--m-inc)" }} />Navíc ostatní média<span>{formatPct(inc[hover])}</span></div>
+          <div className="db-tip-sum">Zasáhne celkem<span>{formatPct(tv[hover] + inc[hover])}</span></div>
+          <div><i className="db-sw db-sw-line" />Od začátku plánu<span>{formatPct(cum[hover])}</span></div>
+          <div className="db-tip-sum">Uvidí v průměru<span>{fmtF(freq[hover])}</span></div>
+        </div>
+      )}
+
+      <button className="db-tablebtn" onClick={() => setTable((t) => !t)} aria-expanded={table}>
+        {table ? "Skrýt tabulku" : "Zobrazit jako tabulku"}
+      </button>
+      {table && (
+        <div className="db-tablewrap">
+          <table className="db-table">
+            <thead><tr><th>Měsíc</th><th>Zasáhne TV</th><th>Navíc ostatní</th><th>Celkem</th><th>Od začátku</th><th>Frekvence</th></tr></thead>
+            <tbody>
+              {labels.map((l, i) => (
+                <tr key={l}><td>{l}</td><td>{formatPct(tv[i])}</td><td>{formatPct(inc[i])}</td>
+                  <td>{formatPct(tv[i] + inc[i])}</td><td>{formatPct(cum[i])}</td><td>{fmtF(freq[i])}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

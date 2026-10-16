@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
-import { getUser, getVisiblePlans, pickPlan, getPlan, getTargetGroups } from "@/lib/queries";
+import { getUser, getVisiblePlans, pickPlan, getPlan, getTargetGroups, getThemes } from "@/lib/queries";
+import { can } from "@/lib/permissions";
+import { channelTypeEnum, type ChannelType } from "@/db/schema";
 import { getDashboard } from "@/lib/dashboard";
 import { planTitle, monthShort, periodLabel } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
@@ -17,7 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function OverviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ plan?: string }>;
+  searchParams: Promise<{ plan?: string; oblast?: string; medium?: string }>;
 }) {
   const me = await currentPrincipal();
   if (!me) redirect("/prihlaseni");
@@ -39,8 +41,15 @@ export default async function OverviewPage({
     );
   }
 
-  const [plan, data, tgs] = await Promise.all([getPlan(planId), getDashboard(me, planId), getTargetGroups()]);
-  if (!plan || !data) redirect("/");
+  const plan = await getPlan(planId);
+  if (!plan) redirect("/");
+  const themes = await getThemes(plan.clientId);
+  // filtry z adresy — jen hodnoty, které k plánu opravdu patří
+  const themeId = themes.some((t) => t.id === sp.oblast) ? sp.oblast! : null;
+  const channelType = (channelTypeEnum.enumValues as readonly string[]).includes(sp.medium ?? "")
+    ? (sp.medium as ChannelType) : null;
+  const [data, tgs] = await Promise.all([getDashboard(me, planId, { themeId, channelType }), getTargetGroups()]);
+  if (!data) redirect("/");
 
   // u ročního plánu přes přelom roku je potřeba vidět rok, jinak stačí měsíc
   const crossYear = plan.periodStart.slice(0, 4) !== plan.periodEnd.slice(0, 4);
@@ -57,7 +66,9 @@ export default async function OverviewPage({
         planId={planId}
         tgName={tgs.find((t) => t.id === plan.targetGroupId)?.name ?? "bez cílové skupiny"}
         periodName={periodLabel(plan.periodStart, plan.periodEnd)}
-        showCalculator
+        themes={themes.map((t) => ({ id: t.id, name: t.name }))}
+        canEdit={can(me, "write", { area: "plan", mediaType: null, planId, campaignId: null, month: null })}
+        filter={{ themeId, channelType }}
       />
     </Chrome>
   );

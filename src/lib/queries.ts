@@ -48,6 +48,7 @@ export async function getPlan(planId: string) {
       id: plans.id, name: plans.name, clientId: plans.clientId, clientName: clients.name,
       periodStart: plans.periodStart, periodEnd: plans.periodEnd,
       status: plans.status, targetGroupId: plans.targetGroupId, currency: plans.currency,
+      freqLimit: plans.freqLimit,
     })
     .from(plans)
     .innerJoin(clients, eq(plans.clientId, clients.id))

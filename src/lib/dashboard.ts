@@ -1,76 +1,85 @@
 import type { ChannelType, PlanUnit } from "@/db/schema";
 import { derive, combineReach, reachFromGrp } from "@/lib/crossmedia";
+import { costKind, type CostKind } from "@/lib/costKind";
 import { monthsBetween } from "@/lib/period";
 import { canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
 import { getPlan, loadPlan, crossContext, getThemes, sharesByTactic, type CrossContext } from "@/lib/queries";
 
 /**
- * Data pro přehled plánu — jedno načtení, všechny pohledy z něj.
+ * Data pro Přehled — jedno načtení, všechny pohledy z něj.
  *
- * Zásah se nikdy nesčítá přes měsíce ani přes bloky: kumulativní zásah
- * „od začátku do měsíce m" se počítá znovu z GRP nasčítaných do m, stejně
- * jako zásah za celé období. Součet měsíčních zásahů by vyšel přes sto procent.
- * Všechno je modelový odhad, ne měření.
+ * Zásah se nikdy nesčítá přes měsíce ani oblasti: kumulativní zásah, zásah
+ * oblasti i scénář se počítají znovu z nasčítaných GRP. Součet zásahů by vyšel
+ * přes sto procent. Všechno je modelový odhad, ne měření.
  */
+
+import { UNASSIGNED, SCENARIO_CUT } from "@/lib/dashboardShared";
+export { UNASSIGNED, SCENARIO_CUT };
 
 export type MonthPoint = {
   month: string;
   cost: number;
-  costByType: Partial<Record<ChannelType, number>>;
-  /** kontakty = impressions (u TV TRP × universum / 100) po blocích */
-  contactsByBlock: Record<string, number>;
-  grp: number;
-  /** zásah samotné TV v měsíci a čistý zásah všech médií */
   tvReach: number;
   net: number;
-  /** kumulativně od začátku období do tohoto měsíce */
   cumNet: number;
-  /** průměrný počet kontaktů na zasaženého v měsíci */
+  /** průměrný počet kontaktů na zasaženou ženu v měsíci */
   frequency: number;
 };
 
-export type BlockSummary = {
+export type MatrixRow = {
   id: string;
   name: string;
+  byType: Partial<Record<ChannelType, number>>;
   cost: number;
-  costByMonth: Record<string, number>;
-  contacts: number;
   net: number;
-  frequency: number;
-  /** část rozpočtu bez údaje o doručení — z ní se zásah spočítat nedá */
-  costWithoutDelivery: number;
+  /** průměr měsíčních frekvencí v měsících, kdy oblast běží */
+  monthlyFrequency: number;
 };
-
-/** Tematická oblast — částky, kontakty i GRP taktiky se dělí jejím podílem. */
-export type ThemeSummary = {
-  id: string;
-  name: string;
-  cost: number;
-  costByMonth: Record<string, number>;
-  contacts: number;
-  net: number;
-  frequency: number;
-  costWithoutDelivery: number;
-};
-
-export const UNASSIGNED = "__nezarazeno";
 
 export type Dashboard = {
   months: string[];
-  themes: ThemeSummary[];
   universe: number;
+  freqLimit: number;
   points: MonthPoint[];
-  blocks: BlockSummary[];
-  total: { cost: number; net: number; frequency: number; grp: number; contacts: number; tvShare: number };
+  total: {
+    cost: number;
+    /** rozdělení nákladů podle typu: média s doručením / média bez dat / agenturní práce */
+    delivered: number;
+    mediaNoData: number;
+    fee: number;
+    net: number;
+    people: number;
+    /** průměr měsíčních frekvencí přes aktivní měsíce — to, co si člověk představí pod „za měsíc" */
+    avgMonthlyFrequency: number;
+    costPerPerson: number;
+    /** průměrný měsíční přínos ostatních médií k TV (p.b.) */
+    avgIncrement: number;
+  };
   costByType: Array<{ type: ChannelType; cost: number }>;
-  /** náklady, ke kterým v plánu chybí GRP/TRP ani impressions */
-  noDelivery: Array<{ channel: string; type: ChannelType; cost: number }>;
+  matrix: MatrixRow[];
+  matrixTypes: ChannelType[];
+  /** položky médií bez doručení, největší první */
+  missing: Array<{ channel: string; cost: number; kind: CostKind }>;
+  /** model: co když se TV v přetížených měsících ubere o SCENARIO_CUT */
+  scenario: null | {
+    months: string[];
+    saving: number;
+    netBefore: number;
+    netAfter: number;
+    freqBefore: number;
+    freqAfter: number;
+  };
 };
 
 type Row = Awaited<ReturnType<typeof loadPlan>>["rows"][number];
 type Budget = Awaited<ReturnType<typeof loadPlan>>["budgets"][number];
+type Cell = {
+  row: Row; month: string; kind: CostKind;
+  /** hodnoty už vynásobené podílem vybrané oblasti (bez filtru = 1) */
+  cost: number; grp: number; delivered: boolean;
+  shares: Array<{ themeId: string; share: number }>;
+};
 
-/** GRP po nosičích → čistý zásah přes Sainsburyho skládání s koeficienty. */
 function netFromGrp(grpByType: Map<ChannelType, number>, ctx: CrossContext) {
   const parts = [...grpByType.entries()].map(([channelType, grp]) => ({
     channelType, reach: grp > 0 ? reachFromGrp(grp, ctx.curveOf(channelType, null)) : 0,
@@ -78,7 +87,21 @@ function netFromGrp(grpByType: Map<ChannelType, number>, ctx: CrossContext) {
   return { ...combineReach(parts, ctx.dup), parts };
 }
 
-export async function getDashboard(me: Principal, planId: string): Promise<Dashboard | null> {
+function sumGrp(cells: Cell[], weight: (c: Cell) => number = () => 1) {
+  const map = new Map<ChannelType, number>();
+  for (const c of cells) {
+    const w = weight(c);
+    if (c.grp > 0 && w > 0) map.set(c.row.channelType, (map.get(c.row.channelType) ?? 0) + c.grp * w);
+  }
+  return map;
+}
+const total = (m: Map<ChannelType, number>) => [...m.values()].reduce((a, b) => a + b, 0);
+
+export async function getDashboard(
+  me: Principal,
+  planId: string,
+  filter: { themeId?: string | null; channelType?: ChannelType | null } = {},
+): Promise<Dashboard | null> {
   const plan = await getPlan(planId);
   if (!plan || !canSeePlan(me, planId)) return null;
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
@@ -86,14 +109,17 @@ export async function getDashboard(me: Principal, planId: string): Promise<Dashb
   const loaded = await loadPlan(planId);
   const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }));
   const universe = ctx.universeOf(null);
+  const shareMap = sharesByTactic(loaded.themeShares);
+  const themeList = await getThemes(plan.clientId);
 
   const byKey = new Map<string, Budget>();
   for (const b of loaded.budgets) byKey.set(`${b.tacticId}|${b.month}`, b);
 
-  // jeden průchod: dopočet jednotek každé taktiky v každém měsíci
-  type Cell = { row: Row; month: string; cost: number; grp: number; impressions: number; delivered: boolean };
-  const cells: Cell[] = [];
+  // všechny buňky plánu bez filtru — matice oblastí je potřebuje celé
+  const all: Cell[] = [];
   for (const r of rows) {
+    const shares = shareMap.get(r.tacticId)?.length ? shareMap.get(r.tacticId)! : [{ themeId: UNASSIGNED, share: 1 }];
+    const kind = costKind(r.channel);
     for (const m of months) {
       const b = byKey.get(`${r.tacticId}|${m}`);
       if (!b) continue;
@@ -104,129 +130,123 @@ export async function getDashboard(me: Principal, planId: string): Promise<Dashb
       });
       const cost = b.planned || d.budget;
       if (!cost && !d.grp) continue;
-      cells.push({ row: r, month: m, cost, grp: d.grp, impressions: d.impressions, delivered: d.grp > 0 });
+      all.push({ row: r, month: m, kind, cost, grp: d.grp, delivered: d.grp > 0, shares });
     }
   }
 
-  const grpUpTo = (pred: (c: Cell) => boolean) => {
-    const map = new Map<ChannelType, number>();
-    for (const c of cells) if (pred(c) && c.grp > 0) map.set(c.row.channelType, (map.get(c.row.channelType) ?? 0) + c.grp);
-    return map;
-  };
+  // filtr: médium buňky vyřadí, oblast je převáží podílem
+  const cells: Cell[] = all
+    .filter((c) => !filter.channelType || c.row.channelType === filter.channelType)
+    .map((c) => {
+      if (!filter.themeId) return c;
+      const sh = c.shares.find((x) => x.themeId === filter.themeId)?.share ?? 0;
+      return { ...c, cost: c.cost * sh, grp: c.grp * sh };
+    })
+    .filter((c) => c.cost > 0 || c.grp > 0);
 
+  const monthOf = (m: string) => cells.filter((c) => c.month === m);
   const points: MonthPoint[] = months.map((m, i) => {
-    const mine = cells.filter((c) => c.month === m);
-    const costByType: MonthPoint["costByType"] = {};
-    const contactsByBlock: Record<string, number> = {};
-    for (const c of mine) {
-      costByType[c.row.channelType] = (costByType[c.row.channelType] ?? 0) + c.cost;
-      if (c.impressions > 0) contactsByBlock[c.row.campaignId] = (contactsByBlock[c.row.campaignId] ?? 0) + c.impressions;
-    }
-    const monthGrp = grpUpTo((c) => c.month === m);
-    const net = netFromGrp(monthGrp, ctx);
-    const cum = netFromGrp(grpUpTo((c) => months.indexOf(c.month) <= i), ctx);
-    const grp = [...monthGrp.values()].reduce((a, b) => a + b, 0);
+    const g = sumGrp(monthOf(m));
+    const net = netFromGrp(g, ctx);
+    const cum = netFromGrp(sumGrp(cells.filter((c) => months.indexOf(c.month) <= i)), ctx);
     return {
       month: m,
-      cost: mine.reduce((a, c) => a + c.cost, 0),
-      costByType,
-      contactsByBlock,
-      grp,
+      cost: monthOf(m).reduce((a, c) => a + c.cost, 0),
       tvReach: net.parts.find((p) => p.channelType === "TV")?.reach ?? 0,
       net: net.net,
       cumNet: cum.net,
-      frequency: net.net > 0 ? grp / 100 / net.net : 0,
+      frequency: net.net > 0 ? total(g) / 100 / net.net : 0,
     };
   });
 
-  const blockIds = [...new Set(rows.map((r) => r.campaignId))];
-  const blocks: BlockSummary[] = blockIds.map((id) => {
-    const mine = cells.filter((c) => c.row.campaignId === id);
-    const g = grpUpTo((c) => c.row.campaignId === id);
-    const net = netFromGrp(g, ctx);
-    const grp = [...g.values()].reduce((a, b) => a + b, 0);
-    const costByMonth: Record<string, number> = {};
-    for (const c of mine) costByMonth[c.month] = (costByMonth[c.month] ?? 0) + c.cost;
-    return {
-      id,
-      name: rows.find((r) => r.campaignId === id)!.campaign,
-      cost: mine.reduce((a, c) => a + c.cost, 0),
-      costByMonth,
-      contacts: mine.reduce((a, c) => a + c.impressions, 0),
-      net: net.net,
-      frequency: net.net > 0 ? grp / 100 / net.net : 0,
-      costWithoutDelivery: mine.filter((c) => !c.delivered).reduce((a, c) => a + c.cost, 0),
-    };
-  });
+  const period = netFromGrp(sumGrp(cells), ctx);
+  const cost = cells.reduce((a, c) => a + c.cost, 0);
+  const fee = cells.filter((c) => c.kind === "fee").reduce((a, c) => a + c.cost, 0);
+  const delivered = cells.filter((c) => c.kind !== "fee" && c.delivered).reduce((a, c) => a + c.cost, 0);
+  const live = points.filter((p) => p.net > 0);
+  const withTv = points.filter((p) => p.tvReach > 0);
+  const people = period.net * universe;
 
-  // ---------------------------------------------------- tematické oblasti
-  const themeList = await getThemes(plan.clientId);
-  const shareMap = sharesByTactic(loaded.themeShares);
-  const sharesOf = (tacticId: string) => {
-    const s = shareMap.get(tacticId);
-    return s && s.length ? s : [{ themeId: UNASSIGNED, share: 1 }];
-  };
-  const themeIds = [...new Set(cells.flatMap((c) => sharesOf(c.row.tacticId).map((x) => x.themeId)))];
-  const themeSummaries: ThemeSummary[] = themeIds.map((id) => {
-    const g = new Map<ChannelType, number>();
-    const costByMonth: Record<string, number> = {};
-    let cost = 0, contacts = 0, noDelivery = 0;
-    for (const c of cells) {
-      const sh = sharesOf(c.row.tacticId).find((x) => x.themeId === id)?.share ?? 0;
-      if (!sh) continue;
-      cost += c.cost * sh;
-      contacts += c.impressions * sh;
-      if (!c.delivered) noDelivery += c.cost * sh;
-      costByMonth[c.month] = (costByMonth[c.month] ?? 0) + c.cost * sh;
-      // GRP se dělí podílem: polovina spotu pro oblast = polovina jeho tlaku
-      if (c.grp > 0) g.set(c.row.channelType, (g.get(c.row.channelType) ?? 0) + c.grp * sh);
-    }
-    const net = netFromGrp(g, ctx);
-    const grp = [...g.values()].reduce((a, b) => a + b, 0);
+  // ---------------------------------------------- scénář: méně TV v přetížení
+  const limit = plan.freqLimit;
+  const over = points.filter((p) => p.frequency > limit).map((p) => p.month);
+  let scenario: Dashboard["scenario"] = null;
+  if (over.length) {
+    const cut = (c: Cell) => (c.row.channelType === "TV" && over.includes(c.month) ? 1 - SCENARIO_CUT : 1);
+    const after = netFromGrp(sumGrp(cells, cut), ctx);
+    const freqIn = (w: (c: Cell) => number) => {
+      const fs = over.map((m) => {
+        const g = sumGrp(monthOf(m), w);
+        const n = netFromGrp(g, ctx).net;
+        return n > 0 ? total(g) / 100 / n : 0;
+      });
+      return fs.reduce((a, b) => a + b, 0) / fs.length;
+    };
+    scenario = {
+      months: over,
+      saving: cells.filter((c) => c.row.channelType === "TV" && over.includes(c.month)).reduce((a, c) => a + c.cost, 0) * SCENARIO_CUT,
+      netBefore: period.net,
+      netAfter: after.net,
+      freqBefore: freqIn(() => 1),
+      freqAfter: freqIn(cut),
+    };
+  }
+
+  // ------------------------------------------- matice oblasti × média (bez filtru oblasti)
+  const forMatrix = all.filter((c) => !filter.channelType || c.row.channelType === filter.channelType);
+  const themeIds = [...new Set(forMatrix.flatMap((c) => c.shares.map((s) => s.themeId)))];
+  const matrix: MatrixRow[] = themeIds.map((id) => {
+    const w = (c: Cell) => c.shares.find((s) => s.themeId === id)?.share ?? 0;
+    const mine = forMatrix.filter((c) => w(c) > 0);
+    const byType: MatrixRow["byType"] = {};
+    for (const c of mine) byType[c.row.channelType] = (byType[c.row.channelType] ?? 0) + c.cost * w(c);
+    const freqs = months.map((m) => {
+      const g = sumGrp(mine.filter((c) => c.month === m), w);
+      const n = netFromGrp(g, ctx).net;
+      return n > 0 ? total(g) / 100 / n : 0;
+    }).filter((f) => f > 0);
     return {
       id,
       name: id === UNASSIGNED ? "Nezařazeno" : themeList.find((t) => t.id === id)?.name ?? "?",
-      cost, costByMonth, contacts,
-      net: net.net,
-      frequency: net.net > 0 ? grp / 100 / net.net : 0,
-      costWithoutDelivery: noDelivery,
+      byType,
+      cost: mine.reduce((a, c) => a + c.cost * w(c), 0),
+      net: netFromGrp(sumGrp(mine, w), ctx).net,
+      monthlyFrequency: freqs.length ? freqs.reduce((a, b) => a + b, 0) / freqs.length : 0,
     };
-  });
-  const order = (id: string) => id === UNASSIGNED ? 1e9 : themeList.findIndex((t) => t.id === id);
-  themeSummaries.sort((a, b) => order(a.id) - order(b.id));
-
-  const totalGrp = grpUpTo(() => true);
-  const total = netFromGrp(totalGrp, ctx);
-  const grpSum = [...totalGrp.values()].reduce((a, b) => a + b, 0);
-  const cost = cells.reduce((a, c) => a + c.cost, 0);
+  }).sort((a, b) => b.cost - a.cost);
 
   const typeMap = new Map<ChannelType, number>();
   for (const c of cells) typeMap.set(c.row.channelType, (typeMap.get(c.row.channelType) ?? 0) + c.cost);
 
-  const noDel = new Map<string, { channel: string; type: ChannelType; cost: number }>();
+  const missingMap = new Map<string, { channel: string; cost: number; kind: CostKind }>();
   for (const c of cells) {
-    if (c.delivered) continue;
-    const k = c.row.tacticId;
-    const cur = noDel.get(k) ?? { channel: c.row.channel, type: c.row.channelType, cost: 0 };
+    if (c.kind === "fee" || c.delivered) continue;
+    const cur = missingMap.get(c.row.tacticId) ?? { channel: c.row.channel, cost: 0, kind: c.kind };
     cur.cost += c.cost;
-    noDel.set(k, cur);
+    missingMap.set(c.row.tacticId, cur);
   }
 
   return {
     months,
-    themes: themeSummaries,
     universe,
+    freqLimit: limit,
     points,
-    blocks: blocks.sort((a, b) => b.cost - a.cost),
     total: {
       cost,
-      net: total.net,
-      frequency: total.net > 0 ? grpSum / 100 / total.net : 0,
-      grp: grpSum,
-      contacts: cells.reduce((a, c) => a + c.impressions, 0),
-      tvShare: cost ? (typeMap.get("TV") ?? 0) / cost : 0,
+      delivered,
+      mediaNoData: cost - fee - delivered,
+      fee,
+      net: period.net,
+      people,
+      avgMonthlyFrequency: live.length ? live.reduce((a, p) => a + p.frequency, 0) / live.length : 0,
+      costPerPerson: people > 0 ? cost / people : 0,
+      avgIncrement: withTv.length ? withTv.reduce((a, p) => a + Math.max(0, p.net - p.tvReach), 0) / withTv.length : 0,
     },
     costByType: [...typeMap.entries()].map(([type, c]) => ({ type, cost: c })).sort((a, b) => b.cost - a.cost),
-    noDelivery: [...noDel.values()].sort((a, b) => b.cost - a.cost),
+    matrix,
+    matrixTypes: [...new Set(forMatrix.map((c) => c.row.channelType))]
+      .sort((a, b) => (typeMap.get(b) ?? 0) - (typeMap.get(a) ?? 0)),
+    missing: [...missingMap.values()].sort((a, b) => b.cost - a.cost),
+    scenario,
   };
 }
