@@ -575,3 +575,20 @@ td.qcol .cellbox { background: transparent; }
   width: 260px; padding: 8px 10px; background: var(--surface); color: var(--ink-2); border: 1px solid var(--line-strong);
   border-radius: var(--radius); box-shadow: 0 6px 18px rgba(20,18,40,.12); font-size: 12px; font-weight: 300; line-height: 1.5; text-align: left; }
 .db-help:hover > span, .db-help:focus > span { display: block; }
+
+/* Plán: úchyt a sdělení zůstanou při vodorovném rolování vidět — v ročním
+   plánu jinak odjely a nešlo poznat, který řádek se upravuje. Řádky bloků
+   a součtů se neukotvují: přes celou šířku by překryly měsíce. */
+table.plan thead th:nth-child(-n+2),
+table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(-n+2) {
+  position: sticky; z-index: 3; background: var(--surface);
+}
+/* nad řádky bloků (25) i patičkou (30), stejně jako ostatní záhlaví (40) */
+table.plan thead th:nth-child(-n+2) { z-index: 45; }
+table.plan thead th:nth-child(2) { box-shadow: inset -1px 0 0 var(--line-strong), inset 0 -1px 0 0 var(--line-strong); }
+table.plan thead th:nth-child(1), table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(1) { left: 0; }
+table.plan thead th:nth-child(2), table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(2) { left: 28px; }
+table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(2) { box-shadow: inset -1px 0 0 var(--line-strong); }
+table.plan tbody tr:not(.grp):not(.emptygrp):hover td:nth-child(-n+2) { background: var(--surface-2); }
+/* měsíc nesmí spadnout pod šířku, do které se vejde 1 500 000 */
+table.plan td.budgetcell { min-width: 96px; }

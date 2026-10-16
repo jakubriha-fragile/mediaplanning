@@ -257,6 +257,24 @@ export const tacticThemes = pgTable(
   (t) => ({ pk: primaryKey({ columns: [t.tacticId, t.themeId] }) }),
 );
 
+/**
+ * Ceník klienta: cena za kontakt podle nosiče — CPP (Kč za GRP) u TV a rádia,
+ * jinak CPT (Kč za tisíc impresí). Slouží k ODHADU doručení u položek, kde plán
+ * má jen Kč. Do rozpočtů se nic nezapisuje: odhad se počítá při čtení, takže
+ * změna ceníku se hned propíše všude a nikdy nepřepíše skutečně zadanou cenu.
+ */
+export const rateCards = pgTable(
+  "rate_card",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    channelType: channelTypeEnum("channel_type").notNull(),
+    price: doublePrecision("price").notNull(),
+    source: text("source").notNull().default(""),
+  },
+  (t) => ({ uq: uniqueIndex("rate_card_uq").on(t.clientId, t.channelType) }),
+);
+
 export const tacticBudgets = pgTable(
   "tactic_budget",
   {

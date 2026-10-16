@@ -182,6 +182,7 @@ console.log("\nTyp nákladu (agenturní práce vs. média)");
   ok("„SOLERO (ag. práce, influ & CC, médiá)“ je smíšené", costKind("SOLERO (ag. práce, influ & CC, médiá)") === "mixed");
   ok("ambasador je honorář", costKind("BENU Longevity - ambasádor") === "fee");
   ok("TV spot jsou média", costKind("TV – hlavní brandový spot") === "media");
+  ok("partnerství / event / OOH je smíšené", costKind("Partnerství / event / OOH (bude upřesněno)") === "mixed");
 }
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");

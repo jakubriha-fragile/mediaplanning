@@ -98,8 +98,8 @@ export function Overview({
     todos.push({
       title: `Doplnit doručení k ${mil(total.mediaNoData)} Kč`,
       text: <>Bez GRP nebo impresí se do zásahu nepočítají: {data.missing.slice(0, 3).map((m) => m.channel).join(", ")}
-        {data.missing.length > 3 ? ` a dalších ${data.missing.length - 3}` : ""}.</>,
-      href: `/?plan=${planId}`, cta: "Otevřít plán",
+        {data.missing.length > 3 ? ` a dalších ${data.missing.length - 3}` : ""}. Stačí cena za kontakt v ceníku.</>,
+      href: `/kalkulacka?plan=${planId}#cenik`, cta: "Doplnit ceník",
     });
   }
   if (over.length && live.length > over.length) {
@@ -142,7 +142,8 @@ export function Overview({
         <div className="db-coverage" title="Podíl mediálního rozpočtu, ke kterému má plán GRP nebo imprese. Agenturní práce se nepočítá.">
           Model počítá se <b>{pct0(coverage)}</b> mediálního rozpočtu
           <span className="db-meter"><i style={{ width: `${Math.round(coverage * 100)}%` }} /></span>
-          {total.mediaNoData > 0 && <a href={`/?plan=${planId}`}>Doplnit data →</a>}
+          {total.estimated > 0 && <span className="db-muted">· z toho {pct0(total.estimated / (media || 1))} odhadem z ceníku</span>}
+          {total.mediaNoData > 0 && <a href={`/kalkulacka?plan=${planId}#cenik`}>Doplnit ceník →</a>}
         </div>
       </div>
 

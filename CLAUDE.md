@@ -117,7 +117,13 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    musí vidět všichni stejná. Doporučení „ubrat TV" je spočítané modelem
    (SCENARIO_CUT), ne odhadnuté.
 
-13. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
+13. **Ceník je jen odhad při čtení.** `rate_card` (klient × nosič, CPP/CPT) se použije
+   v `crossContext.priceFor` jen u médií zadaných v Kč bez vlastní ceny — nikdy
+   u agenturní práce a smíšených položek, a do `tactic_budget` se nic nezapisuje.
+   Plán ho značí „≈", Přehled ukazuje, kolik pokrytí je odhad. Plán, panel
+   zásahu i Přehled musí jít přes `priceFor`, jinak se rozejdou.
+
+14. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
    jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se
    „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.
 
@@ -209,7 +215,9 @@ Zadavatel si vyžádal tento směr (zbývá z původního seznamu):
 Technický dluh:
 
 - Import a export XLSX (zadání §9) — data se zatím nahrávají seedem.
-- Rozhraní pro kalibraci křivek zásahu (duplikace i cílové skupiny editovatelné jsou).
+- Rozhraní pro kalibraci křivek zásahu (duplikace, cílové skupiny i ceník editovatelné jsou).
+- Plán: řádek bloku se při vodorovném rolování neukotvuje (název bloku odjede);
+  ukotvené jsou jen úchyt a sdělení.
   **Výchozí křivka TV je příliš strmá** — nasytí se už kolem 300–500 TRP, takže
   na plánu BENU 2027 vychází zásah ~92 % v každém měsíci i v každé oblasti a liší
   se jen frekvence. Zkalibrovat podle TV reportu, až ho zadavatel pošle.

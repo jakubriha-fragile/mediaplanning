@@ -3,10 +3,11 @@ import { db } from "@/db";
 import {
   campaigns, messageLines, tactics, tacticBudgets, actualSpends,
   accountNotes, metrics, metricTargets, metricActuals, users,
-  clients, plans, targetGroups, reachCurves, duplications, channelTypeEnum, themes, tacticThemes,
+  clients, plans, targetGroups, reachCurves, duplications, channelTypeEnum, themes, tacticThemes, rateCards,
   type ChannelType, type PlanUnit,
 } from "@/db/schema";
 import { monthsBetween } from "@/lib/period";
+import { costKind } from "@/lib/costKind";
 import { can, canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
 import {
   derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey,
@@ -86,14 +87,23 @@ export type CrossContext = {
   universeOf: (tacticTgId: string | null) => number;
   curveOf: (ct: ChannelType, tacticTgId: string | null) => Curve;
   dup: Record<string, number>;
+  /**
+   * Jednotková cena pro výpočet: zadaná cena, a když chybí, cena z ceníku
+   * klienta. Ceník platí jen pro média zadaná v Kč — ne pro agenturní práci
+   * a ne pro smíšené položky, kde by odhad nafoukl doručení i z honorářů.
+   */
+  priceFor: (row: { channelType: ChannelType; channel: string }, driver: PlanUnit, unitPrice: number) =>
+    { unitPrice: number; estimated: boolean };
 };
 
-export async function crossContext(planTargetGroupId: string | null): Promise<CrossContext> {
-  const [tgs, curves, dups] = await Promise.all([
+export async function crossContext(planTargetGroupId: string | null, clientId?: string): Promise<CrossContext> {
+  const [tgs, curves, dups, rates] = await Promise.all([
     db.select().from(targetGroups),
     db.select().from(reachCurves),
     db.select().from(duplications),
+    clientId ? db.select().from(rateCards).where(eq(rateCards.clientId, clientId)) : Promise.resolve([]),
   ]);
+  const rateOf = new Map(rates.map((r) => [r.channelType, r.price]));
 
   const universeById = new Map(tgs.map((t) => [t.id, t.universe]));
   const planUniverse = planTargetGroupId ? universeById.get(planTargetGroupId) ?? 0 : 0;
@@ -111,7 +121,38 @@ export async function crossContext(planTargetGroupId: string | null): Promise<Cr
       return found ? { rMax: found.rMax, k: found.k } : DEFAULT_CURVE[ct] ?? DEFAULT_CURVE.Digital;
     },
     dup,
+    priceFor: (row, driver, unitPrice) => {
+      if (unitPrice > 0 || driver !== "budget" || costKind(row.channel) !== "media") return { unitPrice, estimated: false };
+      const rate = rateOf.get(row.channelType) ?? 0;
+      return rate > 0 ? { unitPrice: rate, estimated: true } : { unitPrice, estimated: false };
+    },
   };
+}
+
+/**
+ * Návrh ceníku z plánu: průměrná zadaná cena po nosičích, vážená náklady.
+ * Bere jen položky, které cenu opravdu mají (TV z TRP, online z impresí).
+ */
+export async function impliedRates(planId: string): Promise<Partial<Record<ChannelType, number>>> {
+  const { rows, budgets } = await loadPlan(planId);
+  const acc = new Map<ChannelType, { cost: number; units: number }>();
+  for (const b of budgets) {
+    if (b.unitPrice <= 0 || b.driver === "budget" || !b.driverValue || !b.planned) continue;
+    const r = rows.find((x) => x.tacticId === b.tacticId);
+    if (!r) continue;
+    // CPP = Kč / GRP, CPT = Kč / tisíc impresí
+    const units = b.driver === "grp" ? b.driverValue : b.driverValue / 1000;
+    const cur = acc.get(r.channelType) ?? { cost: 0, units: 0 };
+    cur.cost += b.planned;
+    cur.units += units;
+    acc.set(r.channelType, cur);
+  }
+  return Object.fromEntries([...acc.entries()].filter(([, v]) => v.units > 0).map(([k, v]) => [k, v.cost / v.units]));
+}
+
+/** Ceník klienta po nosičích. */
+export async function getRateCard(clientId: string) {
+  return db.select().from(rateCards).where(eq(rateCards.clientId, clientId));
 }
 
 // ---------------------------------------------------- tematické oblasti
@@ -218,13 +259,15 @@ export type PlanCell = Derived & {
   driver: PlanUnit;
   driverValue: number;
   unitPrice: number;
+  /** doručení je odhad z ceníku klienta, ne zadaná cena */
+  estimated?: boolean;
 };
 
 export async function getPlanRows(me: Principal, planId: string) {
   const plan = await getPlan(planId);
   if (!plan || !canSeePlan(me, planId)) return [];
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
-  const ctx = await crossContext(plan.targetGroupId);
+  const ctx = await crossContext(plan.targetGroupId, plan.clientId);
   const loaded = await loadPlan(planId);
   const { budgets, spends } = loaded;
   const themeMap = sharesByTactic(loaded.themeShares);
@@ -241,13 +284,14 @@ export async function getPlanRows(me: Principal, planId: string) {
         const driver = (b?.driver ?? "budget") as PlanUnit;
         const driverValue = b?.driverValue ?? b?.planned ?? 0;
         const unitPrice = b?.unitPrice ?? 0;
+        const price = ctx.priceFor(r, driver, unitPrice);
         const d = derive({
-          channelType: r.channelType, driver, driverValue, unitPrice, universe, curve,
+          channelType: r.channelType, driver, driverValue, unitPrice: price.unitPrice, universe, curve,
         });
         // Uložený rozpočet má přednost — porovnává se se skutečností. Nula ale
         // znamená „ještě nedopočítáno" (import, seed), proto tam pustíme dopočet;
         // u prázdné buňky je dopočet taky nula, takže se nic nerozbije.
-        return [m, { ...d, budget: b?.planned || d.budget, driver, driverValue, unitPrice } as PlanCell];
+        return [m, { ...d, budget: b?.planned || d.budget, driver, driverValue, unitPrice, estimated: price.estimated } as PlanCell];
       }),
     );
 
@@ -342,7 +386,7 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
   if (!plan) return { months: [], total: empty, universe: 0, hasUniverse: false };
 
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
-  const ctx = await crossContext(plan.targetGroupId);
+  const ctx = await crossContext(plan.targetGroupId, plan.clientId);
   const loaded = await loadPlan(planId);
   const { budgets } = loaded;
   // jen taktiky, které uživatel vidí — jinak by souhrn prozradil zbytek plánu
@@ -366,7 +410,7 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
         channelType: r.channelType,
         driver: b.driver as PlanUnit,
         driverValue: b.driverValue,
-        unitPrice: b.unitPrice,
+        unitPrice: ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice).unitPrice,
         universe: u,
         curve: ctx.curveOf(r.channelType, r.targetGroupId),
       });

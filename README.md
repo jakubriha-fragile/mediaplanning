@@ -162,6 +162,20 @@ měsících). Níž matice **oblasti × média** (klik na oblast filtruje celý 
 panel s metodikou, předpoklady a slovníčkem. Pojmy jsou vysvětlené za otazníkem.
 Hranici přehlcení nastavuje plánovač u plánu.
 
+### Ceník pro odhad doručení
+
+V Kalkulačce zásahu (po výběru plánu), odkaz vede i z Přehledu („Doplnit ceník").
+Cena za kontakt podle média — CPP u TV a rádia, CPT u ostatních — platí pro všechny
+plány klienta. U každého média je vidět, kolik Kč čeká na cenu, a **návrh z plánu**
+(průměr z položek, které cenu mají) s tlačítkem *Použít*. Položky zadané jen v Kč
+pak dostanou odhad doručení, v Plánu označený „≈". Agenturní práce odhad nedostane.
+
+### Plán
+
+Výchozí pohled ukazuje jen to podstatné: sdělení, Paid/Owned/Earned, kanál, oblast,
+nosič a měsíce. **Podrobnosti** přidají fázi, cílení, jednotku a cenu (pamatuje si
+prohlížeč). Sdělení zůstává při vodorovném rolování vidět.
+
 ### Tematické oblasti
 
 Na co komunikace míří — Brand, Longevity, Probiotika, Dermo, Prevence & V rovnováze,

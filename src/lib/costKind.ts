@@ -12,7 +12,7 @@ export type CostKind = "media" | "fee" | "mixed";
 // ambasador a event jsou honoráře, ne nákup médií — zásah se z nich nepočítá
 const FEE = /(ag\.\s*pr[aá]ce|agenturn|\bfee\b|nat[aá]čen|v[ií]cepr[aá]ce|ad-hoc|vendor obsah|oc posty|content creators|ambas[aá]d|\bevent\b)/i;
 // jen česky s diakritikou — anglické „Social Media fee" je honorář, ne média
-const MEDIA = /(médi[aá]|promo budget|\bmeta\b|přefakturace)/i;
+const MEDIA = /(médi[aá]|promo budget|\bmeta\b|přefakturace|\booh\b)/i;
 
 export function costKind(name: string): CostKind {
   const fee = FEE.test(name);

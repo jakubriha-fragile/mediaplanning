@@ -45,6 +45,8 @@ export type Dashboard = {
     cost: number;
     /** rozdělení nákladů podle typu: média s doručením / média bez dat / agenturní práce */
     delivered: number;
+    /** z toho doručení odhadnuté z ceníku */
+    estimated: number;
     mediaNoData: number;
     fee: number;
     net: number;
@@ -59,7 +61,7 @@ export type Dashboard = {
   matrix: MatrixRow[];
   matrixTypes: ChannelType[];
   /** položky médií bez doručení, největší první */
-  missing: Array<{ channel: string; cost: number; kind: CostKind }>;
+  missing: Array<{ channel: string; channelType: ChannelType; cost: number; kind: CostKind }>;
   /** model: co když se TV v přetížených měsících ubere o SCENARIO_CUT */
   scenario: null | {
     months: string[];
@@ -77,6 +79,8 @@ type Cell = {
   row: Row; month: string; kind: CostKind;
   /** hodnoty už vynásobené podílem vybrané oblasti (bez filtru = 1) */
   cost: number; grp: number; delivered: boolean;
+  /** doručení odhadnuté z ceníku klienta */
+  estimated: boolean;
   shares: Array<{ themeId: string; share: number }>;
 };
 
@@ -105,7 +109,7 @@ export async function getDashboard(
   const plan = await getPlan(planId);
   if (!plan || !canSeePlan(me, planId)) return null;
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
-  const ctx = await crossContext(plan.targetGroupId);
+  const ctx = await crossContext(plan.targetGroupId, plan.clientId);
   const loaded = await loadPlan(planId);
   const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }));
   const universe = ctx.universeOf(null);
@@ -123,14 +127,15 @@ export async function getDashboard(
     for (const m of months) {
       const b = byKey.get(`${r.tacticId}|${m}`);
       if (!b) continue;
+      const price = ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice);
       const d = derive({
         channelType: r.channelType, driver: b.driver as PlanUnit, driverValue: b.driverValue,
-        unitPrice: b.unitPrice, universe: ctx.universeOf(r.targetGroupId),
+        unitPrice: price.unitPrice, universe: ctx.universeOf(r.targetGroupId),
         curve: ctx.curveOf(r.channelType, r.targetGroupId),
       });
       const cost = b.planned || d.budget;
       if (!cost && !d.grp) continue;
-      all.push({ row: r, month: m, kind, cost, grp: d.grp, delivered: d.grp > 0, shares });
+      all.push({ row: r, month: m, kind, cost, grp: d.grp, delivered: d.grp > 0, estimated: price.estimated && d.grp > 0, shares });
     }
   }
 
@@ -218,10 +223,10 @@ export async function getDashboard(
   const typeMap = new Map<ChannelType, number>();
   for (const c of cells) typeMap.set(c.row.channelType, (typeMap.get(c.row.channelType) ?? 0) + c.cost);
 
-  const missingMap = new Map<string, { channel: string; cost: number; kind: CostKind }>();
+  const missingMap = new Map<string, { channel: string; channelType: ChannelType; cost: number; kind: CostKind }>();
   for (const c of cells) {
     if (c.kind === "fee" || c.delivered) continue;
-    const cur = missingMap.get(c.row.tacticId) ?? { channel: c.row.channel, cost: 0, kind: c.kind };
+    const cur = missingMap.get(c.row.tacticId) ?? { channel: c.row.channel, channelType: c.row.channelType, cost: 0, kind: c.kind };
     cur.cost += c.cost;
     missingMap.set(c.row.tacticId, cur);
   }
@@ -234,6 +239,7 @@ export async function getDashboard(
     total: {
       cost,
       delivered,
+      estimated: cells.filter((c) => c.kind !== "fee" && c.estimated).reduce((a, c) => a + c.cost, 0),
       mediaNoData: cost - fee - delivered,
       fee,
       net: period.net,

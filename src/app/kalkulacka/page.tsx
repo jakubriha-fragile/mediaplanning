@@ -1,7 +1,11 @@
 import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
 import { can, canManageUsers } from "@/lib/permissions";
-import { getUser, getPlans, getPlan, getReachSummary, getTargetGroups, getDuplicationRows } from "@/lib/queries";
+import { getUser, getPlans, getPlan, getReachSummary, getTargetGroups, getDuplicationRows, getRateCard, impliedRates } from "@/lib/queries";
+import { getDashboard } from "@/lib/dashboard";
+import { isGrpPriced } from "@/lib/crossmedia";
+import { RateCard, type RateRow } from "@/components/RateCard";
+import type { ChannelType } from "@/db/schema";
 import { monthsBetween, monthLabel, periodLabel } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
 import { ReachCalculator, type CalcSource } from "@/components/ReachCalculator";
@@ -61,6 +65,27 @@ export default async function CalculatorPage({
   const canCalibrate =
     canManageUsers(me) || can(me, "write", { area: "plan", mediaType: null, planId: null, campaignId: null, month: null });
 
+  // ceník patří klientovi plánu — bez vybraného plánu nevíme, čí ceník ukázat
+  let rateRows: RateRow[] | null = null;
+  if (planId) {
+    const plan = (await getPlan(planId))!;
+    const [rates, implied, dash] = await Promise.all([getRateCard(plan.clientId), impliedRates(planId), getDashboard(me, planId)]);
+    const LABEL: Partial<Record<ChannelType, string>> = { Digital: "Online a social", OOH: "OOH a partnerství" };
+    const types = [...new Set<ChannelType>([...(dash?.costByType.map((x) => x.type) ?? []), ...rates.map((r) => r.channelType)])];
+    rateRows = types.map((t) => {
+      const own = rates.find((r) => r.channelType === t);
+      return {
+        channelType: t,
+        label: LABEL[t] ?? t,
+        unit: isGrpPriced(t) ? "CPP" : "CPT",
+        price: own?.price ?? null,
+        source: own?.source ?? "",
+        suggested: implied[t] ?? null,
+        waiting: (dash?.missing ?? []).filter((m) => m.channelType === t && m.kind === "media").reduce((a, m) => a + m.cost, 0),
+      };
+    });
+  }
+
   return (
     <Chrome active="kalkulacka" user={{ name: user.name, email: user.email, role: user.role }}>
       <ReachCalculator
@@ -73,6 +98,9 @@ export default async function CalculatorPage({
         dup={dupRows.map((r) => ({ typeA: r.typeA, typeB: r.typeB, coef: r.coef }))}
         canCalibrate={canCalibrate}
       />
+      {rateRows
+        ? <RateCard planId={planId!} rows={rateRows} canEdit={canCalibrate} />
+        : <div className="banner info"><span><b>Ceník pro odhad doručení</b> se zobrazí po výběru plánu nahoře — patří klientovi plánu.</span></div>}
       <DuplicationTable rows={dupRows} canEdit={canCalibrate} />
     </Chrome>
   );

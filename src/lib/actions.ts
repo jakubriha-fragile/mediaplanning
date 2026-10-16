@@ -15,7 +15,7 @@ import { and, eq, desc, asc, sql, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
-  tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, duplications, themes, tacticThemes,
+  tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, duplications, themes, tacticThemes, rateCards,
   metrics, metricTargets, actualSpends, metricActuals, accountNotes, grants,
   users, changeLog,
   channelTypeEnum, planUnitEnum, mediaTypeEnum,
@@ -1728,6 +1728,48 @@ export async function saveDuplication(raw: z.input<typeof dupInput>): Promise<Re
       `Koeficient ${pair.typeA}×${pair.typeB}: ${num(old)} → ${num(data.coef)}${data.source ? ` (${data.source})` : ""}`,
     ]);
     revalidatePath("/");
+    revalidatePath("/kalkulacka");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const rateInput = z.object({
+  planId: z.string().min(1),
+  channelType: z.enum(channelTypeEnum.enumValues),
+  /** null = cenu z ceníku smazat */
+  price: z.number().positive().max(10_000_000).nullable(),
+  source: z.string().max(200).default(""),
+});
+
+/**
+ * Ceník klienta (cena za kontakt podle nosiče). Platí pro všechny plány
+ * klienta, proto stejné oprávnění jako koeficienty. Klient se bere z plánu,
+ * ve kterém uživatel ceník upravuje.
+ */
+export async function saveRate(raw: z.input<typeof rateInput>): Promise<Result> {
+  try {
+    const data = rateInput.parse(raw);
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    assertCan(me, "read", { area: "plan", mediaType: null, planId: data.planId, campaignId: null, month: null });
+    const [plan] = await db.select({ clientId: plans.clientId }).from(plans).where(eq(plans.id, data.planId));
+    if (!plan) return { ok: false, error: "Plán neexistuje." };
+    const where = and(eq(rateCards.clientId, plan.clientId), eq(rateCards.channelType, data.channelType));
+    const [before] = await db.select().from(rateCards).where(where);
+    if (data.price === null) {
+      await db.delete(rateCards).where(where);
+    } else {
+      await db.insert(rateCards).values({ clientId: plan.clientId, channelType: data.channelType, price: data.price, source: data.source })
+        .onConflictDoUpdate({ target: [rateCards.clientId, rateCards.channelType], set: { price: data.price, source: data.source } });
+    }
+    const unit = isGrpPriced(data.channelType) ? "CPP" : "CPT";
+    await log(me!.id, "plan", [
+      `Ceník ${data.channelType} (${unit}): ${before ? num(before.price) : "—"} → ${data.price === null ? "—" : num(data.price)}`,
+    ]);
+    revalidatePath("/");
+    revalidatePath("/prehled");
     revalidatePath("/kalkulacka");
     return { ok: true };
   } catch (e) {

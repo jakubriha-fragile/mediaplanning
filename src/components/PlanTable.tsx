@@ -31,6 +31,8 @@ export type PlanRow = {
   cells: Record<string, {
     budget: number; grp: number; impressions: number; reach: number;
     frequency: number; driver: PlanUnit; driverValue: number; unitPrice: number;
+    /** doručení odhadnuté z ceníku klienta */
+    estimated?: boolean;
   }>;
   budgets: Record<string, number>;
   actuals: Record<string, number>;
@@ -63,10 +65,10 @@ type Col =
   | { kind: "m"; key: string; label: string; months: string[] }
   | { kind: "q"; key: string; label: string; months: string[] };
 
-// úchyt, sdělení, fáze, cílení, typ, kanál, nosič, jednotka, cena — klient nevidí
-// jednotku ani cenu, ty jsou pro něj agenturní kuchyně
-const LEFT_COLS_AGENCY = 10; // + oblast
-const LEFT_COLS_CLIENT = 8;
+// Vždy viditelné: úchyt, sdělení, typ (Paid/Owned/Earned), kanál, oblast, nosič.
+// Pod „Podrobnostmi" fáze a cílení, u agentury navíc jednotka a cena — mění se
+// zřídka a plánovač je nepotřebuje mít před očima pořád.
+const BASE_COLS = 6;
 const RIGHT_COLS = 3;  // celkem, podíl, smazat
 
 export function PlanTable({
@@ -87,7 +89,18 @@ export function PlanTable({
   /** tematické oblasti klienta */
   themes?: ThemeOption[];
 }) {
-  const leftCols = clientView ? LEFT_COLS_CLIENT : LEFT_COLS_AGENCY;
+  const [details, setDetails] = useState(false);
+  useEffect(() => {
+    try { setDetails(localStorage.getItem("plan.podrobnosti") === "1"); } catch { /* bez úložiště */ }
+  }, []);
+  const toggleDetails = () => {
+    setDetails((d) => {
+      try { localStorage.setItem("plan.podrobnosti", d ? "0" : "1"); } catch { /* bez úložiště */ }
+      return !d;
+    });
+  };
+  const showUnit = details && !clientView;
+  const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 2 : 0);
   const [data, setData] = useState(rows);
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
@@ -265,6 +278,10 @@ export function PlanTable({
           }}>✕ Zrušit filtry</button>
         ) : null}
         <span className="spacer" />
+        <button className="btn" aria-pressed={details} onClick={toggleDetails}
+          title="Fáze, cílení a u agentury jednotka a cena položky">
+          {details ? "Skrýt podrobnosti" : "Podrobnosti"}
+        </button>
         {canEditPlan && <UndoButton undoLabel={undoLabel} pending={pending} onUndo={() => run(() => {}, () => {}, undoLast)} />}
         {canEditPlan && <NewCampaignButton onCreate={(name) => run(() => {}, () => {}, () => createCampaign({ planId, name }))} />}
         <span className="share">
@@ -289,14 +306,14 @@ export function PlanTable({
             <tr>
               <th style={{ width: 28 }} />
               <th>Sdělení</th>
-              <th>Fáze</th>
-              <th>Cílení</th>
+              {details && <th>Fáze</th>}
+              {details && <th>Cílení</th>}
               <th>Typ</th>
               <th>Kanál</th>
               <th title="Na kterou tematickou oblast položka míří — u smíšených podíl v %">Oblast</th>
               <th>Nosič</th>
-              {!clientView && <th>Jednotka</th>}
-              {!clientView && <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc kontaktů)">Cena (Kč)</th>}
+              {showUnit && <th>Jednotka</th>}
+              {showUnit && <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc kontaktů)">Cena (Kč)</th>}
               {cols.map((c) => (
                 <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
                     title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : undefined}>
@@ -436,7 +453,7 @@ export function PlanTable({
                           <div className="share" style={{ paddingLeft: 6 }}>{r.code}</div>
                         </td>
 
-                        <td>
+                        {details && <td>
                           <select className="txt" value={r.phase} disabled={!canEditPlan} style={{ minWidth: 118 }}
                             onChange={(e) => {
                               const v = e.target.value as (typeof PHASES)[number], prev = r.phase;
@@ -446,9 +463,9 @@ export function PlanTable({
                             }}>
                             {PHASES.map((p) => <option key={p}>{p}</option>)}
                           </select>
-                        </td>
+                        </td>}
 
-                        <td style={{ minWidth: 120, maxWidth: 170 }}>
+                        {details && <td style={{ minWidth: 120, maxWidth: 170 }}>
                           <input className="txt" defaultValue={r.audience} disabled={!canEditPlan} title={r.audience}
                             key={`aud-${r.messageLineId}-${r.audience}`}
                             onBlur={(e) => {
@@ -458,7 +475,7 @@ export function PlanTable({
                                   () => patchLine(r.messageLineId, { audience: prev }),
                                   () => updateMessageLine({ messageLineId: r.messageLineId, audience: v }));
                             }} />
-                        </td>
+                        </td>}
 
                         <td>
                           <select className={`txt pill ${r.mediaType}`} value={r.mediaType} disabled={!canEditPlan}
@@ -519,7 +536,7 @@ export function PlanTable({
                           </select>
                         </td>
 
-                        {!clientView && <td>
+                        {showUnit && <td>
                           <select className="txt" value={rowUnit(r)} disabled={!rowEditable(r)}
                             style={{ width: 104 }}
                             title="Co zadáváte do měsíců. Zbylé jednotky se dopočítají."
@@ -531,7 +548,7 @@ export function PlanTable({
                           </select>
                         </td>}
 
-                        {!clientView && <td className="r">
+                        {showUnit && <td className="r">
                           <PriceCell
                             value={rowPrice(r)}
                             label={priceLabel(r.channelType)}
@@ -568,6 +585,7 @@ export function PlanTable({
                                 actual={r.actuals[m]} max={axisMax} type={r.mediaType}
                                 disabled={!r.editable[m]}
                                 showDerived={!clientView}
+                                estimated={!!cell?.estimated}
                                 onCommit={(v) => {
                                   const prev = cell?.driverValue ?? 0;
                                   if (prev === v) return;
@@ -647,9 +665,11 @@ function unitFmt(v: number, unit: PlanUnit): string {
 }
 
 function BudgetCell({
-  value, unit, budget, grp, impressions, reach, actual, max, type, disabled, showDerived, onCommit,
+  value, unit, budget, grp, impressions, reach, actual, max, type, disabled, showDerived, estimated, onCommit,
 }: {
   showDerived: boolean;
+  /** dopočet vychází z ceníku, ne z ceny položky — značí se „≈" */
+  estimated: boolean;
   value: number; unit: PlanUnit;
   budget: number; grp: number; impressions: number; reach: number;
   actual: number; max: number;
@@ -668,9 +688,10 @@ function BudgetCell({
   const aw = Math.min(100, (actual / max) * 100);
 
   /** Pod číslem se ukazuje to, co se z něj dopočítalo. U prázdné buňky nic. */
+  const approx = estimated ? "≈ " : "";
   const second = !value || !showDerived ? ""
     : unit === "budget"
-      ? grp > 0 ? `${Math.round(grp)} GRP` : impressions > 0 ? `${unitFmt(impressions, "impressions")} imp.` : ""
+      ? grp > 0 ? `${approx}${Math.round(grp)} GRP` : impressions > 0 ? `${approx}${unitFmt(impressions, "impressions")} imp.` : ""
       : kc(budget) + " Kč";
   const tip = [
     budget ? `${kc(budget)} Kč` : null,
@@ -678,6 +699,7 @@ function BudgetCell({
     impressions ? `${kc(impressions)} impressions` : null,
     reach ? `zásah ${(reach * 100).toFixed(1).replace(".", ",")} %` : null,
     actual ? `čerpáno ${kc(actual)} Kč` : null,
+    estimated ? "doručení odhadnuté z ceníku" : null,
   ].filter(Boolean).join(" · ");
 
   return (
