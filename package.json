@@ -12,7 +12,12 @@
     "test:perms": "tsx scripts/test-permissions.ts",
     "db:generate": "drizzle-kit generate",
     "test:cross": "tsx scripts/test-crossmedia.ts",
-    "test": "npm run test:perms && npm run test:cross"
+    "test": "npm run test:perms && npm run test:cross",
+    "prod:ulozit": "security add-generic-password -U -a mediaplanning -s mediaplanning-neon-prod -w",
+    "prod:db": "sh scripts/prod.sh npx drizzle-kit push",
+    "prod:import": "sh scripts/prod.sh npx tsx scripts/import-strategicky-plan.ts",
+    "prod:uklid": "sh scripts/prod.sh npx tsx scripts/smazat-plany.ts",
+    "nasadit": "npm run prod:db && git push origin main"
   },
   "dependencies": {
     "dotenv": "^18.0.3",

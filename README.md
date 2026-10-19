@@ -85,6 +85,16 @@ DATABASE_URL="<produkční connection string>" npm run db:seed
 strategický plán. Ukázkové plány ze seedu jdou z produkce uklidit skriptem
 `scripts/smazat-plany.ts` (bez `--potvrdit` jen vypíše, co by smazal).
 
+**Zkratky pro produkci.** Connection string produkční databáze (nepoolovaný, z Neonu)
+se jednou uloží do Klíčenky macOS a dál se nevkládá:
+
+```bash
+npm run prod:ulozit                     # jednou: vloží se string, uloží se šifrovaně
+npm run nasadit                         # schéma do produkce + git push
+npm run prod:import -- "plán.xlsx" --doplnit   # doplní chybějící položky z Excelu
+npm run prod:uklid                      # úklid plánů (bez --potvrdit jen vypíše)
+```
+
 **6. První administrátor.** Seed založí `admin@fragile.cz`. Změňte e-mail
 na svůj v `scripts/seed.ts`, nebo po nasazení v databázi.
 

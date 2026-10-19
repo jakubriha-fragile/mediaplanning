@@ -181,6 +181,12 @@ migraci, která sloupec nejdřív naplní. Na otázku „created or renamed" vol
 `+ create`, pokud nejde opravdu o přejmenování. `db:push` i seed pouštět
 v interaktivním terminálu, ne přes `!` v Claude Code (nemá stdin).
 
+**Zkratky pro produkci (říjen 2026):** nepoolovaný connection string je u zadavatele
+v Klíčence macOS (`npm run prod:ulozit`, jednou). Pak `npm run nasadit` = schéma
+do produkce + `git push`; `npm run prod:import -- "<xlsx>" --doplnit`,
+`npm run prod:uklid`. Vše přes `scripts/prod.sh`. Claude Klíčenku nečte a proti
+produkci nic nespouští — příkazy jen připraví, pouští je zadavatel.
+
 1. `npm run db:push` proti **produkční** databázi, pokud se měnilo schéma.
    **Nepoolovaný** connection string z Neonu — přes pooler DDL zlobí a zasekne se.
    Během běhu `drizzle-kit` nic nevkládat do terminálu, čte ze stdin a paste ho shodí.
