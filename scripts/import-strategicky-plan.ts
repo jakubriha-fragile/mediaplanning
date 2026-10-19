@@ -1,7 +1,11 @@
 /**
  * Import strategického plánu z Excelu (týdenní flowchart BENU, list „2027plan").
  *
- *   DATABASE_URL=… npx tsx scripts/import-strategicky-plan.ts "<cesta k .xlsx>" [--nahradit]
+ *   DATABASE_URL=… npx tsx scripts/import-strategicky-plan.ts "<cesta k .xlsx>" [--nahradit | --doplnit]
+ *
+ *   --nahradit  plán smaže a založí znovu (ruční úpravy v něm se ztratí)
+ *   --doplnit   do existujícího plánu přidá jen položky, které v něm chybí;
+ *               nic nemaže ani nepřepisuje
  *
  * Data klienta se do repozitáře NIKDY neukládají — skript čte soubor z disku
  * a zapisuje rovnou do databáze. Pouštět proti lokální databázi; do produkce
@@ -24,12 +28,14 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as XLSX from "xlsx";
 import * as s from "../src/db/schema";
+import { monthsBetween } from "../src/lib/period";
 
 type Month = string;
 type Series = Record<Month, number>;
 
 const file = process.argv[2];
 const replace = process.argv.includes("--nahradit");
+const fillIn = process.argv.includes("--doplnit");
 if (!file) {
   console.error('Použití: npx tsx scripts/import-strategicky-plan.ts "<soubor.xlsx>" [--nahradit]');
   process.exit(1);
@@ -88,14 +94,19 @@ function rowOf(text: string, from = 0): number {
   for (let r = from; r <= lastRow; r++) if (label(r).toLowerCase().startsWith(text.toLowerCase())) return r;
   throw new Error(`Řádek „${text}" nenalezen.`);
 }
-/** První nenulový řádek s daným popiskem pod nadpisem sekce (do 12 řádků). */
+/**
+ * PRVNÍ řádek s daným popiskem pod nadpisem sekce — i když je prázdný.
+ * Dřív se bral první nenulový, a u sekce s „x" místo čísel (BONUS MC) tak
+ * hledání sjelo do další sekce a převzalo cizí náklady. Hledá se jen do
+ * dalšího nadpisu sekce (řádek s popiskem, který není „Total…/Timing/No of").
+ */
 function within(section: string, text: string): Series {
   const start = rowOf(section);
-  for (let r = start; r <= Math.min(lastRow, start + 12); r++) {
-    if (label(r).toLowerCase().startsWith(text.toLowerCase())) {
-      const s = series(r);
-      if (sum(s)) return s;
-    }
+  const isDetail = (l: string) => !l || /^(total|timing|no of|\d+")/i.test(l);
+  for (let r = start + 1; r <= Math.min(lastRow, start + 12); r++) {
+    const l = label(r);
+    if (l.toLowerCase().startsWith(text.toLowerCase())) return series(r);
+    if (!isDetail(l) && r > start + 1) break; // začala další sekce
   }
   return {};
 }
@@ -110,16 +121,19 @@ type Tactic = {
   cost: Series;
   /** doručení: TRP u TV, impressions u online; bez něj se zásah nepočítá */
   delivery?: { unit: "grp" | "impressions"; values: Series };
+  /** založit i bez rozpočtu — dostupná verze spotu, která zatím neběží */
+  keepEmpty?: boolean;
 };
 
 const T: Tactic[] = [];
-const add = (t: Tactic) => { if (sum(t.cost) > 0) T.push(t); };
+const add = (t: Tactic) => { if (sum(t.cost) > 0 || t.keepEmpty) T.push(t); };
 
-// TV — produkty a brand
+// TV — všechny dostupné verze spotů, i ty, které v plánu zatím neběží
+// (zadavatel je chce mít po ruce při plánování, říjen 2026)
 for (const [section, block, phase, channel] of [
   ["produktové spoty - 3 produkty", "TV – produkty", "Consideration", 'TV spot 25" – 3 produkty'],
   ["produktové spoty - 4 produkty", "TV – produkty", "Consideration", 'TV spot 30" – 4 produkty'],
-  ["ESHOP spoty", "TV – e-shop", "Conversion", 'TV spot 25" – e-shop'],
+  ["ESHOP spoty", "TV – e-shop", "Conversion", 'TV e-shop spot 25" – 4 produkty'],
   ["Brand - hlavní spot", "Brand", "Awareness", "TV – hlavní brandový spot"],
   ['Brand -10" spot', "Brand", "Awareness", 'TV – brandový spot 10"'],
 ] as const) {
@@ -127,10 +141,12 @@ for (const [section, block, phase, channel] of [
     block, phase, channel, channelType: "TV",
     cost: within(section, "Total Client cost"),
     delivery: { unit: "grp", values: within(section, "Total TRPs") },
+    keepEmpty: true,
   });
 }
-add({ block: "Brand", phase: "Awareness", channel: "TV – OMK MC", channelType: "TV", cost: within("Brand OMK MC", "Total Client cost") });
-add({ block: "Brand", phase: "Awareness", channel: "TV – sponzoring pořadu o zdraví", channelType: "TV", cost: within("TV pořad sponzoring", "Total Client cost") });
+add({ block: "Brand", phase: "Awareness", channel: "TV – OMK MC", channelType: "TV", cost: within("Brand OMK MC", "Total Client cost"), keepEmpty: true });
+add({ block: "Brand", phase: "Awareness", channel: "TV – BONUS MC sponzoring", channelType: "TV", cost: within("BONUS - MC - sponzoring", "Total Client cost"), keepEmpty: true });
+add({ block: "Brand", phase: "Awareness", channel: "TV – sponzoring pořadu o zdraví", channelType: "TV", cost: within("TV pořad sponzoring", "Total Client cost"), keepEmpty: true });
 
 // Rádio — jen náklady, GRP v plánu nejsou
 add({ block: "Brand", phase: "Awareness", channel: 'Rádio – Radiohouse 30"', channelType: "Rádio", cost: series(rowOf("Radiohouse Total Client cost")) });
@@ -197,11 +213,11 @@ const PRODUCTS = ["Longevity", "Probiotika", "Dermo", "Prevence & V rovnováze"]
 const evenly = (names: string[]) => Object.fromEntries(names.map((n) => [n, 1 / names.length]));
 
 function themesOf(t: Tactic): Record<string, number> {
-  if (t.block === "TV – produkty") return evenly(PRODUCTS);             // spot se 4 produkty
+  if (t.block === "TV – produkty") return evenly(PRODUCTS);             // spoty se 3 i 4 produkty
+  if (t.block === "TV – e-shop") return evenly(PRODUCTS);               // e-shop spot se 4 produkty
   if (t.block.startsWith("Online")) return evenly(["Brand", ...PRODUCTS]); // brand / longevity / produkty
   const byBlock: Record<string, string> = {
     "Brand": "Brand",
-    "TV – e-shop": "Brand",
     "Social media – always-on": "Brand",
     "Longevity": "Longevity",
     "Probio": "Probiotika",
@@ -262,52 +278,77 @@ async function main() {
 
   const [existing] = await db.select().from(s.plans)
     .where(and(eq(s.plans.clientId, client.id), eq(s.plans.name, PLAN_NAME)));
-  if (existing && !replace) throw new Error(`Plán „${PLAN_NAME}" už existuje — pusťte s --nahradit.`);
-  if (existing) await db.delete(s.plans).where(eq(s.plans.id, existing.id));
+  if (existing && !replace && !fillIn) throw new Error(`Plán „${PLAN_NAME}" už existuje — pusťte s --nahradit, nebo --doplnit.`);
+  if (fillIn && !existing) throw new Error(`Plán „${PLAN_NAME}" neexistuje — není kam doplňovat.`);
+  if (existing && replace) await db.delete(s.plans).where(eq(s.plans.id, existing.id));
 
-  const [plan] = await db.insert(s.plans).values({
+  const plan = existing && fillIn ? existing : (await db.insert(s.plans).values({
     clientId: client.id, name: PLAN_NAME, periodStart, periodEnd,
     status: "draft", targetGroupId: tg.id, position: 10,
-  }).returning();
+  }).returning())[0];
+  const months = monthsBetween(plan.periodStart, plan.periodEnd);
 
-  const blocks = [...new Set(T.map((t) => t.block))];
-  let pos = 0;
-  for (const [bi, block] of blocks.entries()) {
-    const [camp] = await db.insert(s.campaigns).values({ planId: plan.id, name: block, position: bi }).returning();
-    const mine = T.filter((t) => t.block === block);
-    const code = block.toUpperCase().normalize("NFD").replace(/[^A-Z0-9]+/g, "").slice(0, 10) || "BLOK";
-    const [line] = await db.insert(s.messageLines).values({
-      campaignId: camp.id, code: `${code}-1`, message: block, phase: mine[0].phase, audience: TG_NAME,
+  // co v plánu už je — při --doplnit se podle názvu položky přeskočí
+  const present = new Set((await db.select({ channel: s.tactics.channel }).from(s.tactics)
+    .innerJoin(s.messageLines, eq(s.tactics.messageLineId, s.messageLines.id))
+    .innerJoin(s.campaigns, eq(s.messageLines.campaignId, s.campaigns.id))
+    .where(eq(s.campaigns.planId, plan.id))).map((x) => x.channel));
+  const camps = await db.select().from(s.campaigns).where(eq(s.campaigns.planId, plan.id));
+
+  const insertTactic = async (t: Tactic, lineId: string, position: number) => {
+    const [tac] = await db.insert(s.tactics).values({
+      messageLineId: lineId, channel: t.channel, mediaType: "Paid", channelType: t.channelType, position,
     }).returning();
+    await db.insert(s.tacticBudgets).values(months.map((m) => {
+      const cost = t.cost[m] ?? 0;
+      const del = t.delivery?.values[m] ?? 0;
+      if (t.delivery && del > 0) {
+        // Kč se ukládá vždy (invariant 3); jednotková cena se dopočte z nákladu a doručení
+        const unitPrice = t.delivery.unit === "grp" ? cost / del : (cost / del) * 1000;
+        return { tacticId: tac.id, month: m, planned: Math.round(cost), driver: t.delivery.unit, driverValue: del, unitPrice };
+      }
+      // bez doručení (i prázdné verze spotů) se zadává v Kč — doručení dopočte ceník
+      return { tacticId: tac.id, month: m, planned: Math.round(cost), driver: "budget" as const, driverValue: cost, unitPrice: 0 };
+    }));
+    await db.insert(s.tacticThemes).values(
+      Object.entries(themesOf(t)).map(([name, share]) => ({ tacticId: tac.id, themeId: themeIds[name], share })),
+    );
+    const brand = t.phase === "Awareness";
+    await db.insert(s.metrics).values([
+      { tacticId: tac.id, name: brand ? "Reach" : "Konverze", kind: "cumulative" as const, unit: "", slot: 0 },
+      { tacticId: tac.id, name: brand ? "CPM" : "CPA", kind: "rate_low" as const, unit: "Kč", slot: 1 },
+    ]);
+  };
 
-    for (const t of mine) {
-      const [tac] = await db.insert(s.tactics).values({
-        messageLineId: line.id, channel: t.channel, mediaType: "Paid", channelType: t.channelType, position: pos++,
+  const todo = T.filter((t) => !present.has(t.channel));
+  const blocks = [...new Set(todo.map((t) => t.block))];
+  let pos = 0;
+  let added = 0;
+  for (const block of blocks) {
+    const mine = todo.filter((t) => t.block === block);
+    let camp = camps.find((c) => c.name === block);
+    if (!camp) {
+      [camp] = await db.insert(s.campaigns).values({ planId: plan.id, name: block, position: camps.length + blocks.indexOf(block) }).returning();
+    }
+    let [line] = await db.select().from(s.messageLines).where(eq(s.messageLines.campaignId, camp.id));
+    if (!line) {
+      const code = block.toUpperCase().normalize("NFD").replace(/[^A-Z0-9]+/g, "").slice(0, 10) || "BLOK";
+      [line] = await db.insert(s.messageLines).values({
+        campaignId: camp.id, code: `${code}-1`, message: block, phase: mine[0].phase, audience: TG_NAME,
       }).returning();
-
-      await db.insert(s.tacticBudgets).values(periodMonths.map((m) => {
-        const cost = t.cost[m] ?? 0;
-        const del = t.delivery?.values[m] ?? 0;
-        if (t.delivery && del > 0) {
-          // Kč se ukládá vždy (invariant 3); jednotková cena se dopočte z nákladu a doručení
-          const unitPrice = t.delivery.unit === "grp" ? cost / del : (cost / del) * 1000;
-          return { tacticId: tac.id, month: m, planned: Math.round(cost), driver: t.delivery.unit, driverValue: del, unitPrice };
-        }
-        return { tacticId: tac.id, month: m, planned: Math.round(cost), driver: "budget" as const, driverValue: cost, unitPrice: 0 };
-      }));
-
-      await db.insert(s.tacticThemes).values(
-        Object.entries(themesOf(t)).map(([name, share]) => ({ tacticId: tac.id, themeId: themeIds[name], share })),
-      );
-
-      const brand = t.phase === "Awareness";
-      await db.insert(s.metrics).values([
-        { tacticId: tac.id, name: brand ? "Reach" : "Konverze", kind: "cumulative" as const, unit: "", slot: 0 },
-        { tacticId: tac.id, name: brand ? "CPM" : "CPA", kind: "rate_low" as const, unit: "Kč", slot: 1 },
-      ]);
+    }
+    for (const t of mine) {
+      await insertTactic(t, line.id, 1000 + pos++);
+      added++;
+      if (fillIn) console.log(`  + ${t.channel} (${block})`);
     }
   }
-  console.log(`Založen plán „${PLAN_NAME}" (${blocks.length} bloků).`);
+  if (fillIn) {
+    console.log(added ? `Doplněno položek: ${added}. Nic se nesmazalo.` : "Plán už obsahuje všechny položky, není co doplnit.");
+    await conn.end();
+    return;
+  }
+  console.log(`Založen plán „${PLAN_NAME}" (${blocks.length} bloků, ${added} položek).`);
   await conn.end();
 }
 
