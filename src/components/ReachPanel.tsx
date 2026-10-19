@@ -22,6 +22,13 @@ const freq = (f: number) => (f ? f.toFixed(1).replace(".", ",") + "×" : "—");
 const MIN_CONTACTS = [2, 3, 4, 5] as const;
 
 /**
+ * Efektivní zásah (3+) je zatím schovaný — zadavatel se rozhodl pracovat jen se
+ * zásahem 1+ a frekvencí (říjen 2026). Výpočet i testy zůstávají; vrátí se
+ * přepnutím na true.
+ */
+const SHOW_EFFECTIVE = false;
+
+/**
  * Cross-mediální zásah a překryv.
  *
  * Součet dílčích zásahů není zásah kampaně — část lidí vidí TV i online.
@@ -85,7 +92,7 @@ export function ReachPanel({
           title="Otevře Sainsburyho kalkulačku s nosiči tohoto plánu — co kdyby">Otevřít v kalkulačce</a>}
         <span className="share">
           čistý zásah za období <b style={{ color: "var(--brand-ink)" }}>{pct(total.net)}</b>
-          {" "}({big(total.people)} osob) · {minC}+ {pct(totalEff)} · překryv {pct(total.overlap)}
+          {" "}({big(total.people)} osob){SHOW_EFFECTIVE && <> · {minC}+ {pct(totalEff)}</>} · překryv {pct(total.overlap)}
         </span>
       </div>
 
@@ -97,7 +104,14 @@ export function ReachPanel({
               <div className="v num">{pct(total.net)}</div>
               <div className="d num">{big(total.people)} osob</div>
             </div>
-            <div className="kpi">
+            {!SHOW_EFFECTIVE && (
+              <div className="kpi">
+                <div className="k">Průměrná frekvence</div>
+                <div className="v num">{freq(totalFreq)}</div>
+                <div className="d">kolikrát reklamu uvidí zasažený</div>
+              </div>
+            )}
+            {SHOW_EFFECTIVE && <div className="kpi">
               <div className="k">
                 Efektivní zásah{" "}
                 <select value={minC} onChange={(e) => setMinC(Number(e.target.value))}
@@ -109,7 +123,7 @@ export function ReachPanel({
               </div>
               <div className="v num">{pct(totalEff)}</div>
               <div className="d num">{big(totalEff * universe)} osob · frekvence {freq(totalFreq)}</div>
-            </div>
+            </div>}
             <div className="kpi">
               <div className="k">Součet médií</div>
               <div className="v num">{pct(total.gross)}</div>
@@ -145,7 +159,7 @@ export function ReachPanel({
                   <th className="r">GRP</th>
                   <th className="r">Zásah</th>
                   <th className="r">Frekvence</th>
-                  <th className="r">Zásah {minC}+</th>
+                  {SHOW_EFFECTIVE && <th className="r">Zásah {minC}+</th>}
                   <th className="r">Rozpočet (Kč)</th>
                   <th className="r">Podíl rozpočtu</th>
                   <th style={{ width: "32%" }}>Podíl na zásahu</th>
@@ -162,7 +176,7 @@ export function ReachPanel({
                     <td className="r num">{Math.round(b.grp).toLocaleString("cs-CZ")}</td>
                     <td className="r num">{pct(b.reach)}</td>
                     <td className="r share num">{freq(frequencyOf(b.grp, b.reach))}</td>
-                    <td className="r num">{pct(effectiveReach(b.reach, frequencyOf(b.grp, b.reach), minC))}</td>
+                    {SHOW_EFFECTIVE && <td className="r num">{pct(effectiveReach(b.reach, frequencyOf(b.grp, b.reach), minC))}</td>}
                     <td className="r num">{kc(b.budget)}</td>
                     <td className="r share num">{total.budget ? pct(b.budget / total.budget) : "—"}</td>
                     <td>
@@ -174,7 +188,7 @@ export function ReachPanel({
                   </tr>
                 ))}
                 {!total.byType.length && (
-                  <tr><td colSpan={8} style={{ padding: 18, textAlign: "center", color: "var(--muted)" }}>
+                  <tr><td colSpan={SHOW_EFFECTIVE ? 8 : 7} style={{ padding: 18, textAlign: "center", color: "var(--muted)" }}>
                     Zatím není co počítat — doplňte do plánu rozpočty nebo GRP.
                   </td></tr>
                 )}
@@ -189,7 +203,7 @@ export function ReachPanel({
                   <tr>
                     <th>Měsíc</th>
                     <th className="r">Čistý zásah</th>
-                    <th className="r">Zásah {minC}+</th>
+                    {SHOW_EFFECTIVE && <th className="r">Zásah {minC}+</th>}
                     <th className="r">Překryv</th>
                     <th className="r">GRP</th>
                     <th className="r">Rozpočet (Kč)</th>
@@ -201,7 +215,7 @@ export function ReachPanel({
                     <tr key={m.month}>
                       <td>{monthShort(m.month)}</td>
                       <td className="r num">{m.net ? pct(m.net) : "—"}</td>
-                      <td className="r num">{m.net ? pct(effectiveReach(m.net, frequencyOf(m.grp, m.net), minC)) : "—"}</td>
+                      {SHOW_EFFECTIVE && <td className="r num">{m.net ? pct(effectiveReach(m.net, frequencyOf(m.grp, m.net), minC)) : "—"}</td>}
                       <td className="r share num">{m.overlap ? pct(m.overlap) : "—"}</td>
                       <td className="r num">{m.grp ? Math.round(m.grp).toLocaleString("cs-CZ") : "—"}</td>
                       <td className="r num">{m.budget ? kc(m.budget) : "—"}</td>
@@ -222,8 +236,9 @@ export function ReachPanel({
             <b>Jak se to počítá.</b> Z rozpočtu nebo GRP se přes universum cílové skupiny dopočítají
             impressions, z nich křivkou zásahu dílčí zásah každého nosiče. Ty se pak skládají od
             nejsilnějšího média: každé další přidá svůj zásah minus překryv s tím, co už je pokryté.
-            Efektivní zásah předpokládá Poissonovo rozdělení kontaktů mezi zasaženými; reálné
-            rozdělení bývá šikmější, takže skutečný podíl {minC}+ může vyjít o něco nižší.
+            {SHOW_EFFECTIVE && <>Efektivní zásah předpokládá Poissonovo rozdělení kontaktů mezi zasaženými; reálné
+            rozdělení bývá šikmější, takže skutečný podíl {minC}+ může vyjít o něco nižší.</>}
+            {" "}Zásah znamená aspoň jeden kontakt (1+).
             <br />
             <b>Jde o modelový odhad, ne o měření.</b> Přesná deduplikace vyžaduje single-source
             panelová data. Křivky zásahu i duplikační koeficienty jsou zatím výchozí hodnoty —
@@ -277,11 +292,11 @@ function ClientReach({
               <div className="v num">{pct(total.net)}</div>
               <div className="d num">{big(total.people)} osob z {big(universe)}</div>
             </div>
-            <div className="kpi">
+            {SHOW_EFFECTIVE && <div className="kpi">
               <div className="k">Aspoň 3 kontakty</div>
               <div className="v num">{pct(eff3)}</div>
               <div className="d num">{big(eff3 * universe)} osob</div>
-            </div>
+            </div>}
             <div className="kpi">
               <div className="k">Průměrná frekvence</div>
               <div className="v num">{f ? f.toFixed(1).replace(".", ",") + "×" : "—"}</div>

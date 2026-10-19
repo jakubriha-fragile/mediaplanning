@@ -226,6 +226,9 @@ Technický dluh:
   **Výchozí křivka TV je příliš strmá** — nasytí se už kolem 300–500 TRP, takže
   na plánu BENU 2027 vychází zásah ~92 % v každém měsíci i v každé oblasti a liší
   se jen frekvence. Zkalibrovat podle TV reportu, až ho zadavatel pošle.
+- **Zásah = 1+.** Zadavatel pracuje jen se zásahem 1+ a frekvencí; efektivní zásah 3+
+  je v panelu zásahu schovaný (`SHOW_EFFECTIVE` v `ReachPanel.tsx`), výpočet a testy zůstaly.
+  GRP/TRP v plánu BENU jsou podklad pro zásah 1+ (potvrzeno, říjen 2026).
 - Strategický plán BENU 2027: cílová skupina Ženy 25–54 (potvrzeno), leden 2027
   zatím prázdný (rozhodnutí zadavatele, říjen 2026). Chybí GRP rádia, doručení u OMK MC,
   sponzoringu, partnerství a podcastu, rozpad online po platformách a u social
