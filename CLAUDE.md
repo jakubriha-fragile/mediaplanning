@@ -48,6 +48,7 @@ src/lib/mix.ts           data pro Finální mix (/mix): média, měsíce, oblast
 src/lib/metrics.ts       poměrové ukazatele (CPM, CPC, CPA, CTR, ROAS) se počítají z čerpání a základních čísel
 src/lib/displayName.ts   krátký název položky (tactic.label, jinak bez poznámek v závorkách)
 src/components/ClientPlan.tsx  Plán pro klienta — jen čtení, offline/online, bez agenturních nástrojů
+src/components/Chrome.tsx      kostra: menu vlevo (role → položky), tenká hlavička stránky (.top)
 src/app/vyplnit/         K vyplnění — jen položky, kam smí uživatel zapisovat (hlavní stránka klienta)
 src/components/AccessEditor.tsx   přidělení přístupu: plán → co smí → na čem (offline/online/položky)
 src/components/ReachCalibration.tsx  zadání naměřených vln (TRP + zásah 1+) → křivka (fitCurve)
@@ -83,7 +84,9 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
 
 3. **Rozpočet v Kč se do `tactic_budget.planned` ukládá vždy**, i když je taktika
    řízená GRP nebo impressions. Na tom stojí všechny součty i porovnání se
-   skutečností. Kdo mění driver, musí přepočítat `planned`.
+   skutečností. Kdo mění driver, musí přepočítat `planned`. Jedna buňka i vložení
+   bloku z Excelu (`setPlannedBudgets`, vše-nebo-nic, jeden krok Zpět) jdou přes
+   `writeBudget`.
 
 4. **Klíče tabulky duplikací skládá `dupKey()`** (abecedně seřazená dvojice).
    Ručně psaný klíč v jiném pořadí tiše spadne na 1,0 a model přestane počítat

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
-  setTacticThemes, createTheme, renameCampaign,
+  setTacticThemes, createTheme, renameCampaign, setPlannedBudgets,
 } from "@/lib/actions";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
 import { Combo, type ComboOption } from "@/components/Combo";
@@ -109,6 +109,7 @@ export function PlanTable({
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragCamp, setDragCamp] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ id: string; after: boolean } | null>(null);
@@ -216,6 +217,52 @@ export function PlanTable({
     return anyFilter ? known.filter((g) => g.rows.length) : known;
   }, [visible, campaigns, anyFilter]);
 
+  // ---------------------------------------------- ovládání jako v Excelu
+  // Buňky měsíců tvoří mřížku: řádek = pořadí taktiky v tabulce, sloupec = index
+  // v `cols`. Šipky, Enter a Tab mezi nimi skáčou, vložený blok z Excelu se
+  // rozloží od buňky, kam se vkládá.
+  const flat = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  const rowIdx = useMemo(() => new Map(flat.map((r, i) => [r.id, i])), [flat]);
+
+  const moveFocus = (r: number, c: number, dr: number, dc: number): boolean => {
+    let rr = r + dr, cc = c + dc;
+    while (rr >= 0 && rr < flat.length && cc >= 0 && cc < cols.length) {
+      const el = document.querySelector<HTMLInputElement>(`input[data-grid="${rr}:${cc}"]`);
+      if (el && !el.disabled) { el.focus(); return true; }
+      rr += dr; cc += dc;
+    }
+    return false;
+  };
+
+  const pasteGrid = (text: string, r0: number, c0: number) => {
+    const lines = text.replace(/\r/g, "").split("\n");
+    if (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    // hodnoty jdou jen do měsíců — sbalený kvartál se přeskočí
+    const monthCols = cols.map((c, i) => ({ c, i })).filter((x) => x.c.kind === "m" && x.i >= c0);
+    const items: Array<{ tacticId: string; month: string; driver: PlanUnit; value: number }> = [];
+    let skipped = 0;
+    lines.forEach((line, i) => {
+      const row = flat[r0 + i];
+      line.split("\t").forEach((raw, j) => {
+        const t = raw.trim();
+        if (!t) return; // prázdná buňka v Excelu nic nepřepisuje
+        const mc = monthCols[j];
+        if (!row || !mc || !row.editable[mc.c.key]) { skipped++; return; }
+        items.push({ tacticId: row.id, month: mc.c.key, driver: rowUnit(row), value: parseNum(t) });
+      });
+    });
+    if (!items.length) { setInfo(skipped ? "Nic se nevložilo — cílové buňky jsou mimo tabulku nebo k nim nemáte oprávnění." : null); return; }
+    run(() => {}, () => {}, async () => {
+      const res = await setPlannedBudgets({ items });
+      if (res.ok) {
+        const n = res.changed ?? 0;
+        setInfo(`Vloženo z Excelu: ${n} ${n === 1 ? "hodnota" : n >= 2 && n <= 4 ? "hodnoty" : "hodnot"}` +
+          (skipped ? `, ${skipped} mimo tabulku nebo bez oprávnění přeskočeno` : "") + ". Vrátíte jedním kliknutím na Zpět.");
+      }
+      return res;
+    });
+  };
+
   const channelOptions: ComboOption[] = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of rows) counts.set(r.channel, (counts.get(r.channel) ?? 0) + 1);
@@ -302,6 +349,13 @@ export function PlanTable({
           <span><b>Zápis odmítnut.</b> {error}</span>
         </div>
       )}
+      {info && !error && (
+        <div className="banner info" style={{ margin: 0, borderRadius: 0 }}>
+          <span>{info}</span>
+          <span className="spacer" />
+          <button className="linkbtn" onClick={() => setInfo(null)}>zavřít</button>
+        </div>
+      )}
 
       <div className="scroll stick">
         {/* bez práva na úpravu se tabulka kreslí jako text, ne jako zašedlý formulář */}
@@ -380,20 +434,20 @@ export function PlanTable({
                       ) : g.campaign}{" "}
                       <span className="share" style={{ fontWeight: 300 }}>{g.rows.length} taktik</span>
                       {canEditPlan && lines[0] && (
-                        <button className="btn" style={{ marginLeft: 10, fontSize: 11, padding: "2px 8px" }}
+                        <button className="btn blockact" style={{ marginLeft: 10, fontSize: 11, padding: "2px 8px" }}
                           onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: lines[0].id }))}>
                           + Taktika
                         </button>
                       )}
                       {canEditPlan && (
-                        <button className="btn" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
+                        <button className="btn blockact" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
                           title="Nové sdělení v tomto bloku, rovnou s první taktikou"
                           onClick={() => run(() => {}, () => {}, () => createMessageLine({ campaignId: g.campaignId }))}>
                           + Linka sdělení
                         </button>
                       )}
                       {canEditPlan && (
-                        <button className="btn danger" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
+                        <button className="btn danger blockact" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
                           title="Smazat blok"
                           onClick={() => {
                             const n = g.rows.length;
@@ -617,6 +671,9 @@ export function PlanTable({
                                 disabled={!r.editable[m]}
                                 showDerived={!clientView}
                                 estimated={!!cell?.estimated}
+                                grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
+                                onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
+                                onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
                                 onCommit={(v) => {
                                   const prev = cell?.driverValue ?? 0;
                                   if (prev === v) return;
@@ -666,6 +723,9 @@ export function PlanTable({
       </div>
 
       <div className="note">
+        {canEditPlan && <><b>Jako v Excelu:</b> Enter a šipky přeskakují mezi měsíci, Tab doprava.
+        Blok zkopírovaný z Excelu vložíte Ctrl+V (⌘V) do první buňky — rozloží se doprava a dolů,
+        prázdné buňky nic nepřepíšou a celé vložení vrátíte jedním Zpět.<br /></>}
         Délka pruhu = investice v měsíci na společném měřítku 0–{kc(axisMax)} Kč, oranžový proužek u dna =
         skutečné čerpání. Barevný proužek u levého okraje řádku = kampaň.
         {canEditPlan && <> Úchyt ⠿ u řádku přetáhne taktiku — mezi řádky změní pořadí, na jiný blok ji přesune;
@@ -697,7 +757,14 @@ function unitFmt(v: number, unit: PlanUnit): string {
 
 function BudgetCell({
   value, unit, budget, grp, impressions, reach, actual, max, type, disabled, showDerived, estimated, onCommit,
+  grid, onNav, onPasteGrid,
 }: {
+  /** souřadnice v mřížce „řádek:sloupec" — podle nich se skáče šipkami */
+  grid: string;
+  /** přesun na sousední buňku; false = dál už nic není */
+  onNav: (dr: number, dc: number) => boolean;
+  /** vložení víc buněk najednou (blok z Excelu) */
+  onPasteGrid: (text: string) => void;
   showDerived: boolean;
   /** dopočet vychází z ceníku, ne z ceny položky — značí se „≈" */
   estimated: boolean;
@@ -752,10 +819,31 @@ function BudgetCell({
         value={shown}
         onFocus={(e) => { setDraft(value ? String(Math.round(value * 10) / 10) : ""); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ""))}
+        data-grid={grid}
         onBlur={() => { if (draft !== null) { onCommit(parseNum(draft)); setDraft(null); } }}
+        onPaste={(e) => {
+          const text = e.clipboardData.getData("text");
+          // jedna hodnota se vloží normálně, blok (tabulátory, řádky) se rozloží do mřížky
+          if (/[\t\n]/.test(text.trim())) {
+            e.preventDefault();
+            // rozepsaná hodnota by se při opuštění pole zapsala přes vložená čísla
+            setDraft(null);
+            (e.target as HTMLInputElement).blur();
+            onPasteGrid(text);
+          }
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); }
+          const el = e.target as HTMLInputElement;
+          const len = el.value.length;
+          const whole = el.selectionStart === 0 && el.selectionEnd === len;
+          // Excel: Enter dolů, Shift+Enter nahoru; přesun fokusu uloží buňku (blur)
+          if (e.key === "Enter") { e.preventDefault(); if (!onNav(e.shiftKey ? -1 : 1, 0)) el.blur(); }
+          else if (e.key === "ArrowDown") { e.preventDefault(); onNav(1, 0); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); onNav(-1, 0); }
+          // do stran jen z kraje textu — uvnitř čísla šipky posouvají kurzor
+          else if (e.key === "ArrowLeft" && (whole || (el.selectionStart === 0 && el.selectionEnd === 0))) { e.preventDefault(); onNav(0, -1); }
+          else if (e.key === "ArrowRight" && (whole || (el.selectionStart === len && el.selectionEnd === len))) { e.preventDefault(); onNav(0, 1); }
+          else if (e.key === "Escape") { setDraft(null); el.blur(); }
         }}
       />
       {!editing && second && <span className="derived">{second}</span>}

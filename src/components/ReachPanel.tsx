@@ -54,7 +54,9 @@ export function ReachPanel({
   hasUniverse: boolean;
   targetGroupName: string;
 }) {
-  const [open, setOpen] = useState(true);
+  // sbalený = tenký souhrnný pruh nad tabulkou; podrobnosti jen na vyžádání,
+  // ať plánovač vidí tabulku hned a nemusí rolovat přes půl obrazovky čísel
+  const [open, setOpen] = useState(false);
   const [minC, setMinC] = useState<number>(3);
 
   if (clientView) {
@@ -89,7 +91,7 @@ export function ReachPanel({
     <div className="panel" style={{ borderRadius: "var(--radius)", marginBottom: 10 }}>
       <div className="toolbar">
         <button className="btn" onClick={() => setOpen((o) => !o)} style={{ borderRadius: 999 }}>
-          {open ? "▾" : "▸"} Cross-mediální zásah
+          {open ? "▾" : "▸"} Zásah a frekvence
         </button>
         <span className="share">
           {targetGroupName} · universum {big(universe)} osob
@@ -98,8 +100,9 @@ export function ReachPanel({
         {showCalculator && <a className="btn" href={`/kalkulacka?plan=${planId}`} style={{ fontSize: 11, padding: "2px 9px" }}
           title="Otevře Sainsburyho kalkulačku s nosiči tohoto plánu — co kdyby">Otevřít v kalkulačce</a>}
         <span className="share">
-          čistý zásah za období <b style={{ color: "var(--brand-ink)" }}>{pct(total.net)}</b>
-          {" "}({big(total.people)} osob){SHOW_EFFECTIVE && <> · {minC}+ {pct(totalEff)}</>} · překryv {pct(total.overlap)}
+          zásah za období <b style={{ color: "var(--brand-ink)" }}>{pct(total.net)}</b>
+          {" "}({big(total.people)} osob){SHOW_EFFECTIVE && <> · {minC}+ {pct(totalEff)}</>}
+          {" "}· <b style={{ color: "var(--brand-ink)" }}>{freq(weekly(total.grp, total.net, weeks))}</b> týdně · překryv {pct(total.overlap)}
         </span>
       </div>
 

@@ -49,7 +49,8 @@ export function MixView({
     <div className="mix">
       <div className="db-head">
         <div>
-          <h2 className="db-title">Finální mix</h2>
+          {/* nadpis je v hlavičce stránky; při tisku se hlavička schová, proto ho tiskneme tady */}
+          <h2 className="db-title printonly">Finální mix</h2>
           <p className="db-meta">{planName} · {period} · cílová skupina {tgName} · stav: {status}</p>
         </div>
         <button className="btn noprint" onClick={() => window.print()}>Tisk / PDF</button>

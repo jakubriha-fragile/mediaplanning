@@ -148,52 +148,113 @@ export async function setPlannedBudget(raw: z.input<typeof budgetInput>): Promis
     const { tacticId, month, driver, value, unitPrice } = budgetInput.parse(raw);
     const me = await currentPrincipal();
     const c = await tacticCoords(tacticId);
-    const { planId, channel, channelType, targetGroupId } = c;
-
     assertCan(me, "write", at(c, "plan", month));
 
-    const [before] = await db
-      .select()
-      .from(tacticBudgets)
-      .where(and(eq(tacticBudgets.tacticId, tacticId), eq(tacticBudgets.month, month)));
+    const done = await writeBudget(c, month, driver, value, unitPrice);
+    if (!done) return { ok: true };
+    await pushUndo(me!.id, done.label, [done.undo]);
+    await log(me!.id, "plan", [done.label]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
 
-    const price = unitPrice ?? before?.unitPrice ?? 0;
-    const universe = await universeFor(planId, targetGroupId);
-    const d = derive({ channelType, driver, driverValue: value, unitPrice: price, universe });
-    const planned = Math.round(d.budget);
+/**
+ * Zápis jedné buňky plánu: dopočte rozpočet v Kč z řídicí jednotky a uloží ho
+ * vždy (invariant 3). Vrací popis změny a operaci pro vrácení zpět; null, když
+ * se nic nezměnilo. Oprávnění musí ověřit volající.
+ */
+async function writeBudget(
+  c: Awaited<ReturnType<typeof tacticCoords>>,
+  month: string,
+  driver: PlanUnit,
+  value: number,
+  unitPrice?: number,
+): Promise<{ label: string; undo: UndoOp } | null> {
+  const { tacticId, planId, channel, channelType, targetGroupId } = c;
+  const [before] = await db
+    .select()
+    .from(tacticBudgets)
+    .where(and(eq(tacticBudgets.tacticId, tacticId), eq(tacticBudgets.month, month)));
 
-    const same =
-      (before?.planned ?? 0) === planned &&
-      (before?.driver ?? "budget") === driver &&
-      (before?.driverValue ?? 0) === value &&
-      (before?.unitPrice ?? 0) === price;
-    if (same) return { ok: true };
+  const price = unitPrice ?? before?.unitPrice ?? 0;
+  const universe = await universeFor(planId, targetGroupId);
+  const d = derive({ channelType, driver, driverValue: value, unitPrice: price, universe });
+  const planned = Math.round(d.budget);
 
-    await db
-      .insert(tacticBudgets)
-      .values({ tacticId, month, planned, driver, driverValue: value, unitPrice: price })
-      .onConflictDoUpdate({
-        target: [tacticBudgets.tacticId, tacticBudgets.month],
-        set: { planned, driver, driverValue: value, unitPrice: price },
-      });
+  const same =
+    (before?.planned ?? 0) === planned &&
+    (before?.driver ?? "budget") === driver &&
+    (before?.driverValue ?? 0) === value &&
+    (before?.unitPrice ?? 0) === price;
+  if (same) return null;
 
-    const unit = driver === "budget" ? "" : driver === "grp" ? " GRP" : " imp.";
-    const label =
-      driver === "budget"
-        ? `Rozpočet ${channel} / ${monthLabel(month)}: ${kc(before?.planned ?? 0)} → ${kc(planned)}`
-        : `${driver === "grp" ? "GRP" : "Impressions"} ${channel} / ${monthLabel(month)}: ` +
-          `${num(before?.driverValue ?? 0) || "—"}${unit} → ${num(value) || "—"}${unit} (${kc(planned)} Kč)`;
+  await db
+    .insert(tacticBudgets)
+    .values({ tacticId, month, planned, driver, driverValue: value, unitPrice: price })
+    .onConflictDoUpdate({
+      target: [tacticBudgets.tacticId, tacticBudgets.month],
+      set: { planned, driver, driverValue: value, unitPrice: price },
+    });
 
-    await pushUndo(me!.id, label, [{
+  const unit = driver === "budget" ? "" : driver === "grp" ? " GRP" : " imp.";
+  const label =
+    driver === "budget"
+      ? `Rozpočet ${channel} / ${monthLabel(month)}: ${kc(before?.planned ?? 0)} → ${kc(planned)}`
+      : `${driver === "grp" ? "GRP" : "Impressions"} ${channel} / ${monthLabel(month)}: ` +
+        `${num(before?.driverValue ?? 0) || "—"}${unit} → ${num(value) || "—"}${unit} (${kc(planned)} Kč)`;
+
+  return {
+    label,
+    undo: {
       t: "budget", tacticId, month,
       planned: before?.planned ?? 0,
       driver: before?.driver ?? "budget",
       driverValue: before?.driverValue ?? 0,
       unitPrice: before?.unitPrice ?? 0,
-    }]);
-    await log(me!.id, "plan", [label]);
+    },
+  };
+}
+
+const budgetsInput = z.object({
+  items: z.array(z.object({
+    tacticId: z.string().min(1),
+    month: monthSchema,
+    driver: z.enum(planUnitEnum.enumValues),
+    value: z.number().min(0).max(100_000_000_000),
+  })).min(1).max(2000),
+});
+
+/**
+ * Hromadný zápis — vložení bloku z Excelu do tabulky plánu. Všechno, nebo nic:
+ * oprávnění se ověří u každé buňky PŘED prvním zápisem, takže vložení nikdy
+ * neskončí napůl. Celé vložení je jeden krok pro vrácení zpět.
+ */
+export async function setPlannedBudgets(raw: z.input<typeof budgetsInput>): Promise<Result & { changed?: number }> {
+  try {
+    const { items } = budgetsInput.parse(raw);
+    const me = await currentPrincipal();
+    const coords = new Map<string, Awaited<ReturnType<typeof tacticCoords>>>();
+    for (const it of items) {
+      if (!coords.has(it.tacticId)) coords.set(it.tacticId, await tacticCoords(it.tacticId));
+      assertCan(me, "write", at(coords.get(it.tacticId)!, "plan", it.month));
+    }
+    const planIds = new Set([...coords.values()].map((c) => c.planId));
+    if (planIds.size > 1) throw new PermissionError("Vložení přes víc plánů najednou není dovolené.");
+
+    const undo: UndoOp[] = [];
+    const labels: string[] = [];
+    for (const it of items) {
+      const done = await writeBudget(coords.get(it.tacticId)!, it.month, it.driver, it.value);
+      if (done) { undo.push(done.undo); labels.push(done.label); }
+    }
+    if (!undo.length) return { ok: true, changed: 0 };
+    await pushUndo(me!.id, `Vložení z Excelu (${undo.length} ${undo.length === 1 ? "hodnota" : undo.length <= 4 ? "hodnoty" : "hodnot"})`, undo);
+    await log(me!.id, "plan", labels.length > 12 ? [...labels.slice(0, 12), `… a dalších ${labels.length - 12}`] : labels);
     revalidatePath("/");
-    return { ok: true };
+    return { ok: true, changed: undo.length };
   } catch (e) {
     return fail(e);
   }

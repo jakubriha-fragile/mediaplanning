@@ -209,6 +209,17 @@ importovaný součet se součtem v Excelu. Data klienta zůstávají mimo repozi
 
 ### Sekce aplikace
 
+Menu je **vlevo** a nese i kontext otevřeného plánu (klient, období). Je rozdělené
+na *Plán* (Přehled, Plánování, Finální mix), *Vyhodnocení* (Plnění, K vyplnění),
+*Model* (Kalkulačka a předpoklady) a u administrátora *Správu*.
+
+**Plánování jako v Excelu:** Enter a šipky přeskakují mezi měsíci, Tab doprava.
+Blok zkopírovaný z Excelu se vloží Ctrl+V (⌘V) do první buňky a rozloží se doprava
+a dolů — prázdné buňky nic nepřepíšou, buňky bez oprávnění se přeskočí a celé vložení
+se vrací jedním *Zpět*. Výběrová pole v řádcích vypadají jako text a ovládání ukážou
+až pod myší, akce bloku (+ Taktika, Smazat blok) také. Panel zásahu je sbalený
+do souhrnného pruhu (zásah, týdenní frekvence, překryv).
+
 | Záložka | Pro koho | Co tam je |
 |---|---|---|
 | **Přehled** | agentura | zásah a frekvence v čase, oblasti × média, doporučení |
