@@ -36,9 +36,10 @@ Seed založí klienta **BENU** a dva plány: **Q4 2026** s reálnými daty a **R
 kam se struktura z Q4 zkopíruje bez čísel (ceník CPP/CPT se přenese, objemy ne).
 V plánu 2027 je navíc blok *UKÁZKA cross-media* — po prohlédnutí ho smažte.
 
-Přihlaste se jako `klient@benu.cz` a zkuste v záložce *Detail & plnění* vyplnit
-čerpání u taktiky typu Owned. Pole je zašedlé, a kdyby ho někdo v prohlížeči
-odemkl, zápis odmítne server.
+Klient bez přidělených přístupů nevidí nic. Jako administrátor mu v *Uživatelé & přístupy*
+přidělte třeba „vyplňuje skutečnost — vybrané položky — Vybrat, co platí klient sám",
+pak se přihlaste jako `klient@benu.cz`: otevře se mu rovnou *K vyplnění* jen s jeho
+položkami. Cizí položky nevidí, a kdyby někdo zápis zkusil obejít, odmítne ho server.
 
 ---
 
@@ -206,6 +207,41 @@ DATABASE_URL="…" npx tsx scripts/import-strategicky-plan.ts "BENU Strategic Pl
 bere *Total Client cost including fee*, u TV TRP a u online imprese. Na konci porovná
 importovaný součet se součtem v Excelu. Data klienta zůstávají mimo repozitář.
 
+### Sekce aplikace
+
+| Záložka | Pro koho | Co tam je |
+|---|---|---|
+| **Přehled** | agentura | zásah a frekvence v čase, oblasti × média, doporučení |
+| **Plánování** | agentura | tabulka plánu — rozpočty, GRP, imprese, bloky, oblasti |
+| **Finální mix** | všichni | výsledek plánu na jedné stránce: rozdělení rozpočtu, mediamix po měsících, oblasti; tisk do PDF |
+| **Plnění** | agentura | plán vs. skutečnost, cíle a výsledky ukazatelů (KPI), komentáře |
+| **K vyplnění** | klient i agentura | jen položky, kam smí uživatel zapisovat, po měsících — jedno pole na měsíc |
+| **Kalkulačka** | agentura | Sainsbury, ceník, kalibrace zásahu, koeficienty duplikace |
+
+Klient vidí jen *K vyplnění*, *Plán* (čtení) a *Finální mix*; po přihlášení se mu otevře
+*K vyplnění*. Otevřený plán se mezi záložkami přenáší.
+
+### Finální mix
+
+Souhrn ke schválení a sdílení — nic se tu nezadává. Rozpočet celkem, podíl offline/online,
+modelový zásah 1+ za období, pruh rozdělení rozpočtu, tabulka médií (doručení v TRP nebo
+impresích, cena za jednotku jen pro agenturu, zásah) s **flowchartem po měsících** a rozpadem
+na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* schová navigaci.
+
+### K vyplnění
+
+Měsíce jako záložky s červeným počtem chybějících údajů, pod tím jen položky uživatele:
+plán, pole *Skutečnost* (ukládá se samo po opuštění pole) a stav — vyplněno / chybí /
+zatím neprobíhá. „Nečerpáno" zapíše nulu: **nula je odpověď**, prázdné pole ne. Má-li
+položka ukazatele (konverze, CPA…), vyplňují se pod ní. Rozpočet tu jde měnit jen u položek
+řízených v Kč — u GRP/impresí by přepis změnil model, ty se mění v Plánování.
+
+### Kalkulace ukazatelů (KPI)
+
+V *Plnění* jde u každé položky **přidat ukazatel** (název, jednotka, typ: načítá se /
+nižší = lépe / vyšší = lépe), zadat jeho **cíl** po měsících (sloupec Plán / cíl, v režimu
+jednoho měsíce) a smazat ho. Skutečnost ukazatelů vyplňuje ten, kdo má zápis do skutečnosti.
+
 ### Kalkulačka zásahu
 
 Samostatná položka menu (klient ji nevidí). Zásahy nosičů se dají **načíst
@@ -217,6 +253,13 @@ Níž je **dopočet koeficientu z naměřených dat**: k = (R_A + R_B − R_A+B)
 který jde uložit k dané dvojici nosičů, a **tabulka všech koeficientů** — upravit
 je smí administrátor a plánovač, změna platí pro všechny plány a zapíše se do
 historie i se zdrojem. Na rozdíl od kalkulačky v Excelu nezáleží na pořadí médií.
+
+**Kalibrace zásahu z naměřených dat.** Až TV nákup dodá k vlnám TRP a zásah 1+
+(plánovací systém nad Nielsen Admosphere), zadají se sem po médiích a cílových skupinách.
+Z jednoho měření se dopočítá rychlost růstu zásahu (strop zůstane z předpokladu), ze dvou
+a víc i strop. Křivka se hned použije v Plánování, Přehledu i Finálním mixu; srovnání
+„předpoklad vs. naměřená data" je vidět při 300 / 1 000 / 2 000 TRP. Smazáním všech
+měření se vrátí předpoklad. TRP i zásah musí být ve stejné cílové skupině.
 
 ---
 
@@ -251,10 +294,20 @@ Stavy: `návrh → schváleno → v běhu → uzavřeno`.
 
 ## Oprávnění
 
-Jádro aplikace. Grant má **pět rozměrů** — kdo × co × kde × kdy:
+Jádro aplikace. Agentura (administrátor, plánovač) má přístup z role. **Klient nevidí nic,
+dokud mu ho administrátor nepřidělí** — v *Uživatelé & přístupy* ve třech krocích:
+
+1. **Plán** — vždy konkrétní.
+2. **Co smí** — *jen vidí* / *vyplňuje skutečnost* / *upravuje plán i skutečnost*.
+3. **Na čem** — celý plán / **offline** (TV, rádio, OOH, tisk, kino, PR) / **online**
+   (digital, vlastní kanály) / **vybrané položky** (s tlačítkem „Vybrat, co platí klient sám").
+4. Volitelně jen některé měsíce.
+
+Z výběru vznikne svazek grantů, který se v přehledu ukáže jako jedna věta a odebere naráz.
+Pod tím zůstává engine s granty po rozměrech:
 
 ```
-uživatel  ×  plán  ×  typ média  ×  kampaň  ×  měsíc  ×  oblast  ×  úroveň
+uživatel  ×  plán  ×  typ média  ×  offline/online  ×  kampaň  ×  položka  ×  měsíc  ×  oblast  ×  úroveň
 ```
 
 **Rozměr plánu je bezpečnostní pojistka.** Bez něj by grant udělený na letošek
@@ -274,11 +327,12 @@ externista jen na Vánoce, jen prosinec:
 Kontrola běží **na serveru u každého zápisu** (`src/lib/actions.ts`) **i čtení**.
 Zašedlá pole v rozhraní jsou pohodlí, ne ochrana. Klient vidí jen plány, na které
 má grant — ostatní plány ani jejich názvy se mu nepošlou, ani na přímý odkaz.
-V plánu vidí jen taktiky, na jejichž typ média a kampaň má grant (rozměr měsíce
-řádky neskrývá), a souhrny se počítají jen z nich.
+V plánu vidí jen taktiky, na které má grant (typ média, offline/online, kampaň,
+položka; rozměr měsíce řádky neskrývá), a souhrny se počítají jen z nich. Grant
+na jednu položku nedovolí založit novou taktiku ani měnit blok.
 
 ```bash
-npm run test:perms    # 33 testů včetně scénářů ze zadání, izolace plánů a čtení
+npm run test:perms    # 52 testů včetně scénářů ze zadání, izolace plánů, offline/online a položek
 npm test              # oprávnění i cross-mediální přepočty
 ```
 
@@ -301,8 +355,8 @@ Poctivý seznam, aby nepřekvapil:
 
 - **Benchmarky** — zatím se neukládá historie uzavřených plánů ani externí zdroj.
 - **Import z XLSX** — data se zatím nahrávají seedem, ne přes rozhraní.
-- **Kalibrace křivek zásahu** — jdou upravit jen v databázi (koeficienty duplikace,
-  cílové skupiny a universa editovatelné jsou).
+- **Kalibrace křivek zásahu** — rozhraní je hotové (Kalkulačka), chybí data od TV nákupu.
+- **Tematické oblasti** — zakládat jdou, přejmenovat a mazat zatím ne.
 - **Export do XLSX** — zadání §9.
 - **Podklady a poznámky** — tabulky v databázi jsou, rozhraní chybí.
 - **Migrace** — projekt používá `db:push`. Před produkčním provozem přejděte

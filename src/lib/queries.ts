@@ -8,7 +8,7 @@ import {
 } from "@/db/schema";
 import { monthsBetween } from "@/lib/period";
 import { costKind } from "@/lib/costKind";
-import { can, canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
+import { can, canSeePlan, canSeeTactic, channelGroupOf, type Principal } from "@/lib/permissions";
 import {
   derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey, UNCALIBRATED_SOURCE,
   type Curve, type Derived,
@@ -274,7 +274,7 @@ export async function getPlanRows(me: Principal, planId: string) {
   const loaded = await loadPlan(planId);
   const { budgets, spends } = loaded;
   const themeMap = sharesByTactic(loaded.themeShares);
-  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }));
+  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId }));
 
   return rows.map((r) => {
     const universe = ctx.universeOf(r.targetGroupId);
@@ -321,7 +321,7 @@ export async function getPlanRows(me: Principal, planId: string) {
           m,
           can(me, "write", {
             area: "plan", mediaType: r.mediaType, planId,
-            campaignId: r.campaignId, month: m,
+            campaignId: r.campaignId, month: m, channelType: r.channelType, tacticId: r.tacticId,
           }),
         ]),
       ),
@@ -394,7 +394,7 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
   const { budgets } = loaded;
   // jen taktiky, které uživatel vidí — jinak by souhrn prozradil zbytek plánu
   const rows = canSeePlan(me, planId)
-    ? loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }))
+    ? loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId }))
     : [];
   const universe = ctx.universeOf(null);
 
@@ -496,7 +496,7 @@ export async function getPerfRows(me: Principal, planId: string) {
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
   const loaded = await loadPlan(planId);
   const { budgets, spends, notes, mets, targets, mActuals } = loaded;
-  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }));
+  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId }));
 
   return rows.map((r) => ({
     id: r.tacticId,
@@ -512,10 +512,25 @@ export async function getPerfRows(me: Principal, planId: string) {
         m,
         can(me, "write", {
           area: "actuals", mediaType: r.mediaType, planId,
-          campaignId: r.campaignId, month: m,
+          campaignId: r.campaignId, month: m, channelType: r.channelType, tacticId: r.tacticId,
         }),
       ]),
     ),
+    /** smí měnit plán (cíle ukazatelů) — v Plnění se zadávají cíle KPI */
+    planEditable: Object.fromEntries(
+      months.map((m) => [
+        m,
+        can(me, "write", {
+          area: "plan", mediaType: r.mediaType, planId,
+          campaignId: r.campaignId, month: m, channelType: r.channelType, tacticId: r.tacticId,
+        }),
+      ]),
+    ),
+    /** smí přidávat a mazat ukazatele (plán taktiky napříč měsíci) */
+    canManageMetrics: can(me, "write", {
+      area: "plan", mediaType: r.mediaType, planId,
+      campaignId: r.campaignId, month: null, channelType: r.channelType, tacticId: r.tacticId,
+    }),
     budget: byMonth(budgets.filter((b) => b.tacticId === r.tacticId), months, (b) => b.planned),
     spend: byMonth(spends.filter((s) => s.tacticId === r.tacticId), months, (s) => s.amount),
     note: Object.fromEntries(
@@ -532,4 +547,75 @@ export async function getPerfRows(me: Principal, planId: string) {
         actual: byMonth(mActuals.filter((a) => a.metricId === mt.id), months, (a) => a.value),
       })),
   }));
+}
+
+// ------------------------------------------------------------- k vyplnění
+
+export type FillMonth = {
+  planned: number;
+  /** čím je měsíc řízený — rozpočet u GRP/impresí se tady přepsat nesmí, změnil by model */
+  driver: PlanUnit;
+  /** null = ještě nikdo nevyplnil; 0 = vyplněno „nečerpáno" */
+  actual: number | null;
+  canPlan: boolean;
+  canActual: boolean;
+};
+
+export type FillRow = {
+  id: string;
+  block: string;
+  channel: string;
+  channelType: ChannelType;
+  online: boolean;
+  months: Record<string, FillMonth>;
+  metrics: Array<{ id: string; name: string; unit: string; actual: Record<string, number | null>; target: Record<string, number> }>;
+};
+
+/**
+ * Položky, do kterých uživatel smí něco zapsat — podklad pro stránku K vyplnění.
+ * Bere jen taktiky, které vidí, a z nich ty, kde má zápis aspoň v jednom měsíci.
+ * Prázdná skutečnost (žádný řádek) se liší od nuly: nula je „nečerpáno".
+ */
+export async function getFillRows(me: Principal, planId: string): Promise<FillRow[]> {
+  const plan = await getPlan(planId);
+  if (!plan || !canSeePlan(me, planId)) return [];
+  const months = monthsBetween(plan.periodStart, plan.periodEnd);
+  const loaded = await loadPlan(planId);
+  const { budgets, spends, mets, targets, mActuals } = loaded;
+
+  const out: FillRow[] = [];
+  for (const r of loaded.rows) {
+    const coords = { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId };
+    if (!canSeeTactic(me, coords)) continue;
+    const cells = Object.fromEntries(months.map((m) => {
+      const b = budgets.find((x) => x.tacticId === r.tacticId && x.month === m);
+      const s = spends.find((x) => x.tacticId === r.tacticId && x.month === m);
+      return [m, {
+        planned: b?.planned ?? 0,
+        driver: (b?.driver ?? "budget") as PlanUnit,
+        actual: s ? s.amount : null,
+        canPlan: can(me, "write", { area: "plan", ...coords, month: m }),
+        canActual: can(me, "write", { area: "actuals", ...coords, month: m }),
+      }];
+    })) as Record<string, FillMonth>;
+    if (!months.some((m) => cells[m].canPlan || cells[m].canActual)) continue;
+
+    out.push({
+      id: r.tacticId,
+      block: r.campaign,
+      channel: r.channel,
+      channelType: r.channelType,
+      online: channelGroupOf(r.channelType) === "online",
+      months: cells,
+      metrics: mets.filter((mt) => mt.tacticId === r.tacticId).map((mt) => ({
+        id: mt.id, name: mt.name, unit: mt.unit,
+        actual: Object.fromEntries(months.map((m) => {
+          const a = mActuals.find((x) => x.metricId === mt.id && x.month === m);
+          return [m, a ? a.value : null];
+        })),
+        target: Object.fromEntries(months.map((m) => [m, targets.find((x) => x.metricId === mt.id && x.month === m)?.target ?? 0])),
+      })),
+    });
+  }
+  return out;
 }

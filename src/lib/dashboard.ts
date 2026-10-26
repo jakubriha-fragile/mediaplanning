@@ -123,7 +123,7 @@ export async function getDashboard(
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
   const ctx = await crossContext(plan.targetGroupId, plan.clientId);
   const loaded = await loadPlan(planId);
-  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId }));
+  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId }));
   const universe = ctx.universeOf(null);
   const shareMap = sharesByTactic(loaded.themeShares);
   const themeList = await getThemes(plan.clientId);

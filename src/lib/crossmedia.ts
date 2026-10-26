@@ -369,3 +369,58 @@ export function kFromMeasured(
 /** Rozumné meze koeficientu: pod 0,3 nebo nad 3 jde skoro jistě o chybu v datech. */
 export const K_MIN = 0.3;
 export const K_MAX = 3;
+
+// ------------------------------------------------- kalibrace křivky zásahu
+
+export type ReachPoint = { grp: number; reach: number };
+
+/**
+ * Křivka zásahu z naměřených bodů (např. vlny TV z plánovacího systému nad
+ * daty Nielsen Admosphere: TRP vlny a zásah 1+).
+ *
+ *  - jeden bod: strop (rMax) nejde z jednoho čísla určit, bere se z výchozí
+ *    křivky média; dopočítá se jen rychlost nasycení k, aby křivka bodem prošla.
+ *    Leží-li bod nad výchozím stropem, strop se zvedne těsně nad něj.
+ *  - dva a víc bodů: oba parametry nejmenšími čtverci (mřížka přes rMax,
+ *    k pro každé rMax zlatým řezem). Bez knihovny, desítky bodů zvládne hned.
+ *
+ * Vrací i chybu fitu (průměrnou odchylku v p.b.), aby bylo vidět, jestli
+ * body vůbec na jednu křivku sedí.
+ */
+export function fitCurve(
+  points: ReachPoint[],
+  fallback: Curve,
+): { ok: true; curve: Curve; error: number } | { ok: false; error: string } {
+  const pts = points.filter((p) => p.grp > 0 && p.reach > 0);
+  if (!pts.length) return { ok: false, error: "Chybí měření s kladnými TRP a zásahem." };
+  if (pts.some((p) => p.reach >= 1)) return { ok: false, error: "Zásah musí být pod 100 %." };
+
+  const sse = (c: Curve) => pts.reduce((s, p) => s + (reachFromGrp(p.grp, c) - p.reach) ** 2, 0);
+  const maxR = Math.max(...pts.map((p) => p.reach));
+
+  if (pts.length === 1) {
+    const p = pts[0];
+    const rMax = maxR < fallback.rMax ? fallback.rMax : Math.min(0.995, maxR + 0.02);
+    const k = -Math.log(1 - p.reach / rMax) / (p.grp / 100);
+    return { ok: true, curve: { rMax, k }, error: 0 };
+  }
+
+  const bestK = (rMax: number) => {
+    let lo = 0.01, hi = 10;
+    const f = (k: number) => sse({ rMax, k });
+    for (let i = 0; i < 80; i++) {
+      const a = hi - (hi - lo) / 1.618;
+      const b = lo + (hi - lo) / 1.618;
+      if (f(a) < f(b)) hi = b; else lo = a;
+    }
+    return (lo + hi) / 2;
+  };
+  let best: Curve = fallback;
+  let bestErr = Infinity;
+  for (let rMax = Math.min(0.995, maxR + 0.002); rMax <= 0.995 + 1e-9; rMax += 0.0025) {
+    const k = bestK(rMax);
+    const e = sse({ rMax, k });
+    if (e < bestErr) { bestErr = e; best = { rMax, k }; }
+  }
+  return { ok: true, curve: best, error: Math.sqrt(bestErr / pts.length) };
+}

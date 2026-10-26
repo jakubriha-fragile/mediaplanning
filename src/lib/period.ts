@@ -106,3 +106,6 @@ export const big = (n: number) =>
     : n >= 1_000_000 ? (n / 1_000_000).toFixed(1).replace(".", ",") + " mil."
     : n >= 1_000 ? Math.round(n / 1_000) + " tis."
     : String(Math.round(n));
+/** Číslo z pole, jak ho lidé píšou: „1 250 000", „12,5", „1 250 000 Kč". Prázdné = 0. */
+export const parseNum = (s: string) =>
+  Number(String(s).replace(/\s/g, "").replace(",", ".").replace(/[^\d.]/g, "")) || 0;

@@ -16,15 +16,17 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, duplications, themes, tacticThemes, rateCards,
+  reachMeasurements, reachCurves,
   metrics, metricTargets, actualSpends, metricActuals, accountNotes, grants,
   users, changeLog,
   channelTypeEnum, planUnitEnum, mediaTypeEnum,
   type Area, type ChannelType, type PlanUnit,
 } from "@/db/schema";
 import { currentPrincipal } from "@/lib/auth";
-import { assertCan, canManageUsers, canSeePlan, PermissionError } from "@/lib/permissions";
+import { assertCan, canManageUsers, canSeePlan, PermissionError, ACCESS_LEVEL_LABEL } from "@/lib/permissions";
 import { monthLabel, monthsBetween, periodLabel, shiftYears, kc, num } from "@/lib/period";
-import { derive, isGrpPriced, dupKey, DEFAULT_DUPLICATION, K_MIN, K_MAX } from "@/lib/crossmedia";
+import { createId } from "@/lib/id";
+import { derive, isGrpPriced, dupKey, DEFAULT_DUPLICATION, DEFAULT_CURVE, K_MIN, K_MAX, fitCurve } from "@/lib/crossmedia";
 import {
   pushUndo, popUndo, peekUndo, listUndo, snapshotPositions, snapshotCampaignOrder,
   undoCreatedTactic, undoCreatedCampaign, undoCreatedLine, type UndoOp,
@@ -60,7 +62,29 @@ async function tacticCoords(tacticId: string) {
     .where(eq(tactics.id, tacticId))
     .limit(1);
   if (!row) throw new Error("Taktika neexistuje");
-  return row;
+  return { ...row, tacticId };
+}
+
+/**
+ * Souřadnice taktiky pro engine oprávnění. Jedno místo, aby žádná akce
+ * nezapomněla nosič nebo položku — bez nich by grant „jen online" nebo
+ * „jen tahle položka" nešel vynutit.
+ */
+function at(
+  c: Awaited<ReturnType<typeof tacticCoords>>,
+  area: Area,
+  month: string | null,
+  override: { campaignId?: string; mediaType?: "Paid" | "Owned" | "Earned"; channelType?: ChannelType } = {},
+) {
+  return {
+    area,
+    mediaType: override.mediaType ?? c.mediaType,
+    planId: c.planId,
+    campaignId: override.campaignId ?? c.campaignId,
+    channelType: override.channelType ?? c.channelType,
+    tacticId: c.tacticId,
+    month,
+  };
 }
 
 /** Taktiky jednoho plánu v pořadí, jak jdou v tabulce. */
@@ -121,10 +145,10 @@ export async function setPlannedBudget(raw: z.input<typeof budgetInput>): Promis
   try {
     const { tacticId, month, driver, value, unitPrice } = budgetInput.parse(raw);
     const me = await currentPrincipal();
-    const { mediaType, campaignId, planId, channel, channelType, targetGroupId } =
-      await tacticCoords(tacticId);
+    const c = await tacticCoords(tacticId);
+    const { planId, channel, channelType, targetGroupId } = c;
 
-    assertCan(me, "write", { area: "plan", mediaType, planId, campaignId, month });
+    assertCan(me, "write", at(c, "plan", month));
 
     const [before] = await db
       .select()
@@ -179,9 +203,9 @@ export async function setUnitPrice(raw: { tacticId: string; month: string; unitP
     const { tacticId, month } = raw;
     const unitPrice = Math.max(0, Number(raw.unitPrice) || 0);
     const me = await currentPrincipal();
-    const { mediaType, campaignId, planId, channel, channelType, targetGroupId } =
-      await tacticCoords(tacticId);
-    assertCan(me, "write", { area: "plan", mediaType, planId, campaignId, month });
+    const c = await tacticCoords(tacticId);
+    const { planId, channel, channelType, targetGroupId } = c;
+    assertCan(me, "write", at(c, "plan", month));
 
     const [before] = await db
       .select()
@@ -231,9 +255,10 @@ export async function setMetricTarget(raw: z.input<typeof metricTargetInput>): P
     const me = await currentPrincipal();
     const [metric] = await db.select().from(metrics).where(eq(metrics.id, metricId));
     if (!metric) throw new Error("Metrika neexistuje");
-    const { mediaType, campaignId, planId, channel } = await tacticCoords(metric.tacticId);
+    const c = await tacticCoords(metric.tacticId);
+    const { channel } = c;
 
-    assertCan(me, "write", { area: "plan", mediaType, planId, campaignId, month });
+    assertCan(me, "write", at(c, "plan", month));
 
     const [before] = await db
       .select()
@@ -250,6 +275,55 @@ export async function setMetricTarget(raw: z.input<typeof metricTargetInput>): P
     await pushUndo(me!.id, label, [{ t: "metricTarget", metricId, month, target: before?.target ?? 0 }]);
     await log(me!.id, "plan", [label]);
     revalidatePath("/");
+    revalidatePath("/plneni");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const newMetric = z.object({
+  tacticId: z.string().min(1),
+  name: z.string().trim().min(1).max(60),
+  unit: z.string().trim().max(20).default(""),
+  kind: z.enum(["cumulative", "rate_low", "rate_high"]),
+});
+
+/**
+ * Nový ukazatel u taktiky (imprese, kliky, CPA…). Ukazatel patří k plánu —
+ * jeho cíle nastavuje ten, kdo smí měnit plán taktiky; skutečnost pak vyplňuje
+ * ten, kdo má zápis do skutečnosti.
+ */
+export async function createMetric(raw: z.input<typeof newMetric>): Promise<Result> {
+  try {
+    const data = newMetric.parse(raw);
+    const me = await currentPrincipal();
+    const c = await tacticCoords(data.tacticId);
+    assertCan(me, "write", at(c, "plan", null));
+    const [{ max }] = await db
+      .select({ max: sql<number>`coalesce(max(${metrics.slot}), -1)` })
+      .from(metrics)
+      .where(eq(metrics.tacticId, data.tacticId));
+    await db.insert(metrics).values({ ...data, slot: Number(max) + 1 });
+    await log(me!.id, "plan", [`Nový ukazatel „${data.name}" u ${c.channel}`]);
+    revalidatePath("/plneni");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Smaže ukazatel i s cíli a skutečností. Nevratné — UI se předem ptá. */
+export async function deleteMetric(metricId: string): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    const [metric] = await db.select().from(metrics).where(eq(metrics.id, metricId));
+    if (!metric) return { ok: true };
+    const c = await tacticCoords(metric.tacticId);
+    assertCan(me, "write", at(c, "plan", null));
+    await db.delete(metrics).where(eq(metrics.id, metricId));
+    await log(me!.id, "plan", [`Smazán ukazatel „${metric.name}" u ${c.channel}`]);
+    revalidatePath("/plneni");
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -268,17 +342,19 @@ export async function setActualSpend(raw: z.input<typeof actualInput>): Promise<
   try {
     const { tacticId, month, amount } = actualInput.parse(raw);
     const me = await currentPrincipal();
-    const { mediaType, campaignId, planId, channel } = await tacticCoords(tacticId);
+    const c = await tacticCoords(tacticId);
+    const { channel } = c;
 
     // Tohle je ta věta, kvůli které se aplikace staví:
     // klient s grantem jen na Paid sem u Owned taktiky neprojde.
-    assertCan(me, "write", { area: "actuals", mediaType, planId, campaignId, month });
+    assertCan(me, "write", at(c, "actuals", month));
 
     const [before] = await db
       .select()
       .from(actualSpends)
       .where(and(eq(actualSpends.tacticId, tacticId), eq(actualSpends.month, month)));
-    if ((before?.amount ?? 0) === amount) return { ok: true };
+    // nula zapsaná poprvé je informace („nečerpáno"), ne prázdné pole — proto se uloží
+    if (before && before.amount === amount) return { ok: true };
 
     await db
       .insert(actualSpends)
@@ -289,6 +365,7 @@ export async function setActualSpend(raw: z.input<typeof actualInput>): Promise<
     await pushUndo(me!.id, label, [{ t: "actual", tacticId, month, amount: before?.amount ?? 0 }]);
     await log(me!.id, "actuals", [label]);
     revalidatePath("/plneni");
+    revalidatePath("/vyplnit");
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -307,15 +384,16 @@ export async function setMetricActual(raw: z.input<typeof metricActualInput>): P
     const me = await currentPrincipal();
     const [metric] = await db.select().from(metrics).where(eq(metrics.id, metricId));
     if (!metric) throw new Error("Metrika neexistuje");
-    const { mediaType, campaignId, planId, channel } = await tacticCoords(metric.tacticId);
+    const c = await tacticCoords(metric.tacticId);
+    const { channel } = c;
 
-    assertCan(me, "write", { area: "actuals", mediaType, planId, campaignId, month });
+    assertCan(me, "write", at(c, "actuals", month));
 
     const [before] = await db
       .select()
       .from(metricActuals)
       .where(and(eq(metricActuals.metricId, metricId), eq(metricActuals.month, month)));
-    if ((before?.value ?? 0) === value) return { ok: true };
+    if (before && before.value === value) return { ok: true };
 
     await db
       .insert(metricActuals)
@@ -343,9 +421,10 @@ export async function setAccountNote(raw: z.input<typeof noteInput>): Promise<Re
   try {
     const { tacticId, month, text } = noteInput.parse(raw);
     const me = await currentPrincipal();
-    const { mediaType, campaignId, planId, channel } = await tacticCoords(tacticId);
+    const c = await tacticCoords(tacticId);
+    const { channel } = c;
 
-    assertCan(me, "write", { area: "actuals", mediaType, planId, campaignId, month });
+    assertCan(me, "write", at(c, "actuals", month));
     // komentář píše agentura; klient s právem na čerpání ho jen čte
     if (me!.role === "CLIENT") throw new PermissionError("Komentář agentury klient nemění.");
 
@@ -385,6 +464,7 @@ const grantInput = z.object({
   planId: z.string().nullable().default(null),
   campaignId: z.string().nullable(),
   month: monthSchema.nullable(),
+  channelGroup: z.enum(["offline", "online"]).nullable().default(null),
   note: z.string().max(200).optional(),
 });
 
@@ -414,6 +494,7 @@ export async function addGrant(raw: z.input<typeof grantInput>): Promise<Result>
     await log(me!.id, "plan", [
       `Přiděleno oprávnění ${user?.email ?? data.userId}: ${data.area}/${data.level} · ` +
         `${plan?.name ?? "všechny plány"} · ${data.mediaType ?? "všechny typy"} · ` +
+        `${data.channelGroup ?? "offline i online"} · ` +
         `${campaign?.name ?? "všechny kampaně"} · ` +
         `${data.month ? monthLabel(data.month) : "všechny měsíce"}`,
     ]);
@@ -435,6 +516,107 @@ export async function removeGrant(grantId: string): Promise<Result> {
       .where(eq(grants.id, grantId));
     await db.delete(grants).where(eq(grants.id, grantId));
     await log(me!.id, "plan", [`Odebráno oprávnění ${g?.email ?? grantId} (${g?.area}/${g?.level})`]);
+    revalidatePath("/sprava");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ------------------------------------------------- přístup jedním kliknutím
+
+/**
+ * Co uživatel smí — srozumitelně, bez skládání grantů ručně:
+ *   view = jen vidí, fill = vyplňuje skutečnost, edit = upravuje plán i skutečnost.
+ * Na čem: celý plán, offline, online, nebo vybrané položky.
+ *
+ * Vznikne z toho několik grantů se společným svazkem (bundle), aby šly v přehledu
+ * ukázat jako jeden řádek a odebrat naráz. Engine pak pracuje s obyčejnými granty.
+ */
+const accessInput = z.object({
+  userId: z.string().min(1),
+  planId: z.string().min(1),
+  level: z.enum(["view", "fill", "edit"]),
+  scope: z.enum(["all", "offline", "online", "items"]),
+  tacticIds: z.array(z.string().min(1)).max(500).default([]),
+  /** Prázdné = všechny měsíce plánu. */
+  months: z.array(monthSchema).max(36).default([]),
+});
+
+export async function grantAccess(raw: z.input<typeof accessInput>): Promise<Result & { created?: number }> {
+  try {
+    const me = await currentPrincipal();
+    if (!canManageUsers(me)) throw new PermissionError("Oprávnění smí měnit jen administrátor.");
+    const data = accessInput.parse(raw);
+
+    const [user] = await db.select().from(users).where(eq(users.id, data.userId));
+    if (!user) return { ok: false, error: "Uživatel neexistuje." };
+    const [plan] = await db.select().from(plans).where(eq(plans.id, data.planId));
+    if (!plan) return { ok: false, error: "Plán neexistuje." };
+
+    const periodMonths = monthsBetween(plan.periodStart, plan.periodEnd);
+    if (data.months.some((m) => !periodMonths.includes(m))) {
+      return { ok: false, error: "Vybraný měsíc není v období plánu." };
+    }
+
+    let items: Array<{ id: string; channel: string }> = [];
+    if (data.scope === "items") {
+      if (!data.tacticIds.length) return { ok: false, error: "Vyberte aspoň jednu položku." };
+      // položka z jiného plánu by vytvořila grant, který nikdy na nic nesedne
+      items = await db
+        .select({ id: tactics.id, channel: tactics.channel })
+        .from(tactics)
+        .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
+        .innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
+        .where(and(eq(campaigns.planId, data.planId), inArray(tactics.id, data.tacticIds)));
+      if (items.length !== new Set(data.tacticIds).size) {
+        return { ok: false, error: "Některá z vybraných položek není v tomto plánu." };
+      }
+    }
+
+    const areas: Array<{ area: Area; level: "read" | "write" }> =
+      data.level === "view" ? [{ area: "plan", level: "read" }]
+      : data.level === "fill" ? [{ area: "actuals", level: "write" }]
+      : [{ area: "plan", level: "write" }, { area: "actuals", level: "write" }];
+
+    const bundle = createId();
+    const group = data.scope === "offline" || data.scope === "online" ? data.scope : null;
+    const tacticList: Array<string | null> = data.scope === "items" ? items.map((t) => t.id) : [null];
+    const monthList: Array<string | null> = data.months.length ? data.months : [null];
+
+    const rows = [];
+    for (const a of areas) for (const tacticId of tacticList) for (const month of monthList) {
+      rows.push({
+        userId: data.userId, area: a.area, level: a.level, mediaType: null, planId: data.planId,
+        campaignId: null, month, channelGroup: group, tacticId, bundle,
+      });
+    }
+    await db.insert(grants).values(rows);
+
+    const what = data.scope === "all" ? "celý plán"
+      : data.scope === "items" ? `položky: ${items.map((t) => t.channel).join(", ")}`
+      : data.scope;
+    await log(me!.id, "plan", [
+      `Přístup pro ${user.email}: ${ACCESS_LEVEL_LABEL[data.level]} · ${plan.name} · ${what}` +
+        (data.months.length ? ` · ${data.months.map(monthLabel).join(", ")}` : ""),
+    ]);
+    revalidatePath("/sprava");
+    return { ok: true, created: rows.length };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Odebere celý svazek grantů najednou (jeden řádek v přehledu přístupů). */
+export async function removeGrantBundle(raw: { userId: string; bundle: string }): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    if (!canManageUsers(me)) throw new PermissionError("Oprávnění smí měnit jen administrátor.");
+    const [u] = await db.select({ email: users.email }).from(users).where(eq(users.id, raw.userId));
+    const gone = await db.delete(grants)
+      .where(and(eq(grants.userId, raw.userId), eq(grants.bundle, raw.bundle)))
+      .returning({ id: grants.id });
+    await log(me!.id, "plan", [`Odebrán přístup ${u?.email ?? raw.userId} (${gone.length} oprávnění)`]);
     revalidatePath("/sprava");
     return { ok: true };
   } catch (e) {
@@ -542,10 +724,10 @@ export async function updateTactic(raw: z.input<typeof tacticPatch>): Promise<Re
     const before = await tacticCoords(data.tacticId);
 
     // oprávnění se ptáme na PŮVODNÍ souřadnice…
-    assertCan(me, "write", { area: "plan", mediaType: before.mediaType, planId: before.planId, campaignId: before.campaignId, month: null });
+    assertCan(me, "write", at(before, "plan", null));
     // …a pokud se mění typ média nebo kampaň, i na CÍLOVÉ, ať se přes úpravu neobchází grant
     if (data.mediaType && data.mediaType !== before.mediaType) {
-      assertCan(me, "write", { area: "plan", mediaType: data.mediaType, planId: before.planId, campaignId: before.campaignId, month: null });
+      assertCan(me, "write", at(before, "plan", null, { mediaType: data.mediaType }));
     }
     if (data.messageLineId) {
       const [line] = await db.select().from(messageLines).where(eq(messageLines.id, data.messageLineId));
@@ -554,7 +736,7 @@ export async function updateTactic(raw: z.input<typeof tacticPatch>): Promise<Re
         throw new PermissionError("Taktiku nejde přeřadit do jiného plánu.");
       }
       if (line.campaignId !== before.campaignId) {
-        assertCan(me, "write", { area: "plan", mediaType: before.mediaType, planId: before.planId, campaignId: line.campaignId, month: null });
+        assertCan(me, "write", at(before, "plan", null, { campaignId: line.campaignId }));
       }
     }
 
@@ -659,7 +841,7 @@ export async function moveTactic(raw: {
   try {
     const me = await currentPrincipal();
     const before = await tacticCoords(raw.tacticId);
-    assertCan(me, "write", { area: "plan", mediaType: before.mediaType, planId: before.planId, campaignId: before.campaignId, month: null });
+    assertCan(me, "write", at(before, "plan", null));
 
     // jen taktiky tohoto plánu: pořadí se porovnává vždy uvnitř plánu a
     // přečíslování napříč plány by přes Zpět přepsalo cizí přesuny
@@ -686,7 +868,7 @@ export async function moveTactic(raw: {
 
     let newLineId = moving.messageLineId;
     if (targetCampaignId && targetCampaignId !== currentLine.campaignId) {
-      assertCan(me, "write", { area: "plan", mediaType: before.mediaType, planId: before.planId, campaignId: targetCampaignId, month: null });
+      assertCan(me, "write", at(before, "plan", null, { campaignId: targetCampaignId }));
 
       const existing = await db
         .select()
@@ -882,7 +1064,8 @@ export async function createTactic(raw: z.input<typeof newTactic>): Promise<Resu
     const [line] = await db.select().from(messageLines).where(eq(messageLines.id, data.messageLineId));
     if (!line) throw new Error("Linka sdělení neexistuje");
 
-    assertCan(me, "write", { area: "plan", mediaType: data.mediaType, planId: await campaignPlan(line.campaignId), campaignId: line.campaignId, month: null });
+    // nová taktika vzniká s výchozím nosičem Digital; grant na jednu položku ji založit nedovolí
+    assertCan(me, "write", { area: "plan", mediaType: data.mediaType, planId: await campaignPlan(line.campaignId), campaignId: line.campaignId, channelType: "Digital", tacticId: null, month: null });
 
     const t = await insertTactic(line, data.channel, data.mediaType);
 
@@ -899,7 +1082,7 @@ export async function deleteTactic(tacticId: string): Promise<Result> {
   try {
     const me = await currentPrincipal();
     const before = await tacticCoords(tacticId);
-    assertCan(me, "write", { area: "plan", mediaType: before.mediaType, planId: before.planId, campaignId: before.campaignId, month: null });
+    assertCan(me, "write", at(before, "plan", null));
     // smazání zpět vrátit neumíme (kaskádou padnou i rozpočty a metriky),
     // proto zásobník raději vyprázdníme, ať se uživatel nespoléhá
     await db.delete(tactics).where(eq(tactics.id, tacticId));
@@ -947,6 +1130,27 @@ export async function createCampaign(raw: z.input<typeof newCampaign>): Promise<
 
     await pushUndo(me!.id, `Založen blok „${data.name}"`, [undoCreatedCampaign(c.id)]);
     await log(me!.id, "plan", [`Založen blok „${data.name}"`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Přejmenování bloku. Název je v rámci plánu unikátní (index campaign_uq). */
+export async function renameCampaign(raw: { campaignId: string; name: string }): Promise<Result> {
+  try {
+    const name = z.string().trim().min(1).max(120).parse(raw.name);
+    const me = await currentPrincipal();
+    const planId = await campaignPlan(raw.campaignId);
+    assertCan(me, "write", { area: "plan", mediaType: null, planId, campaignId: raw.campaignId, month: null });
+    const [before] = await db.select().from(campaigns).where(eq(campaigns.id, raw.campaignId));
+    if (!before || before.name === name) return { ok: true };
+    const [clash] = await db.select({ id: campaigns.id }).from(campaigns)
+      .where(and(eq(campaigns.planId, planId), eq(campaigns.name, name)));
+    if (clash) return { ok: false, error: `Blok „${name}" už v plánu je.` };
+    await db.update(campaigns).set({ name }).where(eq(campaigns.id, raw.campaignId));
+    await log(me!.id, "plan", [`Blok „${before.name}" přejmenován na „${name}"`]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
@@ -1015,7 +1219,7 @@ async function assertCanUndo(me: NonNullable<Awaited<ReturnType<typeof currentPr
   const tactic = async (tacticId: string, area: "plan" | "actuals", month: string | null) => {
     const c = await tacticCoords(tacticId).catch(() => null);
     if (!c) return; // taktika mezitím zmizela, zápis do ní nic neudělá
-    assertCan(me, "write", { area, mediaType: c.mediaType, planId: c.planId, campaignId: c.campaignId, month });
+    assertCan(me, "write", at(c, area, month));
   };
   const metric = async (metricId: string, area: "plan" | "actuals", month: string) => {
     const [m] = await db.select({ tacticId: metrics.tacticId }).from(metrics).where(eq(metrics.id, metricId));
@@ -1440,7 +1644,7 @@ export async function setTacticThemes(raw: z.input<typeof sharesInput>): Promise
     const data = sharesInput.parse(raw);
     const me = await currentPrincipal();
     const c = await tacticCoords(data.tacticId);
-    assertCan(me, "write", { area: "plan", mediaType: c.mediaType, planId: c.planId, campaignId: c.campaignId, month: null });
+    assertCan(me, "write", at(c, "plan", null));
 
     // oblast musí patřit stejnému klientovi jako plán
     const [plan] = await db.select({ clientId: plans.clientId }).from(plans).where(eq(plans.id, c.planId));
@@ -1510,10 +1714,11 @@ export async function setTacticMedia(raw: z.input<typeof tacticMedia>): Promise<
     const data = tacticMedia.parse(raw);
     const me = await currentPrincipal();
     const before = await tacticCoords(data.tacticId);
-    assertCan(me, "write", {
-      area: "plan", mediaType: before.mediaType, planId: before.planId,
-      campaignId: before.campaignId, month: null,
-    });
+    assertCan(me, "write", at(before, "plan", null));
+    // změna nosiče může taktiku přesunout z online do offline — i tam musí mít právo
+    if (data.channelType && data.channelType !== before.channelType) {
+      assertCan(me, "write", at(before, "plan", null, { channelType: data.channelType }));
+    }
 
     const patch: Record<string, unknown> = {};
     const items: string[] = [];
@@ -1612,14 +1817,14 @@ export async function setRowUnit(raw: {
 }): Promise<Result> {
   try {
     const me = await currentPrincipal();
-    const { mediaType, campaignId, planId, channel, channelType, targetGroupId } =
-      await tacticCoords(raw.tacticId);
+    const c = await tacticCoords(raw.tacticId);
+    const { planId, channel, channelType, targetGroupId } = c;
 
     const plan = await db.select().from(plans).where(eq(plans.id, planId));
     const months = monthsBetween(plan[0].periodStart, plan[0].periodEnd);
     // na řádek smí sáhnout jen ten, kdo smí všechny jeho měsíce
     for (const m of months) {
-      assertCan(me, "write", { area: "plan", mediaType, planId, campaignId, month: m });
+      assertCan(me, "write", at(c, "plan", m));
     }
 
     const rows = await db.select().from(tacticBudgets).where(eq(tacticBudgets.tacticId, raw.tacticId));
@@ -1791,6 +1996,84 @@ export async function resetDuplication(raw: { typeA: string; typeB: string }): P
     await log(me!.id, "plan", [`Koeficient ${pair.typeA}×${pair.typeB} vrácen na výchozí hodnotu`]);
     revalidatePath("/");
     revalidatePath("/kalkulacka");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ------------------------------------------------- kalibrace křivek zásahu
+
+const measurementInput = z.object({
+  channelType: z.enum(channelTypeEnum.enumValues),
+  targetGroupId: z.string().min(1),
+  grp: z.number().positive().max(100_000),
+  /** zásah 1+ jako podíl 0–1 */
+  reach: z.number().gt(0).lt(1),
+  label: z.string().max(120).default(""),
+  source: z.string().max(200).default(""),
+});
+
+/**
+ * Z bodů média a cílové skupiny spočítá křivku a zapíše ji do reach_curve.
+ * Bez bodů křivku smaže — výpočty se vrátí na předpoklad z kódu.
+ * Zdroj křivky nese počet měření, aby bylo v aplikaci vidět, z čeho je.
+ */
+async function recalibrate(channelType: ChannelType, targetGroupId: string): Promise<string> {
+  const pts = await db.select().from(reachMeasurements)
+    .where(and(eq(reachMeasurements.channelType, channelType), eq(reachMeasurements.targetGroupId, targetGroupId)));
+  if (!pts.length) {
+    await db.delete(reachCurves)
+      .where(and(eq(reachCurves.channelType, channelType), eq(reachCurves.targetGroupId, targetGroupId)));
+    return `Křivka ${channelType} vrácena na předpoklad`;
+  }
+  const fit = fitCurve(pts.map((p) => ({ grp: p.grp, reach: p.reach })), DEFAULT_CURVE[channelType]);
+  if (!fit.ok) throw new Error(fit.error);
+  const sources = [...new Set(pts.map((p) => p.source).filter(Boolean))].join(", ");
+  const source = `Kalibrace z ${pts.length} ${pts.length === 1 ? "měření" : "měření"}${sources ? ` (${sources})` : ""}`;
+  await db.insert(reachCurves)
+    .values({ channelType, targetGroupId, rMax: fit.curve.rMax, k: fit.curve.k, source })
+    .onConflictDoUpdate({
+      target: [reachCurves.channelType, reachCurves.targetGroupId],
+      set: { rMax: fit.curve.rMax, k: fit.curve.k, source },
+    });
+  return `Křivka ${channelType}: strop ${Math.round(fit.curve.rMax * 1000) / 10} %, k ${num(fit.curve.k)}`;
+}
+
+export async function addReachMeasurement(raw: z.input<typeof measurementInput>): Promise<Result> {
+  try {
+    const data = measurementInput.parse(raw);
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    const [tg] = await db.select().from(targetGroups).where(eq(targetGroups.id, data.targetGroupId));
+    if (!tg) return { ok: false, error: "Cílová skupina neexistuje." };
+    await db.insert(reachMeasurements).values(data);
+    const what = await recalibrate(data.channelType, data.targetGroupId);
+    await log(me!.id, "plan", [
+      `Měření zásahu ${data.channelType} · ${tg.name}${data.label ? ` · ${data.label}` : ""}: ` +
+        `${num(data.grp)} TRP → ${Math.round(data.reach * 1000) / 10} %`,
+      what,
+    ]);
+    revalidatePath("/kalkulacka");
+    revalidatePath("/prehled");
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function deleteReachMeasurement(id: string): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    const [row] = await db.delete(reachMeasurements).where(eq(reachMeasurements.id, id)).returning();
+    if (!row) return { ok: true };
+    const what = await recalibrate(row.channelType, row.targetGroupId);
+    await log(me!.id, "plan", [`Smazáno měření zásahu ${row.channelType}${row.label ? ` (${row.label})` : ""}`, what]);
+    revalidatePath("/kalkulacka");
+    revalidatePath("/prehled");
+    revalidatePath("/");
     return { ok: true };
   } catch (e) {
     return fail(e);

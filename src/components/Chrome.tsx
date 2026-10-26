@@ -12,16 +12,44 @@ const ROLE_LABEL: Record<string, string> = {
   VIEWER: "čtenář",
 };
 
+type Section = "prehled" | "plan" | "mix" | "plneni" | "vyplnit" | "kalkulacka" | "sprava" | "nastaveni";
+
+/**
+ * Navigace podle toho, kdo se dívá. Agentura plánuje a vyhodnocuje, klient
+ * vyplňuje svoje položky a čte výsledek — odborné záložky (Přehled s modelem
+ * zásahu, kalkulačka) by ho jen mátly.
+ */
+function sections(role: string): Array<{ key: Section; href: string; label: string; plan: boolean }> {
+  if (role === "CLIENT") {
+    return [
+      { key: "vyplnit", href: "/vyplnit", label: "K vyplnění", plan: true },
+      { key: "plan", href: "/", label: "Plán", plan: true },
+      { key: "mix", href: "/mix", label: "Finální mix", plan: true },
+    ];
+  }
+  return [
+    { key: "prehled", href: "/prehled", label: "Přehled", plan: true },
+    { key: "plan", href: "/", label: "Plánování", plan: true },
+    { key: "mix", href: "/mix", label: "Finální mix", plan: true },
+    { key: "plneni", href: "/plneni", label: "Plnění", plan: true },
+    { key: "vyplnit", href: "/vyplnit", label: "K vyplnění", plan: true },
+    { key: "kalkulacka", href: "/kalkulacka", label: "Kalkulačka", plan: true },
+  ];
+}
+
 export function Chrome({
   active,
   user,
   title,
+  planId,
   children,
 }: {
-  active: "prehled" | "plan" | "plneni" | "kalkulacka" | "sprava" | "nastaveni";
+  active: Section;
   user: { name: string | null; email: string; role: string };
   /** klient a období otevřeného plánu; bez plánu zůstane jen název aplikace */
   title?: { client: string; period: string };
+  /** otevřený plán — přenáší se mezi záložkami, aby přepnutí záložky neskočilo na jiný plán */
+  planId?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -51,17 +79,14 @@ export function Chrome({
             </div>
           </div>
           <nav className="nav">
-            {user.role !== "CLIENT" && (
-              <Link href="/prehled" aria-current={active === "prehled" ? "page" : undefined}>Přehled</Link>
-            )}
-            <Link href="/" aria-current={active === "plan" ? "page" : undefined}>Plán</Link>
-            <Link href="/plneni" aria-current={active === "plneni" ? "page" : undefined}>Detail &amp; plnění</Link>
-            {user.role !== "CLIENT" && (
-              <Link href="/kalkulacka" aria-current={active === "kalkulacka" ? "page" : undefined}>Kalkulačka zásahu</Link>
-            )}
+            {sections(user.role).map((s) => (
+              <Link key={s.key} href={s.plan && planId ? `${s.href}?plan=${planId}` : s.href}
+                aria-current={active === s.key ? "page" : undefined}>{s.label}</Link>
+            ))}
             {user.role === "ADMIN" && (
               <>
-                <Link href="/sprava" aria-current={active === "sprava" ? "page" : undefined}>Uživatelé &amp; oprávnění</Link>
+                <span className="navsep" aria-hidden />
+                <Link href="/sprava" aria-current={active === "sprava" ? "page" : undefined}>Uživatelé &amp; přístupy</Link>
                 <Link href="/nastaveni" aria-current={active === "nastaveni" ? "page" : undefined}>Nastavení</Link>
               </>
             )}

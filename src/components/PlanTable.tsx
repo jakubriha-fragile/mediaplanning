@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
-  setTacticThemes, createTheme,
+  setTacticThemes, createTheme, renameCampaign,
 } from "@/lib/actions";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
 import { Combo, type ComboOption } from "@/components/Combo";
@@ -358,7 +358,22 @@ export function PlanTable({
                       )}
                       <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2,
                         background: campColor(g.campaign), marginRight: 7 }} />
-                      {g.campaign} <span className="share" style={{ fontWeight: 300 }}>{g.rows.length} taktik</span>
+                      {canEditPlan ? (
+                        <input className="txt blockname" defaultValue={g.campaign} aria-label="Název bloku"
+                          title="Klikněte a přepište název bloku"
+                          size={Math.max(8, g.campaign.length + 1)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            if (e.key === "Escape") { (e.target as HTMLInputElement).value = g.campaign; (e.target as HTMLInputElement).blur(); }
+                          }}
+                          onBlur={(e) => {
+                            const name = e.target.value.trim();
+                            if (!name) { e.target.value = g.campaign; return; }
+                            if (name === g.campaign) return;
+                            run(() => {}, () => { e.target.value = g.campaign; }, () => renameCampaign({ campaignId: g.campaignId, name }));
+                          }} />
+                      ) : g.campaign}{" "}
+                      <span className="share" style={{ fontWeight: 300 }}>{g.rows.length} taktik</span>
                       {canEditPlan && lines[0] && (
                         <button className="btn" style={{ marginLeft: 10, fontSize: 11, padding: "2px 8px" }}
                           onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: lines[0].id }))}>

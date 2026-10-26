@@ -84,7 +84,7 @@ ok("stejné médium se překrývá víc než dvě různá",
 ok("duplikace je symetrická", duplicationOf("TV", "Digital") === duplicationOf("Digital", "TV"));
 // pojistka proti překlepu v klíči: tabulka se skládá seřazeně, takže nesprávné
 // pořadí by tiše spadlo na 1,0 a model by překryv vůbec nezapočítal
-import { DEFAULT_DUPLICATION, dupKey } from "../src/lib/crossmedia";
+import { DEFAULT_DUPLICATION, dupKey, fitCurve } from "../src/lib/crossmedia";
 const TYPES = ["TV", "Rádio", "OOH", "Print", "Kino", "Digital", "Vlastní", "PR"] as const;
 ok("všechny klíče tabulky jsou seřazené",
    Object.keys(DEFAULT_DUPLICATION).every((k) => {
@@ -183,6 +183,24 @@ console.log("\nTyp nákladu (agenturní práce vs. média)");
   ok("ambasador je honorář", costKind("BENU Longevity - ambasádor") === "fee");
   ok("TV spot jsou média", costKind("TV – hlavní brandový spot") === "media");
   ok("partnerství / event / OOH je smíšené", costKind("Partnerství / event / OOH (bude upřesněno)") === "mixed");
+}
+
+console.log("\nKalibrace křivky z naměřených vln");
+{
+  const fb = { rMax: 0.98, k: 1.5 };
+  const one = fitCurve([{ grp: 1800, reach: 0.65 }], fb);
+  ok("jedno měření: křivka prochází bodem", one.ok && Math.abs(reachFromGrp(1800, one.curve) - 0.65) < 1e-6);
+  ok("jedno měření: strop zůstává z předpokladu", one.ok && one.curve.rMax === 0.98);
+  const high = fitCurve([{ grp: 500, reach: 0.985 }], fb);
+  ok("bod nad stropem stropem pohne", high.ok && high.curve.rMax > 0.985);
+  const truth = { rMax: 0.82, k: 0.9 };
+  const pts = [300, 800, 1500, 2500].map((g) => ({ grp: g, reach: reachFromGrp(g, truth) }));
+  const many = fitCurve(pts, fb);
+  ok("víc měření: najde strop i rychlost", many.ok && Math.abs(many.curve.rMax - 0.82) < 0.01 && Math.abs(many.curve.k - 0.9) < 0.05,
+    many.ok ? `${many.curve.rMax.toFixed(3)} / ${many.curve.k.toFixed(3)}` : "");
+  ok("víc měření: chyba fitu je malá", many.ok && many.error < 0.005);
+  ok("zásah 100 % odmítne", !fitCurve([{ grp: 500, reach: 1 }], fb).ok);
+  ok("bez měření odmítne", !fitCurve([], fb).ok);
 }
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");

@@ -1,9 +1,13 @@
 /**
  * Engine oprávnění — zadání §5.2.
  *
- * Grant má pět rozměrů: plán × typ média × kampaň × měsíc × oblast, plus úroveň.
+ * Grant má tyto rozměry: plán × typ média × skupina nosičů (offline/online) ×
+ * kampaň × položka × měsíc, plus oblast (plán / skutečnost / podklady) a úroveň.
  * Rozměr plánu je tam proto, že jeden grant nesmí přetéct do plánu jiného
  * klienta ani do jiného roku — oprávnění se udělují na konkrétní plán.
+ * Skupina nosičů a položka jsou tu kvůli klientovi: v plánu BENU je všechno
+ * Paid, takže typ média nic nerozliší — rozlišuje „offline vs. online"
+ * a konkrétní řádky, které klient platí sám.
  * NULL v rozměru znamená „vše". Operace projde, pokud existuje grant, který
  * pokrývá VŠECHNY rozměry dotčeného záznamu. Chybí-li grant, operace se odmítne —
  * výchozí stav je zákaz.
@@ -13,7 +17,32 @@
  * zašedl pole — to je pohodlí, ne ochrana.
  */
 
-import type { Area, Level, MediaType, Role } from "@/db/schema";
+import type { Area, ChannelType, Level, MediaType, Role } from "@/db/schema";
+
+export type ChannelGroup = "offline" | "online";
+
+/**
+ * Online = to, co se kupuje a měří digitálně. Všechno ostatní je offline
+ * (včetně PR — u klienta ho řeší stejní lidé jako tisk a eventy).
+ */
+const ONLINE: ChannelType[] = ["Digital", "Vlastní"];
+
+export function channelGroupOf(ct: ChannelType): ChannelGroup {
+  return ONLINE.includes(ct) ? "online" : "offline";
+}
+
+export const CHANNEL_GROUP_LABEL: Record<ChannelGroup, string> = {
+  offline: "Offline (TV, rádio, OOH, tisk, kino, PR)",
+  online: "Online (digital, vlastní kanály)",
+};
+
+/** Úrovně přístupu, jak je vidí administrátor; na granty je převádí grantAccess. */
+export const ACCESS_LEVEL_LABEL = {
+  view: "jen vidí",
+  fill: "vyplňuje skutečnost",
+  edit: "upravuje plán i skutečnost",
+} as const;
+export type AccessLevel = keyof typeof ACCESS_LEVEL_LABEL;
 
 export type GrantRow = {
   area: Area;
@@ -22,6 +51,10 @@ export type GrantRow = {
   planId: string | null;
   campaignId: string | null;
   month: string | null;
+  /** NULL = obě skupiny */
+  channelGroup?: ChannelGroup | null;
+  /** NULL = všechny položky; jinak právě jedna taktika */
+  tacticId?: string | null;
 };
 
 export type Principal = {
@@ -31,13 +64,17 @@ export type Principal = {
   grants: GrantRow[];
 };
 
-/** Co se zrovna mění — souřadnice záznamu v pěti rozměrech. */
+/** Co se zrovna mění — souřadnice záznamu ve všech rozměrech. */
 export type Target = {
   area: Area;
   mediaType?: MediaType | null;
   planId?: string | null;
   campaignId?: string | null;
   month?: string | null;
+  /** nosič dotčené taktiky; NULL = operace napříč nosiči (blok, plán) */
+  channelType?: ChannelType | null;
+  /** dotčená taktika; NULL = operace nad víc taktikami nebo zakládání nové */
+  tacticId?: string | null;
 };
 
 /**
@@ -78,6 +115,25 @@ function dimensionMatches(grantValue: string | null, targetValue: string | null 
   return grantValue === targetValue;
 }
 
+/** Skupina nosičů: grant „online" sedí jen na taktiku s online nosičem. */
+function groupMatches(grantGroup: ChannelGroup | null | undefined, ct: ChannelType | null | undefined): boolean {
+  if (!grantGroup) return true;
+  if (!ct) return false; // operace napříč nosiči, grant je úzký
+  return channelGroupOf(ct) === grantGroup;
+}
+
+/** Všechny rozměry grantu kromě oblasti a úrovně. */
+function grantCovers(g: GrantRow, t: Omit<Target, "area">): boolean {
+  return (
+    dimensionMatches(g.mediaType, t.mediaType ?? null) &&
+    dimensionMatches(g.planId, t.planId ?? null) &&
+    dimensionMatches(g.campaignId, t.campaignId ?? null) &&
+    dimensionMatches(g.month, t.month ?? null) &&
+    dimensionMatches(g.tacticId ?? null, t.tacticId ?? null) &&
+    groupMatches(g.channelGroup, t.channelType)
+  );
+}
+
 /**
  * Hlavní rozhodovací funkce.
  * `need` je požadovaná úroveň; write implikuje read.
@@ -95,11 +151,7 @@ export function can(principal: Principal | null, need: Level, target: Target): b
   for (const g of principal.grants) {
     if (g.area !== target.area) continue;
     if (RANK[g.level] < RANK[need]) continue;
-    if (!dimensionMatches(g.mediaType, target.mediaType ?? null)) continue;
-    if (!dimensionMatches(g.planId, target.planId ?? null)) continue;
-    if (!dimensionMatches(g.campaignId, target.campaignId ?? null)) continue;
-    if (!dimensionMatches(g.month, target.month ?? null)) continue;
-    return true;
+    if (grantCovers(g, target)) return true;
   }
   return false;
 }
@@ -111,7 +163,9 @@ export function assertCan(principal: Principal | null, need: Level, target: Targ
       target.area,
       target.planId ? "plán" : "*",
       target.mediaType ?? "*",
+      target.channelType ?? "*",
       target.campaignId ? "kampaň" : "*",
+      target.tacticId ? "položka" : "*",
       target.month ?? "*",
     ].join(" / ");
     throw new PermissionError(`Nemáte oprávnění zapisovat: ${where}`);
@@ -144,10 +198,10 @@ export function canSeePlan(p: Principal | null, planId: string): boolean {
   return p.grants.some((g) => READ_AREAS.includes(g.area) && (g.planId === null || g.planId === planId));
 }
 
-/** Smí vidět konkrétní taktiku? Typ média a kampaň musí sedět na některý grant. */
+/** Smí vidět konkrétní taktiku? Plán, typ média, nosič, kampaň i položka musí sedět na některý grant. */
 export function canSeeTactic(
   p: Principal | null,
-  t: { planId: string; mediaType: MediaType; campaignId: string },
+  t: { planId: string; mediaType: MediaType; campaignId: string; channelType: ChannelType; tacticId: string },
 ): boolean {
   if (!p || !p.active) return false;
   if (roleReadsEverything(p)) return true;
@@ -155,7 +209,9 @@ export function canSeeTactic(
     READ_AREAS.includes(g.area) &&
     dimensionMatches(g.planId, t.planId) &&
     dimensionMatches(g.mediaType, t.mediaType) &&
-    dimensionMatches(g.campaignId, t.campaignId));
+    dimensionMatches(g.campaignId, t.campaignId) &&
+    dimensionMatches(g.tacticId ?? null, t.tacticId) &&
+    groupMatches(g.channelGroup, t.channelType));
 }
 
 /** Vidí celý plán, nebo jen jeho výsek? Podle toho se ukazují souhrny za celý plán. */
@@ -164,38 +220,10 @@ export function seesWholePlan(p: Principal | null, planId: string): boolean {
   if (roleReadsEverything(p)) return true;
   return p.grants.some((g) =>
     READ_AREAS.includes(g.area) && (g.planId === null || g.planId === planId) &&
-    g.mediaType === null && g.campaignId === null);
+    g.mediaType === null && g.campaignId === null && !g.channelGroup && !g.tacticId);
 }
 
 /** Smí uživatel spravovat uživatele a oprávnění? */
 export function canManageUsers(principal: Principal | null): boolean {
   return !!principal && principal.active && principal.role === "ADMIN";
-}
-
-/**
- * Pomůcka pro UI: vrací, které buňky smí uživatel editovat, aby šlo pole zašednout.
- * Nikdy se na to nespoléhá při zápisu.
- */
-export function editableMatrix(
-  principal: Principal | null,
-  planId: string,
-  campaignId: string,
-  months: string[],
-  mediaTypes: MediaType[],
-): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  for (const area of ["plan", "actuals"] as Area[]) {
-    for (const mt of mediaTypes) {
-      for (const m of months) {
-        out[`${area}|${mt}|${m}`] = can(principal, "write", {
-          area,
-          mediaType: mt,
-          planId,
-          campaignId,
-          month: m,
-        });
-      }
-    }
-  }
-  return out;
 }

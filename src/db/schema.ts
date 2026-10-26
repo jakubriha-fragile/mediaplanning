@@ -169,6 +169,29 @@ export const reachCurves = pgTable(
 );
 
 /**
+ * Naměřený zásah — podklad pro kalibraci křivky. Typicky vlna TV z plánovacího
+ * systému TV nákupu (Nielsen Admosphere): TRP vlny a zásah 1+ v cílové skupině.
+ * Z bodů jednoho média a skupiny se spočítá křivka a zapíše do reach_curve;
+ * smazáním všech bodů se křivka vrací na předpoklad.
+ */
+export const reachMeasurements = pgTable(
+  "reach_measurement",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    channelType: channelTypeEnum("channel_type").notNull(),
+    targetGroupId: text("target_group_id").notNull().references(() => targetGroups.id, { onDelete: "cascade" }),
+    /** TRP (GRP v cílové skupině) za vlnu */
+    grp: doublePrecision("grp").notNull(),
+    /** zásah 1+ jako podíl 0–1 */
+    reach: doublePrecision("reach").notNull(),
+    label: text("label").notNull().default(""),
+    source: text("source").notNull().default(""),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({ idx: index("reach_measurement_idx").on(t.channelType, t.targetGroupId) }),
+);
+
+/**
  * Duplikace nad rámec nezávislosti pro dvojici médií. 1,0 = publika se
  * překrývají přesně tak, jak by odpovídalo náhodě (Sainsbury). Vyšší hodnota
  * znamená větší reálný překryv, a tedy nižší čistý zásah.
@@ -356,7 +379,8 @@ export const accountNotes = pgTable(
 
 // ---------------------------------------------------------------- oprávnění
 
-/** Grant se čtyřmi rozměry (zadání §5.2). NULL = zástupný znak „vše".
+/** Grant s rozměry plán × typ média × skupina nosičů × kampaň × položka × měsíc
+ *  (rozšíření zadání §5.2). NULL = zástupný znak „vše".
  *  Výchozí stav je zákaz — bez grantu (nebo bez rozsahu z role) se nezapíše nic. */
 export const grants = pgTable(
   "grant",
@@ -370,6 +394,13 @@ export const grants = pgTable(
     planId: text("plan_id").references(() => plans.id, { onDelete: "cascade" }),
     campaignId: text("campaign_id").references(() => campaigns.id, { onDelete: "cascade" }),
     month: text("month"),
+    /** "offline" | "online" — v plánu BENU je všechno Paid, typ média klienta neodliší */
+    channelGroup: text("channel_group").$type<"offline" | "online">(),
+    /** Jedna konkrétní položka plánu (např. promo, které klient platí z vlastní karty). */
+    tacticId: text("tactic_id").references(() => tactics.id, { onDelete: "cascade" }),
+    /** Granty založené jedním přidělením („vyplňuje online") nesou stejný svazek,
+     *  aby se daly ukázat jako jeden řádek a odebrat naráz. */
+    bundle: text("bundle"),
     note: text("note"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },

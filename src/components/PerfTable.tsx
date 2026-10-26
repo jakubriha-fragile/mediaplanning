@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { setActualSpend, setMetricActual, setAccountNote, undoLast } from "@/lib/actions";
+import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { setActualSpend, setMetricActual, setMetricTarget, setAccountNote, undoLast, createMetric, deleteMetric } from "@/lib/actions";
 import { verdictFor, monthState, elapsed, type Verdict } from "@/lib/pacing";
 
 export type PerfMetric = {
@@ -22,6 +23,10 @@ export type PerfRow = {
   message: string;
   audience: string;
   editable: Record<string, boolean>;
+  /** smí měnit cíle ukazatelů v daném měsíci */
+  planEditable: Record<string, boolean>;
+  /** smí přidávat a mazat ukazatele */
+  canManageMetrics: boolean;
   budget: Record<string, number>;
   spend: Record<string, number>;
   note: Record<string, string>;
@@ -54,7 +59,11 @@ export function PerfTable({
   periodName: string;
   undoLabel: string | null;
 }) {
+  const router = useRouter();
   const [data, setData] = useState(rows);
+  // po přidání nebo smazání ukazatele přijdou ze serveru nové řádky
+  useEffect(() => setData(rows), [rows]);
+  const [adding, setAdding] = useState<string | null>(null);
   /**
    * Otevíráme na aktuálním měsíci, ne na souhrnu — v souhrnu se nedá zadávat
    * a uživatel skončil na stránce, kde nejde nic dělat. Když dnešek mimo
@@ -169,10 +178,12 @@ export function PerfTable({
           <tbody>
             {visible.map((r) => {
               const bv = budgetVerdict(r);
-              const rowSpan = 1 + r.metrics.length;
+              const showAdd = r.canManageMetrics && !clientView;
+              const rowSpan = 1 + r.metrics.length + (showAdd ? 1 : 0);
               const canEdit = single ? r.editable[single] : false;
+              const canTarget = single ? r.planEditable[single] : false;
               return (
-                <>
+                <Fragment key={r.id}>
                   <tr key={r.id} style={{ borderTop: "2px solid var(--line-strong)" }}>
                     <td rowSpan={rowSpan} style={{ verticalAlign: "top", paddingTop: 9, maxWidth: 210 }}>
                       <div className="share">{r.campaign}</div>
@@ -240,9 +251,35 @@ export function PerfTable({
                       <tr key={mt.id}>
                         <td style={{ paddingLeft: 16 }}>
                           {mt.name} <span className="share">{mt.unit}</span>
+                          {showAdd && (
+                            <button className="linkbtn" style={{ marginLeft: 8, color: "var(--muted)" }} title="Smazat ukazatel i s cíli a skutečností"
+                              onClick={() => {
+                                if (!confirm(`Smazat ukazatel „${mt.name}" u ${r.channel} včetně všech cílů a skutečnosti? Nejde vrátit.`)) return;
+                                save(() => {}, () => {}, async () => { const res = await deleteMetric(mt.id); if (res.ok) router.refresh(); return res; });
+                              }}>smazat</button>
+                          )}
                           <div className="share">{KIND_LABEL[mt.kind]}</div>
                         </td>
-                        <td className="r num">{v.plan ? num(Math.round(v.plan * 100) / 100) : "—"}</td>
+                        <td className={`r ${single && canTarget ? "editable" : ""}`}>
+                          {single && canTarget ? (
+                            <input className="cell" inputMode="decimal" placeholder="cíl"
+                              title="Cíl na tento měsíc"
+                              defaultValue={num(mt.target[single])}
+                              onFocus={(e) => { e.target.value = mt.target[single] ? String(mt.target[single]) : ""; e.target.select(); }}
+                              onBlur={(e) => {
+                                const val = parseF(e.target.value); const prev = mt.target[single];
+                                e.target.value = num(val);
+                                if (val === prev) return;
+                                save(
+                                  () => setData((d) => d.map((x) => x.id === r.id ? {
+                                    ...x, metrics: x.metrics.map((y) => y.id === mt.id ? { ...y, target: { ...y.target, [single]: val } } : y),
+                                  } : x)),
+                                  () => { e.target.value = num(prev); },
+                                  () => setMetricTarget({ metricId: mt.id, month: single, target: val }),
+                                );
+                              }} />
+                          ) : <span className="num">{v.plan ? num(Math.round(v.plan * 100) / 100) : "—"}</span>}
+                        </td>
                         <td className={`realcell ${canEdit ? "editable" : "locked"}`}>
                           {single ? (
                             <input className="cell" inputMode="decimal" disabled={!canEdit} placeholder="realita"
@@ -274,7 +311,24 @@ export function PerfTable({
                       </tr>
                     );
                   })}
-                </>
+                  {showAdd && (
+                    <tr key={`${r.id}-add`}>
+                      <td colSpan={5} style={{ paddingLeft: 16 }}>
+                        {adding === r.id ? (
+                          <NewMetric
+                            onCancel={() => setAdding(null)}
+                            onSave={(m) => save(() => {}, () => {}, async () => {
+                              const res = await createMetric({ tacticId: r.id, ...m });
+                              if (res.ok) { setAdding(null); router.refresh(); }
+                              return res;
+                            })} />
+                        ) : (
+                          <button className="linkbtn" onClick={() => setAdding(r.id)}>+ přidat ukazatel (imprese, kliky, CPA…)</button>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
             {!visible.length && (
@@ -323,6 +377,29 @@ function Pill({ v }: { v: Verdict }) {
     <span className={`pill s-${v.status}`}>
       <b className="g">{GLYPH[v.status]}</b>
       {v.label}
+    </span>
+  );
+}
+
+/** Nový ukazatel: název, jednotka a jak se vyhodnocuje. Typ určuje, jestli se poměřuje s časem. */
+function NewMetric({ onSave, onCancel }: {
+  onSave: (m: { name: string; unit: string; kind: "cumulative" | "rate_low" | "rate_high" }) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [unit, setUnit] = useState("");
+  const [kind, setKind] = useState<"cumulative" | "rate_low" | "rate_high">("cumulative");
+  return (
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <input className="moneyin" style={{ width: 160, textAlign: "left" }} autoFocus placeholder="název, např. Kliky" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="moneyin" style={{ width: 90, textAlign: "left" }} placeholder="jednotka" value={unit} onChange={(e) => setUnit(e.target.value)} />
+      <select className="moneyin" style={{ width: "auto", textAlign: "left" }} value={kind} onChange={(e) => setKind(e.target.value as never)}>
+        <option value="cumulative">načítá se (imprese, kliky, konverze)</option>
+        <option value="rate_low">poměr, nižší = lépe (CPM, CPA)</option>
+        <option value="rate_high">poměr, vyšší = lépe (CTR, ROAS)</option>
+      </select>
+      <button className="btn primary" disabled={!name.trim()} onClick={() => onSave({ name: name.trim(), unit: unit.trim(), kind })}>Přidat</button>
+      <button className="btn" onClick={onCancel}>Zrušit</button>
     </span>
   );
 }

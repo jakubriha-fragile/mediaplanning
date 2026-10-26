@@ -94,7 +94,8 @@ console.log("\nČtení — co klient vůbec uvidí");
     id: "u-p27", role: "CLIENT", active: true,
     grants: [{ area: "actuals", level: "write", mediaType: "Paid", planId: PLAN_2027, campaignId: null, month: null }],
   };
-  const t = (planId: string, mediaType: "Paid" | "Owned" | "Earned", campaignId = CAMP_BRAND) => ({ planId, mediaType, campaignId });
+  const t = (planId: string, mediaType: "Paid" | "Owned" | "Earned", campaignId = CAMP_BRAND) =>
+    ({ planId, mediaType, campaignId, channelType: "Digital" as const, tacticId: "t-x" });
   check("klient vidí plán, na který má grant", canSeePlan(paid2027, PLAN_2027), true);
   check("klient NEVIDÍ plán bez grantu (ani jeho název)", canSeePlan(paid2027, PLAN_2026), false);
   check("klient vidí Paid taktiku", canSeeTactic(paid2027, t(PLAN_2027, "Paid")), true);
@@ -106,6 +107,50 @@ console.log("\nČtení — co klient vůbec uvidí");
   check("account vidí všechny plány", canSeePlan(account, PLAN_2027), true);
   check("klient bez grantů nevidí nic", canSeePlan({ id: "x", role: "CLIENT", active: true, grants: [] }, PLAN_2026), false);
   check("deaktivovaný nevidí nic", canSeePlan(vypnuty, PLAN_2026), false);
+}
+
+console.log("\nSkupina nosičů — klient vyplňuje jen online");
+{
+  const online: Principal = {
+    id: "u-on", role: "CLIENT", active: true,
+    grants: [{ area: "actuals", level: "write", mediaType: null, planId: PLAN_2027, campaignId: null, month: null, channelGroup: "online" }],
+  };
+  const w = (channelType: "TV" | "Digital" | "Vlastní" | "Rádio" | null) =>
+    can(online, "write", { area: "actuals", planId: PLAN_2027, mediaType: "Paid", campaignId: CAMP_BRAND, month: "2027-03", channelType, tacticId: "t-1" });
+  check("smí čerpání u Digital", w("Digital"), true);
+  check("smí čerpání u vlastních kanálů (online)", w("Vlastní"), true);
+  check("NESMÍ čerpání u TV", w("TV"), false);
+  check("NESMÍ čerpání u rádia", w("Rádio"), false);
+  check("NESMÍ operaci napříč nosiči", w(null), false);
+  check("NESMÍ měnit plán ani u Digital", can(online, "write", { area: "plan", planId: PLAN_2027, mediaType: "Paid", campaignId: CAMP_BRAND, month: "2027-03", channelType: "Digital", tacticId: "t-1" }), false);
+  const tac = (channelType: "TV" | "Digital") => ({ planId: PLAN_2027, mediaType: "Paid" as const, campaignId: CAMP_BRAND, channelType, tacticId: "t-1" });
+  check("vidí online taktiku", canSeeTactic(online, tac("Digital")), true);
+  check("NEVIDÍ TV taktiku", canSeeTactic(online, tac("TV")), false);
+  check("s výsekem online NEVIDÍ souhrny celého plánu", seesWholePlan(online, PLAN_2027), false);
+}
+
+console.log("\nJednotlivé položky — klient vyplňuje jen to, co platí sám");
+{
+  const items: Principal = {
+    id: "u-it", role: "CLIENT", active: true,
+    grants: [
+      { area: "actuals", level: "write", mediaType: null, planId: PLAN_2027, campaignId: null, month: null, tacticId: "t-meta" },
+      { area: "plan", level: "write", mediaType: null, planId: PLAN_2027, campaignId: null, month: null, tacticId: "t-meta" },
+    ],
+  };
+  const w = (area: "plan" | "actuals", tacticId: string | null) =>
+    can(items, "write", { area, planId: PLAN_2027, mediaType: "Paid", campaignId: CAMP_BRAND, month: "2027-04", channelType: "Digital", tacticId });
+  check("smí čerpání u své položky", w("actuals", "t-meta"), true);
+  check("smí rozpočet u své položky", w("plan", "t-meta"), true);
+  check("NESMÍ čerpání u jiné položky", w("actuals", "t-tv"), false);
+  check("NESMÍ založit novou položku (operace bez taktiky)", w("plan", null), false);
+  check("NESMÍ měnit blok", can(items, "write", { area: "plan", planId: PLAN_2027, mediaType: null, campaignId: CAMP_BRAND, month: null }), false);
+  check("grant na položku NEPŘETEČE do jiného plánu", can(items, "write", { area: "actuals", planId: PLAN_2026, mediaType: "Paid", campaignId: CAMP_BRAND, month: "2026-10", channelType: "Digital", tacticId: "t-meta" }), false);
+  const tac = (tacticId: string) => ({ planId: PLAN_2027, mediaType: "Paid" as const, campaignId: CAMP_BRAND, channelType: "Digital" as const, tacticId });
+  check("vidí svou položku", canSeeTactic(items, tac("t-meta")), true);
+  check("NEVIDÍ cizí položku", canSeeTactic(items, tac("t-tv")), false);
+  check("vidí plán (smí ho otevřít)", canSeePlan(items, PLAN_2027), true);
+  check("NEVIDÍ souhrny celého plánu", seesWholePlan(items, PLAN_2027), false);
 }
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");

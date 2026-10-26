@@ -10,6 +10,10 @@ import { monthsBetween, monthLabel, periodLabel } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
 import { ReachCalculator, type CalcSource } from "@/components/ReachCalculator";
 import { DuplicationTable } from "@/components/DuplicationTable";
+import { ReachCalibration, type CurveState } from "@/components/ReachCalibration";
+import { db } from "@/db";
+import { reachMeasurements, reachCurves } from "@/db/schema";
+import { DEFAULT_CURVE, UNCALIBRATED_SOURCE } from "@/lib/crossmedia";
 
 export const dynamic = "force-dynamic";
 
@@ -86,8 +90,20 @@ export default async function CalculatorPage({
     });
   }
 
+  // kalibrace: naměřené body a výsledné křivky pro všechny skupiny a čtyři hlavní média
+  const [measured, curveRows] = await Promise.all([db.select().from(reachMeasurements), db.select().from(reachCurves)]);
+  const curves: CurveState[] = tgs.flatMap((t) => (["TV", "Rádio", "Digital", "OOH"] as ChannelType[]).map((ct) => {
+    const row = curveRows.find((c) => c.channelType === ct && c.targetGroupId === t.id && c.source !== UNCALIBRATED_SOURCE);
+    const calibrated = row && measured.some((m) => m.channelType === ct && m.targetGroupId === t.id);
+    return {
+      channelType: ct, targetGroupId: t.id, assumed: DEFAULT_CURVE[ct],
+      calibrated: calibrated ? { rMax: row.rMax, k: row.k } : null,
+    };
+  }));
+  const planTg = planId ? (await getPlan(planId))?.targetGroupId ?? null : null;
+
   return (
-    <Chrome active="kalkulacka" user={{ name: user.name, email: user.email, role: user.role }}>
+    <Chrome active="kalkulacka" user={{ name: user.name, email: user.email, role: user.role }} planId={planId ?? undefined}>
       <ReachCalculator
         key={`${source?.planId ?? ""}|${source?.month ?? ""}`}
         plans={readable.map((p) => ({
@@ -101,6 +117,17 @@ export default async function CalculatorPage({
       {rateRows
         ? <RateCard planId={planId!} rows={rateRows} canEdit={canCalibrate} />
         : <div className="banner info"><span><b>Ceník pro odhad doručení</b> se zobrazí po výběru plánu nahoře — patří klientovi plánu.</span></div>}
+      <ReachCalibration
+        rows={measured.map((m) => ({
+          id: m.id, channelType: m.channelType, targetGroupId: m.targetGroupId,
+          targetGroupName: tgs.find((t) => t.id === m.targetGroupId)?.name ?? "",
+          grp: m.grp, reach: m.reach, label: m.label, source: m.source,
+        }))}
+        curves={curves}
+        targetGroups={tgs.map((t) => ({ id: t.id, name: t.name }))}
+        defaultTg={planTg}
+        canEdit={canCalibrate}
+      />
       <DuplicationTable rows={dupRows} canEdit={canCalibrate} />
     </Chrome>
   );

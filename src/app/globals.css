@@ -592,3 +592,123 @@ table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(2) { box-shadow: inset
 table.plan tbody tr:not(.grp):not(.emptygrp):hover td:nth-child(-n+2) { background: var(--surface-2); }
 /* měsíc nesmí spadnout pod šířku, do které se vejde 1 500 000 */
 table.plan td.budgetcell { min-width: 96px; }
+
+/* ---------------------------------------------------- přidělení přístupu */
+.access { padding: 4px 0 0; }
+.access-step { display: flex; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.access-n {
+  flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--brand-soft); color: var(--brand-ink);
+  font-size: 11px; font-weight: 500; display: grid; place-items: center; margin-top: 1px;
+}
+.access-h { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 7px; }
+.access-select {
+  font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid var(--line-strong);
+  border-radius: 4px; background: var(--surface); color: var(--ink); min-width: 260px;
+}
+.choice { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.choice label {
+  display: flex; flex-direction: column; gap: 2px; padding: 9px 11px 9px 32px; position: relative;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); cursor: pointer; font-size: 12px; line-height: 1.4;
+}
+.choice label:hover { border-color: var(--brand); }
+.choice label.on { border-color: var(--brand); background: var(--brand-soft); }
+.choice label input { position: absolute; left: 10px; top: 11px; accent-color: var(--brand); }
+.choice label b { font-weight: 500; color: var(--ink); }
+.choice label span { color: var(--muted); font-size: 11px; }
+.picker { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius); }
+.picker-bar { display: flex; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.picker-list { max-height: 320px; overflow: auto; padding: 4px 0; }
+.picker-block { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 8px 10px 3px; }
+.picker-item { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
+.picker-item:hover { background: var(--surface-2); }
+.picker-item input { accent-color: var(--brand); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  font: inherit; font-size: 11.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2);
+}
+.chip.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.access-sum { display: flex; gap: 10px; align-items: center; padding: 12px 14px; background: var(--surface-2); font-size: 12.5px; flex-wrap: wrap; }
+.access-sum b { font-weight: 500; }
+.accesslist { width: 100%; }
+.accesslist td { font-size: 12.5px; }
+details.adv { border-top: 1px solid var(--line); }
+details.adv summary { padding: 8px 14px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+details.adv summary:hover { color: var(--brand-ink); }
+
+/* ---------------------------------------------------- K vyplnění */
+.fill-head { display: flex; align-items: flex-end; gap: 12px; margin: 4px 0 12px; }
+.fill-title { font-size: 20px; font-weight: 200; letter-spacing: -.01em; margin-bottom: 3px; }
+.fill-months { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.fill-month {
+  font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 999px; cursor: pointer; position: relative;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2);
+}
+.fill-month.empty { color: var(--muted); border-style: dashed; }
+.fill-month.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 500; }
+.fill-badge {
+  display: inline-block; min-width: 17px; margin-left: 6px; padding: 0 5px; border-radius: 999px;
+  background: var(--bad-pure); color: #fff; font-size: 10.5px; font-weight: 500; text-align: center;
+}
+.fill-tools { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 4px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; padding: 6px 12px; border: none; background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button.on { background: var(--brand-soft); color: var(--brand-ink); font-weight: 500; }
+.filltable td { padding: 9px 10px; }
+.money { display: inline-flex; align-items: center; gap: 5px; position: relative; }
+.moneyin {
+  font: inherit; font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; width: 140px;
+  padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink);
+}
+.moneyin::placeholder { color: var(--muted); font-size: 11.5px; }
+.moneyin:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); }
+.money.saved .moneyin { border-color: var(--ok); }
+.savedmark { color: var(--ok); font-weight: 700; position: absolute; right: -14px; }
+.linkbtn { font: inherit; font-size: 11px; background: none; border: none; color: var(--brand-ink); cursor: pointer; text-decoration: underline; padding: 0; }
+.fill-metrics td { background: var(--surface-2); padding: 6px 10px !important; }
+.fill-metric { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; font-size: 12px; }
+.nav { flex-wrap: wrap; }
+.navsep { flex: 1; }
+
+/* ---------------------------------------------------- Finální mix */
+.mix { display: grid; gap: 16px; padding-bottom: 24px; }
+.mix-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.mix-kpi { background: var(--surface); padding: 14px 18px; }
+.mix-kpi .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+.mix-kpi .v { font-size: 28px; font-weight: 200; letter-spacing: -.01em; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.mix-kpi .d { font-size: 11.5px; color: var(--muted); }
+.mix-bar { display: flex; height: 22px; border-radius: 3px; overflow: hidden; gap: 2px; margin: 10px 0 10px; }
+.mix-bar span { display: block; min-width: 2px; }
+.mix-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--ink-2); }
+.mix-legend b { font-weight: 500; color: var(--ink); margin-left: 3px; }
+.mixtable th.mixm { font-size: 9.5px; padding: 6px 2px; text-align: center; }
+.mixtable td.c { text-align: center; padding: 6px 2px; }
+.mixrow { cursor: pointer; }
+.mixrow:hover td { background: var(--surface-2); }
+.mixcaret { display: inline-block; width: 14px; color: var(--muted); font-size: 10px; }
+.mixitem td { font-size: 12px; background: color-mix(in srgb, var(--surface-2) 50%, transparent); }
+.mixitem td:first-child { padding-left: 34px; }
+.mixcell { padding: 4px 2px !important; min-width: 38px; }
+.mixcell span { display: block; height: 14px; border-radius: 2px; }
+.mix-themes { display: grid; gap: 7px; }
+.mix-theme { display: flex; align-items: center; gap: 12px; font-size: 12.5px; }
+.mix-theme-name { width: 180px; flex: none; }
+.mix-theme-bar { flex: 1; height: 10px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+.mix-theme-bar span { display: block; height: 100%; background: var(--brand); border-radius: 2px; }
+
+@media print {
+  .top, .noprint, .foot, .planbar, nav { display: none !important; }
+  body { background: #fff; }
+  .db-card, .mix-kpis { break-inside: avoid; }
+  .mixcell span, .mix-bar span, .mix-theme-bar span { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+.calib-status { margin-left: auto; align-self: center; }
+.calib-compare { padding: 0 14px 12px; }
+.calib-compare table { width: auto; min-width: 520px; border: 1px solid var(--line); border-radius: var(--radius); }
+.calib-old td { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+.calib-new td { background: var(--surface-2); }
+.calib-new input { border: 1px solid var(--line-strong) !important; background: var(--surface) !important; }
+input.txt.blockname { width: auto; font-weight: 500; font-size: 12.5px; padding: 2px 5px; }
+td.r.editable input.cell { border: 1px dashed var(--line-strong); }
+td.r.editable input.cell:focus { border-style: solid; }

@@ -58,7 +58,7 @@ export default async function OverviewPage({
   ]));
 
   return (
-    <Chrome active="prehled" user={chrome} title={{ client: plan.clientName, period: planTitle(plan) }}>
+    <Chrome active="prehled" user={chrome} planId={planId} title={{ client: plan.clientName, period: planTitle(plan) }}>
       <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />
       <Overview
         data={data}

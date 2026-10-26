@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { currentPrincipal } from "@/lib/auth";
 import {
   getPlanRows, getCampaignTree, getUser, getVisiblePlans, pickPlan, getPlan,
-  getReachSummary, getTargetGroups, getThemes,
+  getReachSummary, getTargetGroups, getThemes, getFillRows,
 } from "@/lib/queries";
 import { myUndoStack } from "@/lib/actions";
 import { can, seesWholePlan } from "@/lib/permissions";
@@ -29,6 +29,11 @@ export default async function PlanPage({
   const sp = await searchParams;
   const allPlans = await getVisiblePlans(me);
   const planId = pickPlan(allPlans, sp.plan);
+
+  // klient přichází hlavně vyplňovat — bez výslovně vybraného plánu ho pošleme na jeho položky
+  if (me.role === "CLIENT" && !sp.plan && planId && (await getFillRows(me, planId)).length) {
+    redirect(`/vyplnit?plan=${planId}`);
+  }
 
   if (!planId) {
     return (
@@ -74,7 +79,7 @@ export default async function PlanPage({
 
   return (
     <Chrome active="plan" user={{ name: user.name, email: user.email, role: user.role }}
-      title={{ client: plan.clientName, period: planTitle(plan) }}>
+      planId={planId} title={{ client: plan.clientName, period: planTitle(plan) }}>
       <PlanSwitcher
         plans={allPlans}
         current={planId}
@@ -124,7 +129,7 @@ export default async function PlanPage({
         <div className="banner info">
           <span>
             <b>Plán máte jen ke čtení.</b> Rozpočty mění media plánovač. Skutečné čerpání vyplňujete
-            v záložce <a href={`/plneni?plan=${planId}`}>Detail &amp; plnění</a>, a to jen tam, kde k tomu máte oprávnění.
+            v záložce <a href={`/vyplnit?plan=${planId}`}>K vyplnění</a>, a to jen tam, kde k tomu máte oprávnění.
           </span>
         </div>
       )}
@@ -133,8 +138,8 @@ export default async function PlanPage({
         <div className="banner info">
           <span>
             Mediaplán připravila agentura Fragile. <b>Částky jsou včetně agenturního fee.</b>{" "}
-            Skutečné čerpání najdete v záložce{" "}
-            <a href={`/plneni?plan=${planId}`}>Detail &amp; plnění</a>; s dotazy se obraťte na svého accounta.
+            Svoje položky vyplňujete v záložce{" "}
+            <a href={`/vyplnit?plan=${planId}`}>K vyplnění</a>; s dotazy se obraťte na svého accounta.
           </span>
         </div>
       ) : (

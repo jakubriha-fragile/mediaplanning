@@ -44,6 +44,10 @@ src/app/kalkulacka/      Sainsburyho kalkulačka + editace koeficientů duplikac
 src/lib/dashboard.ts     data pro Přehled (/prehled): zásah a frekvence v čase, matice oblasti × média,
                          filtry (?oblast, ?medium), modelový scénář „méně TV v přetížení"
 src/lib/costKind.ts      média / agenturní práce / smíšené — podle názvu položky
+src/lib/mix.ts           data pro Finální mix (/mix): média, měsíce, oblasti, modelový zásah
+src/app/vyplnit/         K vyplnění — jen položky, kam smí uživatel zapisovat (hlavní stránka klienta)
+src/components/AccessEditor.tsx   přidělení přístupu: plán → co smí → na čem (offline/online/položky)
+src/components/ReachCalibration.tsx  zadání naměřených vln (TRP + zásah 1+) → křivka (fitCurve)
 scripts/import-strategicky-plan.ts   import týdenního flowchartu BENU z Excelu
 ```
 
@@ -59,12 +63,17 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
 ## Invarianty — tohle nerozbíjet
 
 1. **Oprávnění se kontrolují na serveru u každého zápisu**, v `src/lib/actions.ts`,
-   přes `assertCan()`. Zašedlá pole v UI jsou pohodlí, ne ochrana. Grant má **pět
-   rozměrů**: plán × typ média × kampaň × měsíc × oblast. NULL = zástupný znak.
+   přes `assertCan()`. Zašedlá pole v UI jsou pohodlí, ne ochrana. Grant má rozměry:
+   plán × typ média × skupina nosičů (offline/online) × kampaň × položka (taktika)
+   × měsíc, plus oblast (plán/skutečnost/podklady). NULL = zástupný znak.
    Výchozí stav je zákaz.
+   **Zápis do taktiky skládá souřadnice VŽDY přes `at(c, area, month)`** — jinak
+   chybí nosič a položka a grant „jen online" / „jen tahle položka" nejde vynutit.
    **Nová akce bez `assertCan` s `planId` je bezpečnostní chyba.** Kontrola:
-   `grep -n 'assertCan(me' src/lib/actions.ts | grep -v planId` musí být prázdné
-   (pozor na víceřádkové volání).
+   `grep -n 'assertCan(me' src/lib/actions.ts | grep -v 'planId\|at('` musí být
+   prázdné (pozor na víceřádkové volání).
+   Klientovi se přístup přiděluje přes `grantAccess` (svazek grantů se stejným
+   `bundle`); `canSeeTactic` a `seesWholePlan` znají i offline/online a položku.
 
 2. **Rozměr plánu je bezpečnostní pojistka.** Bez něj by grant udělený klientovi
    na Q4 2026 automaticky platil i pro rok 2027 a každý další plán.
@@ -95,7 +104,8 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    `"use server"` je **veřejná akce** — i čtecí funkce tam musí mít kontrolu
    (viz `recentChanges`). Přesuny taktik a bloků mezi plány jsou zakázané.
 
-9. **Klient má vlastní pohled** (`role === "CLIENT"` → `clientView` v `PlanTable`,
+9. **Klient má vlastní pohled** (navigace: K vyplnění, Plán, Finální mix; po přihlášení
+   jde rovnou na K vyplnění) (`role === "CLIENT"` → `clientView` v `PlanTable`,
    `ReachPanel`, `PerfTable`). Nevidí agenturní sloupce (Jednotka, Cena), dopočty
    GRP v buňkách, odborný panel zásahu ani texty typu „před sdílením s klientem".
    Komentář agentury nesmí měnit ani na serveru (`setAccountNote`). Výhrada
@@ -129,11 +139,18 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se
    „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.
 
+15. **Skutečnost: nula ≠ prázdno.** `setActualSpend` a `setMetricActual` uloží i první
+   nulu — „nečerpáno" je odpověď a K vyplnění podle existence řádku pozná, co chybí.
+
+16. **Kalibrace zásahu** (`reach_measurement` → `fitCurve` → `reach_curve`) se přepočítá
+   při každém přidání/smazání měření; bez měření se řádek křivky smaže a platí
+   `DEFAULT_CURVE`. Jedno měření určí jen k (strop z předpokladu), dvě a víc i strop.
+
 ## Ověřování — pouštět před každou dodávkou
 
 ```bash
 npx tsc --noEmit
-npm test                                    # 33 testů oprávnění + 55 cross-média
+npm test                                    # 52 testů oprávnění + 74 cross-média
 npx next build
 env -u DATABASE_URL -u AUTH_SECRET npx next build   # build nesmí potřebovat proměnné
 ```
@@ -227,8 +244,12 @@ Zadavatel si vyžádal tento směr (zbývá z původního seznamu):
 
 Technický dluh:
 
+- Tematické oblasti nejde přejmenovat ani smazat (jen založit).
+- K vyplnění: „chybí" = měsíc ≤ dnešní a plán > 0 bez zapsané skutečnosti. Čerpání se
+  ale vykazuje se zpožděním — možná posunout o měsíc, až se ozve klient.
+
 - Import a export XLSX (zadání §9) — data se zatím nahrávají seedem.
-- Rozhraní pro kalibraci křivek zásahu (duplikace, cílové skupiny i ceník editovatelné jsou).
+- Kalibrace křivek: rozhraní je (Kalkulačka → Kalibrace zásahu), čeká se na vlny od TV nákupu.
 - Plán: řádek bloku se při vodorovném rolování neukotvuje (název bloku odjede);
   ukotvené jsou jen úchyt a sdělení.
   **TV křivka = předpoklad zadavatele** (říjen 2026): TV zasáhne téměř celou cílovku

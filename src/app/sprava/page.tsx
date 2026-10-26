@@ -1,23 +1,62 @@
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { users, campaigns, grants, plans } from "@/db/schema";
+import { users, campaigns, grants, plans, tactics, messageLines } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { currentPrincipal } from "@/lib/auth";
-import { canManageUsers } from "@/lib/permissions";
+import { canManageUsers, channelGroupOf, ACCESS_LEVEL_LABEL } from "@/lib/permissions";
 import { monthsBetween, monthLabel } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
-import { addGrant, removeGrant, inviteUser, setUserActive, setUserRole, recentChanges } from "@/lib/actions";
+import { AccessEditor, type AccessPlan } from "@/components/AccessEditor";
+import { addGrant, removeGrant, removeGrantBundle, inviteUser, setUserActive, setUserRole, recentChanges } from "@/lib/actions";
 import { getUser } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 const ROLE_HINT: Record<string, string> = {
   ADMIN: "spravuje uživatele a oprávnění, vidí a mění vše",
-  PLANNER: "plán i skutečnost",
+  PLANNER: "plán i skutečnost u všech plánů",
   ACCOUNT: "skutečnost a podklady, plán jen ke čtení",
-  CLIENT: "jen to, co mu přidělíte grantem",
-  VIEWER: "jen čtení",
+  CLIENT: "jen to, co mu přidělíte níže — bez přístupu nevidí nic",
+  VIEWER: "jen čtení všech plánů",
 };
+
+const ROLE_NAME: Record<string, string> = {
+  ADMIN: "Administrátor", PLANNER: "Plánovač (agentura)", ACCOUNT: "Account (agentura)",
+  CLIENT: "Klient", VIEWER: "Jen čtení",
+};
+
+/** „položku platí klient sám" — formulace, kterou plány BENU skutečně používají */
+const CLIENT_PAYS = /hradí klient|vlastní karty/i;
+
+type GrantView = {
+  id: string; userId: string; area: string; level: string; mediaType: string | null; month: string | null;
+  note: string | null; campaignName: string | null; planId: string | null; channelGroup: string | null;
+  tacticId: string | null; bundle: string | null;
+};
+
+/** Svazek grantů → jedna věta: co smí, na čem, kdy. */
+function describe(gs: GrantView[], tacticName: Record<string, string>, monthName: Record<string, string>) {
+  const areas = new Set(gs.map((g) => `${g.area}:${g.level}`));
+  const level =
+    areas.has("plan:write") && areas.has("actuals:write") ? ACCESS_LEVEL_LABEL.edit
+    : areas.size === 1 && areas.has("actuals:write") ? ACCESS_LEVEL_LABEL.fill
+    : areas.size === 1 && areas.has("plan:read") ? ACCESS_LEVEL_LABEL.view
+    : [...areas].map((a) => {
+        const [ar, lv] = a.split(":");
+        return `${ar === "plan" ? "plán" : ar === "actuals" ? "skutečnost" : "podklady"} (${lv === "write" ? "zápis" : "čtení"})`;
+      }).join(", ");
+  const g0 = gs[0];
+  const items = [...new Set(gs.map((g) => g.tacticId).filter(Boolean) as string[])];
+  const what = items.length
+    ? items.map((t) => tacticName[t] ?? "smazaná položka").join(" · ")
+    : [
+        g0.channelGroup === "offline" ? "offline" : g0.channelGroup === "online" ? "online" : null,
+        g0.mediaType, g0.campaignName ? `blok ${g0.campaignName}` : null,
+      ].filter(Boolean).join(", ") || "celý plán";
+  const months = [...new Set(gs.map((g) => g.month).filter(Boolean) as string[])].sort();
+  const when = months.length ? months.map((m) => monthName[m] ?? m).join(", ") : "všechny měsíce";
+  return { level, what, items: items.length, when };
+}
 
 export default async function AdminPage() {
   const me = await currentPrincipal();
@@ -35,6 +74,7 @@ export default async function AdminPage() {
         id: grants.id, userId: grants.userId, area: grants.area, level: grants.level,
         mediaType: grants.mediaType, month: grants.month, note: grants.note,
         campaignName: campaigns.name, planId: grants.planId,
+        channelGroup: grants.channelGroup, tacticId: grants.tacticId, bundle: grants.bundle,
       })
       .from(grants)
       .leftJoin(campaigns, eq(grants.campaignId, campaigns.id)),
@@ -43,17 +83,38 @@ export default async function AdminPage() {
 
   // granty se udělují na konkrétní plán, takže kampaně nabízíme jen z nich
   const camps = await db.select().from(campaigns).orderBy(asc(campaigns.name));
+  const tacticRows = await db
+    .select({
+      id: tactics.id, channel: tactics.channel, channelType: tactics.channelType,
+      block: campaigns.name, planId: campaigns.planId,
+    })
+    .from(tactics)
+    .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
+    .innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
+    .orderBy(asc(campaigns.position), asc(campaigns.name), asc(tactics.position));
+  const tacticName = Object.fromEntries(tacticRows.map((t) => [t.id, t.channel]));
   const MONTHS = [...new Set(planRows.flatMap((p) => monthsBetween(p.periodStart, p.periodEnd)))].sort();
   const MONTH_LABEL = Object.fromEntries(MONTHS.map((m) => [m, `${monthLabel(m)} ${m.slice(0, 4)}`]));
   const planName = Object.fromEntries(planRows.map((p) => [p.id, p.name]));
+  const accessPlans: AccessPlan[] = planRows.map((p) => ({
+    id: p.id,
+    name: p.name,
+    months: monthsBetween(p.periodStart, p.periodEnd).map((m) => ({ value: m, label: MONTH_LABEL[m] })),
+    tactics: tacticRows.filter((t) => t.planId === p.id).map((t) => ({
+      id: t.id, channel: t.channel, channelType: t.channelType, block: t.block,
+      group: channelGroupOf(t.channelType), clientPays: CLIENT_PAYS.test(t.channel),
+    })),
+  }));
 
   return (
     <Chrome active="sprava" user={{ name: user.name, email: user.email, role: user.role }}>
       <div className="banner info">
         <span>
-          <b>Oprávnění se vynucuje na serveru.</b> Zašedlá pole v rozhraní jsou pohodlí, ne ochrana —
-          o tom, co projde, rozhoduje engine u každého zápisu i čtení. Grant má pět rozměrů: plán,
-          typ média, kampaň, měsíc a oblast. Klient uvidí jen taktiky, na které má grant. Prázdná hodnota znamená „vše". Kdo nemá grant, nemá přístup.
+          <b>Jak přístupy fungují:</b> agentura (administrátor, plánovač) vidí všechno podle role.
+          Klient nevidí nic, dokud mu tady nepřidělíte přístup — vždy ke konkrétnímu plánu, a buď
+          k celému, nebo jen k offline, online či vybraným položkám. Uvidí pak jen to, k čemu přístup
+          má, a v záložce <b>K vyplnění</b> najde přesně svoje položky. Kontroluje se to na serveru
+          u každého zápisu i čtení.
         </span>
       </div>
 
@@ -83,13 +144,13 @@ export default async function AdminPage() {
           <div className="field" style={{ margin: 0, minWidth: 150 }}>
             <label htmlFor="role">Role</label>
             <select id="role" name="role" defaultValue="CLIENT">
-              {Object.keys(ROLE_HINT).map((r) => <option key={r} value={r}>{r}</option>)}
+              {Object.keys(ROLE_HINT).map((r) => <option key={r} value={r}>{ROLE_NAME[r]}</option>)}
             </select>
           </div>
           <button className="btn primary" type="submit">Pozvat</button>
         </form>
         <div className="note">
-          {Object.entries(ROLE_HINT).map(([r, h]) => <div key={r}><b>{r}</b> — {h}</div>)}
+          {Object.entries(ROLE_HINT).map(([r, h]) => <div key={r}><b>{ROLE_NAME[r]}</b> — {h}</div>)}
         </div>
       </div>
 
@@ -99,7 +160,7 @@ export default async function AdminPage() {
         <div className="panel" key={u.id} style={{ borderRadius: 5, marginBottom: 12 }}>
           <div className="toolbar">
             <b>{u.name ?? u.email}</b>
-            <span className="pill ph">{u.role}</span>
+            <span className="pill ph">{ROLE_NAME[u.role] ?? u.role}</span>
             <span className="share">{u.email}</span>
             {!u.active && <span className="pill s-bad">deaktivován</span>}
             <span className="spacer" />
@@ -108,7 +169,7 @@ export default async function AdminPage() {
                 style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <select name="role" defaultValue={u.role} aria-label="Role" className="txt"
                   style={{ width: "auto", border: "1px solid var(--line-strong)" }}>
-                  {Object.keys(ROLE_HINT).map((r) => <option key={r} value={r}>{r}</option>)}
+                  {Object.keys(ROLE_HINT).map((r) => <option key={r} value={r}>{ROLE_NAME[r]}</option>)}
                 </select>
                 <button className="btn" type="submit">Změnit roli</button>
               </form>
@@ -120,31 +181,50 @@ export default async function AdminPage() {
             </form>
           </div>
 
-          {myGrants.length > 0 && (
-            <div className="scroll">
-              <table>
-                <thead>
-                  <tr><th>Oblast</th><th>Úroveň</th><th>Plán</th><th>Typ média</th><th>Kampaň</th><th>Měsíc</th><th>Poznámka</th><th /></tr>
-                </thead>
-                <tbody>
-                  {myGrants.map((g) => (
-                    <tr key={g.id}>
-                      <td>{g.area === "plan" ? "plán" : g.area === "actuals" ? "skutečnost" : "podklady"}</td>
-                      <td><span className={`pill ${g.level === "write" ? "s-ok" : "ph"}`}>{g.level === "write" ? "zápis" : "čtení"}</span></td>
-                      <td>{g.planId ? planName[g.planId] ?? g.planId : <span className="share">všechny</span>}</td>
-                      <td>{g.mediaType ? <span className={`pill ${g.mediaType}`}>{g.mediaType}</span> : <span className="share">všechny</span>}</td>
-                      <td>{g.campaignName ?? <span className="share">všechny</span>}</td>
-                      <td>{g.month ? MONTH_LABEL[g.month] ?? g.month : <span className="share">všechny</span>}</td>
-                      <td className="share">{g.note ?? ""}</td>
-                      <td className="r">
-                        <form action={async () => { "use server"; await removeGrant(g.id); }}>
-                          <button className="btn danger" type="submit">Odebrat</button>
-                        </form>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {myGrants.length > 0 && (() => {
+            // svazek = jedno přidělení; staré granty bez svazku jsou každý zvlášť
+            const groups = new Map<string, GrantView[]>();
+            for (const g of myGrants) {
+              const key = g.bundle ? `b:${g.bundle}` : `g:${g.id}`;
+              groups.set(key, [...(groups.get(key) ?? []), g]);
+            }
+            return (
+              <div className="scroll">
+                <table className="accesslist">
+                  <thead><tr><th>Plán</th><th>Co smí</th><th>Na čem</th><th>Kdy</th><th /></tr></thead>
+                  <tbody>
+                    {[...groups.entries()].map(([key, gs]) => {
+                      const d = describe(gs, tacticName, MONTH_LABEL);
+                      const g0 = gs[0];
+                      return (
+                        <tr key={key}>
+                          <td>{g0.planId ? planName[g0.planId] ?? "—" : <span className="share">všechny plány</span>}</td>
+                          <td><span className={`pill ${gs.some((g) => g.level === "write") ? "s-ok" : "ph"}`}>{d.level}</span></td>
+                          <td style={{ maxWidth: 520 }}>
+                            {d.items ? <><b>{d.items} {d.items === 1 ? "položka" : d.items < 5 ? "položky" : "položek"}:</b> <span className="share">{d.what}</span></> : d.what}
+                          </td>
+                          <td className="share">{d.when}</td>
+                          <td className="r">
+                            <form action={async () => {
+                              "use server";
+                              if (g0.bundle) await removeGrantBundle({ userId: u.id, bundle: g0.bundle });
+                              else await removeGrant(g0.id);
+                            }}>
+                              <button className="btn danger" type="submit">Odebrat</button>
+                            </form>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+
+          {u.role === "CLIENT" && !myGrants.length && (
+            <div className="banner info" style={{ margin: 12 }}>
+              <span><b>Zatím nic nevidí.</b> Přidejte mu přístup k plánu — třeba „vyplňuje skutečnost" u položek, které platí sám.</span>
             </div>
           )}
 
@@ -152,9 +232,13 @@ export default async function AdminPage() {
               a předvyplněný formulář jen sváděl k omylu */}
           {u.role === "ADMIN" || u.role === "PLANNER" ? (
             <div className="note" style={{ borderTop: "1px solid var(--line)" }}>
-              Role {u.role} má přístup ke všem plánům z role — další oprávnění nepotřebuje.
+              {ROLE_NAME[u.role]} má přístup ke všem plánům z role — další oprávnění nepotřebuje.
             </div>
           ) : (
+          <>
+          <AccessEditor userId={u.id} userLabel={u.name ?? u.email} plans={accessPlans} />
+          <details className="adv">
+          <summary>Pokročilé: oprávnění po jednotlivých rozměrech</summary>
           <form
             action={async (fd: FormData) => {
               "use server";
@@ -168,6 +252,7 @@ export default async function AdminPage() {
                 planId: (plan === "*" ? null : plan) as never,
                 campaignId: (fd.get("campaignId") || null) as never,
                 month: (fd.get("month") || null) as never,
+                channelGroup: (fd.get("channelGroup") || null) as never,
                 note: String(fd.get("note") || ""),
               });
             }}
@@ -202,6 +287,11 @@ export default async function AdminPage() {
               <select name="mediaType" defaultValue=""><option value="">všechny</option>
                 <option>Paid</option><option>Owned</option><option>Earned</option></select>
             </div>
+            <div className="field" style={{ margin: 0, minWidth: 120 }}>
+              <label>Nosiče</label>
+              <select name="channelGroup" defaultValue=""><option value="">offline i online</option>
+                <option value="offline">offline</option><option value="online">online</option></select>
+            </div>
             <div className="field" style={{ margin: 0, minWidth: 150 }}>
               <label>Kampaň</label>
               {/* kampaně se jmenují v každém plánu stejně — bez seskupení se snadno
@@ -228,6 +318,8 @@ export default async function AdminPage() {
             </div>
             <button className="btn" type="submit">Přidat oprávnění</button>
           </form>
+          </details>
+          </>
           )}
         </div>
         );

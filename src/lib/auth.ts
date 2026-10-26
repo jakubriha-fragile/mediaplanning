@@ -137,6 +137,8 @@ export async function currentPrincipal(): Promise<Principal | null> {
       planId: g.planId,
       campaignId: g.campaignId,
       month: g.month,
+      channelGroup: g.channelGroup ?? null,
+      tacticId: g.tacticId ?? null,
     })),
   };
 }
