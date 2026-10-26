@@ -109,3 +109,16 @@ export const big = (n: number) =>
 /** Číslo z pole, jak ho lidé píšou: „1 250 000", „12,5", „1 250 000 Kč". Prázdné = 0. */
 export const parseNum = (s: string) =>
   Number(String(s).replace(/\s/g, "").replace(",", ".").replace(/[^\d.]/g, "")) || 0;
+
+/**
+ * Týdnů v měsíci (dny ÷ 7). Frekvence se všude ukazuje týdně, protože tak
+ * o tlaku mluví plánovači; plán je po měsících, takže jde o rovnoměrné
+ * rozložení měsíce do týdnů — skutečný průběh uvnitř měsíce z dat neplyne.
+ */
+export function weeksIn(month: Month): number {
+  const { year, month: m } = parseMonth(month);
+  return new Date(Date.UTC(year, m, 0)).getUTCDate() / 7;
+}
+
+/** Týdnů v celém období (součet měsíců). */
+export const weeksOf = (months: Month[]) => months.reduce((s, m) => s + weeksIn(m), 0);

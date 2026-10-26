@@ -1,6 +1,7 @@
 import type { ChannelType, PlanUnit } from "@/db/schema";
 import { derive, combineReach, reachFromGrp, isGrpPriced } from "@/lib/crossmedia";
 import { costKind, type CostKind } from "@/lib/costKind";
+import { displayName } from "@/lib/displayName";
 import { monthsBetween } from "@/lib/period";
 import { canSeePlan, canSeeTactic, channelGroupOf, seesWholePlan, type ChannelGroup, type Principal } from "@/lib/permissions";
 import { getPlan, loadPlan, crossContext, getThemes, sharesByTactic } from "@/lib/queries";
@@ -80,7 +81,7 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
       };
       byType.set(r.channelType, ch);
     }
-    const item: MixItem = { id: r.tacticId, channel: r.channel, block: r.campaign, kind, cost: 0, byMonth: {} };
+    const item: MixItem = { id: r.tacticId, channel: displayName(r), block: r.campaign, kind, cost: 0, byMonth: {} };
 
     for (const m of months) {
       const b = loaded.budgets.find((x) => x.tacticId === r.tacticId && x.month === m);

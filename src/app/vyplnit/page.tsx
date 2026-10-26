@@ -42,7 +42,7 @@ export default async function FillPage({ searchParams }: { searchParams: Promise
 
   return (
     <Chrome active="vyplnit" user={chrome} planId={planId} title={{ client: plan.clientName, period: planTitle(plan) }}>
-      <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />
+      {allPlans.length > 1 && <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />}
       <FillForm
         key={planId}
         rows={rows}

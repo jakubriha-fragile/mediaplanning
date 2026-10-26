@@ -221,6 +221,17 @@ importovaný součet se součtem v Excelu. Data klienta zůstávají mimo repozi
 Klient vidí jen *K vyplnění*, *Plán* (čtení) a *Finální mix*; po přihlášení se mu otevře
 *K vyplnění*. Otevřený plán se mezi záložkami přenáší.
 
+**Plán pro klienta** je samostatný jednoduchý pohled: součet, offline/online (ne Paid/Owned/Earned),
+čerpáno a tabulka položek po měsících s odstínem podle výše částky — bez filtrů, kódů sdělení
+a polí. Odhad zásahu vidí jen klient s přístupem k celému plánu (u výseku by „0 %" mátlo).
+
+**Krátké názvy.** Položky se klientovi a v souhrnech ukazují bez poznámek pro agenturu
+(„(hradí klient z vlastní karty)", „(navýšení…)", „(odhad)"). Vlastní krátký název jde zadat
+v Plánování → Podrobnosti → *Krátký název*; plný název zůstává v nápovědě.
+
+**Frekvence je všude týdně** — kolikrát týdně reklamu průměrně uvidí zasažený (v Plánování za
+období i po měsících, v Přehledu po měsících).
+
 ### Finální mix
 
 Souhrn ke schválení a sdílení — nic se tu nezadává. Rozpočet celkem, podíl offline/online,
@@ -236,11 +247,17 @@ zatím neprobíhá. „Nečerpáno" zapíše nulu: **nula je odpověď**, prázd
 položka ukazatele (konverze, CPA…), vyplňují se pod ní. Rozpočet tu jde měnit jen u položek
 řízených v Kč — u GRP/impresí by přepis změnil model, ty se mění v Plánování.
 
-### Kalkulace ukazatelů (KPI)
+### Ukazatele (KPI)
 
 V *Plnění* jde u každé položky **přidat ukazatel** (název, jednotka, typ: načítá se /
 nižší = lépe / vyšší = lépe), zadat jeho **cíl** po měsících (sloupec Plán / cíl, v režimu
 jednoho měsíce) a smazat ho. Skutečnost ukazatelů vyplňuje ten, kdo má zápis do skutečnosti.
+
+**Poměrové ukazatele se nezadávají, počítají se** (`src/lib/metrics.ts`): CPM = čerpání ÷ imprese
+× 1 000, CPC = čerpání ÷ kliky, CPA = čerpání ÷ konverze, CTR = kliky ÷ imprese × 100,
+ROAS = tržby ÷ čerpání — za každý měsíc. Zadává se jen čerpání a základní čísla. Chybí-li u položky
+základní ukazatel, který poměr potřebuje (CPM bez impresí), nabídne se k vyplnění a založí se
+prvním zápisem. Ukazatel se pozná podle názvu.
 
 ### Kalkulačka zásahu
 

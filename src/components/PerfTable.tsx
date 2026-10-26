@@ -2,11 +2,16 @@
 
 import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setActualSpend, setMetricActual, setMetricTarget, setAccountNote, undoLast, createMetric, deleteMetric } from "@/lib/actions";
+import { setActualSpend, setMetricActual, setMetricTarget, setAccountNote, undoLast, createMetric, deleteMetric, setBaseMetricActual } from "@/lib/actions";
+import { DERIVED, type BaseKey, type DerivedKey } from "@/lib/metrics";
 import { verdictFor, monthState, elapsed, type Verdict } from "@/lib/pacing";
 
 export type PerfMetric = {
-  id: string;
+  /** null = základní ukazatel, který potřebuje poměrový a zatím neexistuje */
+  id: string | null;
+  base: BaseKey | null;
+  /** poměrový ukazatel — počítá se, nezadává */
+  derived: DerivedKey | null;
   name: string;
   kind: "cumulative" | "rate_low" | "rate_high";
   unit: string;
@@ -248,20 +253,22 @@ export function PerfTable({
                   {r.metrics.map((mt) => {
                     const v = metricVerdict(r, mt);
                     return (
-                      <tr key={mt.id}>
+                      <tr key={mt.id ?? `v-${mt.base}`}>
                         <td style={{ paddingLeft: 16 }}>
                           {mt.name} <span className="share">{mt.unit}</span>
-                          {showAdd && (
+                          {showAdd && mt.id && (
                             <button className="linkbtn" style={{ marginLeft: 8, color: "var(--muted)" }} title="Smazat ukazatel i s cíli a skutečností"
                               onClick={() => {
                                 if (!confirm(`Smazat ukazatel „${mt.name}" u ${r.channel} včetně všech cílů a skutečnosti? Nejde vrátit.`)) return;
-                                save(() => {}, () => {}, async () => { const res = await deleteMetric(mt.id); if (res.ok) router.refresh(); return res; });
+                                save(() => {}, () => {}, async () => { const res = await deleteMetric(mt.id!); if (res.ok) router.refresh(); return res; });
                               }}>smazat</button>
                           )}
-                          <div className="share">{KIND_LABEL[mt.kind]}</div>
+                          <div className="share">
+                            {mt.derived ? `počítá se: ${DERIVED[mt.derived].formula}` : mt.id ? KIND_LABEL[mt.kind] : "potřebuje ho " + r.metrics.filter((x) => x.derived && DERIVED[x.derived].needs.includes(mt.base!)).map((x) => x.name).join(", ")}
+                          </div>
                         </td>
-                        <td className={`r ${single && canTarget ? "editable" : ""}`}>
-                          {single && canTarget ? (
+                        <td className={`r ${single && canTarget && mt.id ? "editable" : ""}`}>
+                          {single && canTarget && mt.id ? (
                             <input className="cell" inputMode="decimal" placeholder="cíl"
                               title="Cíl na tento měsíc"
                               defaultValue={num(mt.target[single])}
@@ -275,13 +282,17 @@ export function PerfTable({
                                     ...x, metrics: x.metrics.map((y) => y.id === mt.id ? { ...y, target: { ...y.target, [single]: val } } : y),
                                   } : x)),
                                   () => { e.target.value = num(prev); },
-                                  () => setMetricTarget({ metricId: mt.id, month: single, target: val }),
+                                  () => setMetricTarget({ metricId: mt.id!, month: single, target: val }),
                                 );
                               }} />
                           ) : <span className="num">{v.plan ? num(Math.round(v.plan * 100) / 100) : "—"}</span>}
                         </td>
-                        <td className={`realcell ${canEdit ? "editable" : "locked"}`}>
-                          {single ? (
+                        <td className={`realcell ${canEdit && !mt.derived ? "editable" : "locked"}`}>
+                          {single && mt.derived ? (
+                            <span className="num" title={`Počítá se: ${DERIVED[mt.derived].formula}`}>
+                              {mt.actual[single] ? num(Math.round(mt.actual[single] * 100) / 100) : <span className="share">spočte se</span>}
+                            </span>
+                          ) : single ? (
                             <input className="cell" inputMode="decimal" disabled={!canEdit} placeholder="realita"
                               defaultValue={num(mt.actual[single])}
                               onFocus={(e) => { e.target.value = mt.actual[single] ? String(mt.actual[single]) : ""; e.target.select(); }}
@@ -291,10 +302,16 @@ export function PerfTable({
                                 if (val === prev) return;
                                 save(
                                   () => setData((d) => d.map((x) => x.id === r.id ? {
-                                    ...x, metrics: x.metrics.map((y) => y.id === mt.id ? { ...y, actual: { ...y.actual, [single]: val } } : y),
+                                    ...x, metrics: x.metrics.map((y) => y === mt ? { ...y, actual: { ...y.actual, [single]: val } } : y),
                                   } : x)),
                                   () => { e.target.value = num(prev); },
-                                  () => setMetricActual({ metricId: mt.id, month: single, value: val }),
+                                  async () => {
+                                    if (mt.id) return setMetricActual({ metricId: mt.id, month: single, value: val });
+                                    // ukazatel ještě neexistuje — založí se a pak přijdou čerstvá data
+                                    const res = await setBaseMetricActual({ tacticId: r.id, base: mt.base!, month: single, value: val });
+                                    if (res.ok) router.refresh();
+                                    return res;
+                                  },
                                 );
                               }} />
                           ) : <span className="num">{v.actual ? num(Math.round(v.actual * 100) / 100) : "—"}</span>}

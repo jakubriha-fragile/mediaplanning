@@ -11,6 +11,8 @@ import {
 } from "../src/lib/crossmedia";
 import { periodLabel } from "../src/lib/period";
 import { costKind } from "../src/lib/costKind";
+import { shortName, displayName } from "../src/lib/displayName";
+import { resolveMetrics, derivedOf, baseOf } from "../src/lib/metrics";
 
 let failed = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -183,6 +185,47 @@ console.log("\nTyp nákladu (agenturní práce vs. média)");
   ok("ambasador je honorář", costKind("BENU Longevity - ambasádor") === "fee");
   ok("TV spot jsou média", costKind("TV – hlavní brandový spot") === "media");
   ok("partnerství / event / OOH je smíšené", costKind("Partnerství / event / OOH (bude upřesněno)") === "mixed");
+}
+
+console.log("\nKrátké názvy položek");
+{
+  ok("odstřihne „(hradí klient…) (navýšení…)“", shortName("Always-on Social Media promo budget (hradí klient z vlastní karty) (navýšení o 15 000 Kč)") === "Always-on Social Media promo budget");
+  ok("odstřihne „ - hradí klient z vlastní karty“ na konci", shortName("Melanom - prevence - médiá (META) - hradí klient z vlastní karty") === "Melanom - prevence - médiá (META)");
+  ok("nechá věcnou závorku", shortName("SOLERO (ag. práce, influ & CC, médiá)") === "SOLERO (ag. práce, influ & CC, médiá)");
+  ok("odstřihne „(odhad)“", shortName("Vendor obsah & openings (odhad)") === "Vendor obsah & openings");
+  ok("TV spot beze změny", shortName("TV spot 30\" – 4 produkty") === "TV spot 30\" – 4 produkty");
+  ok("vlastní krátký název má přednost", displayName({ channel: "Akční leták promo budget (hradí klient z vlastní karty)", label: "Leták" }) === "Leták");
+  ok("prázdný vlastní název = automaticky", displayName({ channel: "Akční leták promo budget (hradí klient z vlastní karty)", label: "  " }) === "Akční leták promo budget");
+}
+
+console.log("\nPoměrové ukazatele se počítají");
+{
+  ok("CPM je poměrový", derivedOf("CPM") === "CPM" && baseOf("CPM") === null);
+  ok("„Imprese“ jsou základní", baseOf("Imprese") === "impressions");
+  ok("„CPA (Kč)“ je poměrový", derivedOf("CPA (Kč)") === "CPA");
+  ok("Reach není imprese", baseOf("Reach") === null);
+  const months = ["2027-02", "2027-03"];
+  const store: Record<string, number> = { "i|2027-02": 200000, "k|2027-02": 40, "cpa|2027-02": 999 };
+  const res = resolveMetrics({
+    months,
+    metrics: [
+      { id: "i", name: "Imprese", unit: "", kind: "cumulative" },
+      { id: "k", name: "Konverze", unit: "", kind: "cumulative" },
+      { id: "cpm", name: "CPM", unit: "Kč", kind: "rate_low" },
+      { id: "cpa", name: "CPA", unit: "Kč", kind: "rate_low" },
+      { id: "ctr", name: "CTR", unit: "%", kind: "rate_high" },
+    ],
+    actualOf: (id, m) => store[`${id}|${m}`] ?? null,
+    targetOf: () => 0,
+    spendOf: (m) => (m === "2027-02" ? 10000 : null),
+  });
+  const get = (n: string) => res.find((x) => x.name === n)!;
+  ok("CPM = čerpání ÷ imprese × 1000", get("CPM").actual["2027-02"] === 50);
+  ok("CPA = čerpání ÷ konverze (ruční hodnota se ignoruje)", get("CPA").actual["2027-02"] === 250);
+  ok("bez čerpání se nepočítá", get("CPM").actual["2027-03"] === null);
+  ok("CTR doplní chybějící Kliky k vyplnění", res.some((x) => x.id === null && x.base === "clicks"));
+  ok("bez kliků CTR nejde spočítat", get("CTR").actual["2027-02"] === null);
+  ok("počítané jsou na konci", res.slice(-3).every((x) => x.derived));
 }
 
 console.log("\nKalibrace křivky z naměřených vln");

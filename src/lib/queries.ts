@@ -8,6 +8,8 @@ import {
 } from "@/db/schema";
 import { monthsBetween } from "@/lib/period";
 import { costKind } from "@/lib/costKind";
+import { displayName } from "@/lib/displayName";
+import { resolveMetrics, type ResolvedMetric } from "@/lib/metrics";
 import { can, canSeePlan, canSeeTactic, channelGroupOf, type Principal } from "@/lib/permissions";
 import {
   derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey, UNCALIBRATED_SOURCE,
@@ -217,6 +219,7 @@ export async function loadPlan(planId: string) {
       tacticId: tactics.id,
       messageLineId: tactics.messageLineId,
       channel: tactics.channel,
+      label: tactics.label,
       mediaType: tactics.mediaType,
       channelType: tactics.channelType,
       targetGroupId: tactics.targetGroupId,
@@ -308,6 +311,8 @@ export async function getPlanRows(me: Principal, planId: string) {
       phase: r.phase as string,
       audience: r.audience,
       channel: r.channel,
+      label: r.label,
+      name: displayName(r),
       mediaType: r.mediaType,
       channelType: r.channelType,
       targetGroupId: r.targetGroupId,
@@ -536,16 +541,11 @@ export async function getPerfRows(me: Principal, planId: string) {
     note: Object.fromEntries(
       months.map((m) => [m, notes.find((n) => n.tacticId === r.tacticId && n.month === m)?.text ?? ""]),
     ),
-    metrics: mets
-      .filter((mt) => mt.tacticId === r.tacticId)
-      .map((mt) => ({
-        id: mt.id,
-        name: mt.name,
-        kind: mt.kind,
-        unit: mt.unit,
-        target: byMonth(targets.filter((t) => t.metricId === mt.id), months, (t) => t.target),
-        actual: byMonth(mActuals.filter((a) => a.metricId === mt.id), months, (a) => a.value),
-      })),
+    // poměrové ukazatele (CPM, CPA…) se dopočítají z čerpání a základních čísel
+    metrics: tacticMetrics(r.tacticId, months, loaded).map((mt) => ({
+      ...mt,
+      actual: Object.fromEntries(months.map((m) => [m, mt.actual[m] ?? 0])),
+    })),
   }));
 }
 
@@ -564,12 +564,25 @@ export type FillMonth = {
 export type FillRow = {
   id: string;
   block: string;
+  /** krátký název k zobrazení; plný je v `channel` */
+  name: string;
   channel: string;
   channelType: ChannelType;
   online: boolean;
   months: Record<string, FillMonth>;
-  metrics: Array<{ id: string; name: string; unit: string; actual: Record<string, number | null>; target: Record<string, number> }>;
+  metrics: ResolvedMetric[];
 };
+
+/** Ukazatele taktiky včetně dopočtu poměrových (viz src/lib/metrics.ts). */
+function tacticMetrics(tacticId: string, months: string[], loaded: Awaited<ReturnType<typeof loadPlan>>): ResolvedMetric[] {
+  return resolveMetrics({
+    months,
+    metrics: loaded.mets.filter((mt) => mt.tacticId === tacticId),
+    actualOf: (id, m) => loaded.mActuals.find((x) => x.metricId === id && x.month === m)?.value ?? null,
+    targetOf: (id, m) => loaded.targets.find((x) => x.metricId === id && x.month === m)?.target ?? 0,
+    spendOf: (m) => loaded.spends.find((x) => x.tacticId === tacticId && x.month === m)?.amount ?? null,
+  });
+}
 
 /**
  * Položky, do kterých uživatel smí něco zapsat — podklad pro stránku K vyplnění.
@@ -603,18 +616,12 @@ export async function getFillRows(me: Principal, planId: string): Promise<FillRo
     out.push({
       id: r.tacticId,
       block: r.campaign,
+      name: displayName(r),
       channel: r.channel,
       channelType: r.channelType,
       online: channelGroupOf(r.channelType) === "online",
       months: cells,
-      metrics: mets.filter((mt) => mt.tacticId === r.tacticId).map((mt) => ({
-        id: mt.id, name: mt.name, unit: mt.unit,
-        actual: Object.fromEntries(months.map((m) => {
-          const a = mActuals.find((x) => x.metricId === mt.id && x.month === m);
-          return [m, a ? a.value : null];
-        })),
-        target: Object.fromEntries(months.map((m) => [m, targets.find((x) => x.metricId === mt.id && x.month === m)?.target ?? 0])),
-      })),
+      metrics: tacticMetrics(r.tacticId, months, loaded),
     });
   }
   return out;

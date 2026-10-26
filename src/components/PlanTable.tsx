@@ -21,6 +21,10 @@ export type PlanRow = {
   phase: string;
   audience: string;
   channel: string;
+  /** vlastní krátký název; null = automaticky */
+  label: string | null;
+  /** co se ukazuje klientovi a v souhrnech */
+  name: string;
   mediaType: "Paid" | "Owned" | "Earned";
   channelType: ChannelType;
   targetGroupId: string | null;
@@ -100,7 +104,7 @@ export function PlanTable({
     });
   };
   const showUnit = details && !clientView;
-  const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 2 : 0);
+  const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 3 : 0);
   const [data, setData] = useState(rows);
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
@@ -310,6 +314,7 @@ export function PlanTable({
               {details && <th>Cílení</th>}
               <th>Typ</th>
               <th>Kanál</th>
+              {showUnit && <th title="Jak položku uvidí klient a souhrny. Prázdné = zkrátí se automaticky (bez poznámek v závorkách).">Krátký název</th>}
               <th title="Na kterou tematickou oblast položka míří — u smíšených podíl v %">Oblast</th>
               <th>Nosič</th>
               {showUnit && <th>Jednotka</th>}
@@ -517,6 +522,17 @@ export function PlanTable({
                                   () => updateTactic({ tacticId: r.id, channel: v }));
                             }} />
                         </td>
+                        {showUnit && <td style={{ minWidth: 150 }}>
+                          <input className="txt" key={`${r.id}-${r.label ?? ""}`} defaultValue={r.label ?? ""} placeholder={r.name}
+                            disabled={!canEditPlan} title="Prázdné = automaticky"
+                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                            onBlur={(e) => {
+                              const v = e.target.value.trim();
+                              if (v === (r.label ?? "")) return;
+                              run(() => patchRow(r.id, { label: v || null }), () => patchRow(r.id, { label: r.label }),
+                                  () => updateTactic({ tacticId: r.id, label: v }));
+                            }} />
+                        </td>}
 
                         <td style={{ minWidth: 130 }}>
                           <ThemeCell

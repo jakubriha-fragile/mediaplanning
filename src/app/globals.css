@@ -712,3 +712,10 @@ details.adv summary:hover { color: var(--brand-ink); }
 input.txt.blockname { width: auto; font-weight: 500; font-size: 12.5px; padding: 2px 5px; }
 td.r.editable input.cell { border: 1px dashed var(--line-strong); }
 td.r.editable input.cell:focus { border-style: solid; }
+.fill-derived b { font-weight: 500; color: var(--brand-ink); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------- plán pro klienta */
+.cplan td, .cplan th { white-space: nowrap; }
+.cplan .cplan-name { position: sticky; left: 0; z-index: 1; background: var(--surface); min-width: 240px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.cplan thead .cplan-name, .cplan tfoot .cplan-name, .cplan tr.grp .cplan-name { background: var(--surface-2); }
+.cplan .cplan-cell { min-width: 74px; }

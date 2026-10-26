@@ -26,6 +26,7 @@ import { currentPrincipal } from "@/lib/auth";
 import { assertCan, canManageUsers, canSeePlan, PermissionError, ACCESS_LEVEL_LABEL } from "@/lib/permissions";
 import { monthLabel, monthsBetween, periodLabel, shiftYears, kc, num } from "@/lib/period";
 import { createId } from "@/lib/id";
+import { BASE, DERIVED, baseOf, derivedOf, type BaseKey } from "@/lib/metrics";
 import { derive, isGrpPriced, dupKey, DEFAULT_DUPLICATION, DEFAULT_CURVE, K_MIN, K_MAX, fitCurve } from "@/lib/crossmedia";
 import {
   pushUndo, popUndo, peekUndo, listUndo, snapshotPositions, snapshotCampaignOrder,
@@ -51,6 +52,7 @@ async function tacticCoords(tacticId: string) {
     .select({
       mediaType: tactics.mediaType,
       channel: tactics.channel,
+      label: tactics.label,
       channelType: tactics.channelType,
       targetGroupId: tactics.targetGroupId,
       campaignId: messageLines.campaignId,
@@ -388,6 +390,7 @@ export async function setMetricActual(raw: z.input<typeof metricActualInput>): P
     const { channel } = c;
 
     assertCan(me, "write", at(c, "actuals", month));
+    if (derivedOf(metric.name)) return { ok: false, error: `${metric.name} se počítá samo z čerpání a základních čísel.` };
 
     const [before] = await db
       .select()
@@ -405,6 +408,49 @@ export async function setMetricActual(raw: z.input<typeof metricActualInput>): P
     await log(me!.id, "actuals", [label]);
     revalidatePath("/plneni");
     return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const baseActualInput = z.object({
+  tacticId: z.string().min(1),
+  base: z.enum(["impressions", "clicks", "conversions", "revenue"]),
+  month: monthSchema,
+  value: z.number().min(0),
+});
+
+/**
+ * Zápis základního čísla (imprese, kliky, konverze, tržby), které potřebuje
+ * poměrový ukazatel položky. Když ukazatel ještě neexistuje, založí se — ale jen
+ * tehdy, když ho nějaký poměrový ukazatel téže položky opravdu potřebuje. Bez
+ * té podmínky by šlo přes „skutečnost" zakládat libovolné ukazatele, což je
+ * struktura plánu.
+ */
+export async function setBaseMetricActual(raw: z.input<typeof baseActualInput>): Promise<Result> {
+  try {
+    const data = baseActualInput.parse(raw);
+    const me = await currentPrincipal();
+    const c = await tacticCoords(data.tacticId);
+    assertCan(me, "write", at(c, "actuals", data.month));
+
+    const own = await db.select().from(metrics).where(eq(metrics.tacticId, data.tacticId));
+    let metric = own.find((m) => baseOf(m.name) === data.base);
+    if (!metric) {
+      const needed = own.some((m) => {
+        const d = derivedOf(m.name);
+        return d && DERIVED[d].needs.includes(data.base as BaseKey);
+      });
+      if (!needed) return { ok: false, error: "Tenhle ukazatel u položky není." };
+      const slot = Math.max(-1, ...own.map((m) => m.slot)) + 1;
+      [metric] = await db.insert(metrics)
+        .values({ tacticId: data.tacticId, name: BASE[data.base].name, unit: BASE[data.base].unit, kind: "cumulative", slot })
+        .returning();
+      await log(me!.id, "plan", [`Doplněn ukazatel „${metric.name}" u ${c.channel} (potřebuje ho poměrový ukazatel)`]);
+    }
+    const res = await setMetricActual({ metricId: metric.id, month: data.month, value: data.value });
+    revalidatePath("/vyplnit");
+    return res;
   } catch (e) {
     return fail(e);
   }
@@ -712,6 +758,8 @@ export async function recentChanges(limit = 40) {
 const tacticPatch = z.object({
   tacticId: z.string().min(1),
   channel: z.string().max(120).optional(),
+  /** krátký název pro klienta; prázdný = automaticky z kanálu */
+  label: z.string().max(80).optional(),
   mediaType: z.enum(["Paid", "Owned", "Earned"]).optional(),
   messageLineId: z.string().min(1).optional(),
 });
@@ -747,17 +795,22 @@ export async function updateTactic(raw: z.input<typeof tacticPatch>): Promise<Re
     if (data.mediaType && data.mediaType !== before.mediaType) {
       items.push(`Typ média ${before.channel}: ${before.mediaType} → ${data.mediaType}`);
     }
+    const label = data.label === undefined ? undefined : data.label.trim() || null;
+    if (label !== undefined && label !== before.label) {
+      items.push(`Krátký název ${before.channel}: „${before.label ?? "automaticky"}" → „${label ?? "automaticky"}"`);
+    }
     if (!items.length && !data.messageLineId) return { ok: true };
 
     const [full] = await db.select().from(tactics).where(eq(tactics.id, data.tacticId));
     await pushUndo(me!.id, items[0] ?? `Přeřazena taktika ${before.channel}`, [
-      { t: "tactic", tacticId: full.id, channel: full.channel, mediaType: full.mediaType, messageLineId: full.messageLineId },
+      { t: "tactic", tacticId: full.id, channel: full.channel, mediaType: full.mediaType, messageLineId: full.messageLineId, label: full.label },
     ]);
 
     await db
       .update(tactics)
       .set({
         ...(data.channel !== undefined ? { channel: data.channel } : {}),
+        ...(label !== undefined ? { label } : {}),
         ...(data.mediaType ? { mediaType: data.mediaType } : {}),
         ...(data.messageLineId ? { messageLineId: data.messageLineId } : {}),
       })
@@ -1799,6 +1852,7 @@ export async function saveTargetGroup(raw: z.input<typeof tgInput>): Promise<Res
       await log(me!.id, "plan", [`Založena cílová skupina ${data.name} (${kc(data.universe)} osob)`]);
     }
     revalidatePath("/");
+    revalidatePath("/nastaveni");
     return { ok: true };
   } catch (e) {
     return fail(e);

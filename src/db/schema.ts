@@ -239,6 +239,9 @@ export const tactics = pgTable(
     id: text("id").primaryKey().$defaultFn(createId),
     messageLineId: text("message_line_id").notNull().references(() => messageLines.id, { onDelete: "cascade" }),
     channel: text("channel").notNull(),
+    /** Krátký název pro klienta a souhrny. NULL = zkrátí se automaticky z kanálu
+     *  (displayName). Kanál zůstává celý — podle něj se pozná agenturní práce. */
+    label: text("label"),
     mediaType: mediaTypeEnum("media_type").notNull(),
     channelType: channelTypeEnum("channel_type").notNull().default("Digital"),
     /** NULL = použije se cílová skupina plánu. */

@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setActualSpend, setPlannedBudget, setMetricActual } from "@/lib/actions";
+import { setActualSpend, setPlannedBudget, setMetricActual, setBaseMetricActual } from "@/lib/actions";
+import { DERIVED, type ResolvedMetric } from "@/lib/metrics";
 import { kc, num, parseNum } from "@/lib/period";
 import type { FillRow } from "@/lib/queries";
 
@@ -41,6 +42,8 @@ export function FillForm({
 }) {
   const router = useRouter();
   const [data, setData] = useState(rows);
+  // po uložení přijdou ze serveru čerstvá data — dopočtené CPA/CPM i nově založené ukazatele
+  useEffect(() => setData(rows), [rows]);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -62,7 +65,7 @@ export function FillForm({
 
   const shown = data.filter((r) =>
     (group === "all" || (group === "online") === r.online) &&
-    (!q || `${r.channel} ${r.block}`.toLowerCase().includes(q.toLowerCase())) &&
+    (!q || `${r.name} ${r.channel} ${r.block}`.toLowerCase().includes(q.toLowerCase())) &&
     (!onlyMissing || statusOf(r, month, currentMonth) === "missing") &&
     // řádek bez plánu i bez možnosti zápisu v tomhle měsíci nemá smysl ukazovat
     (r.months[month].planned > 0 || r.months[month].actual !== null || r.months[month].canPlan));
@@ -171,11 +174,16 @@ export function FillForm({
                       patch(r.id, month, { actual: v });
                       save(actKey, () => setActualSpend({ tacticId: r.id, month, amount: v }), () => patch(r.id, month, { actual: before }));
                     } : null}
-                    onMetric={c.canActual ? (metricId, v) => {
+                    onMetric={c.canActual ? (metric, v) => {
                       setData((d) => d.map((x) => x.id !== r.id ? x : {
-                        ...x, metrics: x.metrics.map((mt) => mt.id !== metricId ? mt : { ...mt, actual: { ...mt.actual, [month]: v } }),
+                        ...x, metrics: x.metrics.map((mt) => mt !== metric ? mt : { ...mt, actual: { ...mt.actual, [month]: v } }),
                       }));
-                      save(`${metricId}|${month}`, () => setMetricActual({ metricId, month, value: v }), () => router.refresh());
+                      // základní ukazatel, který zatím neexistuje, se založí prvním zápisem
+                      save(`${metric.id ?? metric.base}|${month}`,
+                        () => metric.id
+                          ? setMetricActual({ metricId: metric.id, month, value: v })
+                          : setBaseMetricActual({ tacticId: r.id, base: metric.base!, month, value: v }),
+                        () => router.refresh());
                     } : null}
                     planKey={planKey} actKey={actKey}
                   />
@@ -204,7 +212,7 @@ function FillRowView({
   r: FillRow; month: string; st: Status; saved: string | null;
   onPlan: ((v: number) => void) | null;
   onActual: ((v: number) => void) | null;
-  onMetric: ((metricId: string, v: number) => void) | null;
+  onMetric: ((metric: ResolvedMetric, v: number) => void) | null;
   planKey: string; actKey: string;
 }) {
   const c = r.months[month];
@@ -212,7 +220,7 @@ function FillRowView({
     <>
       <tr>
         <td>
-          <div style={{ fontWeight: 500 }}>{r.channel}</div>
+          <div style={{ fontWeight: 500 }} title={r.name !== r.channel ? r.channel : undefined}>{r.name}</div>
           <div className="share">{r.block} · {r.channelType}</div>
         </td>
         <td className="r">
@@ -239,13 +247,26 @@ function FillRowView({
         <tr className="fill-metrics">
           <td colSpan={4}>
             <span className="share">Výsledky:</span>
-            {r.metrics.map((mt) => (
-              <label key={mt.id} className="fill-metric">
+            {r.metrics.filter((mt) => !mt.derived).map((mt) => (
+              <label key={mt.id ?? mt.base} className="fill-metric">
                 <span>{mt.name}{mt.unit ? ` (${mt.unit})` : ""}</span>
-                <NumInput value={mt.actual[month]} onCommit={(v) => onMetric(mt.id, v)} label={`${mt.name} ${r.channel}`} />
+                <NumInput value={mt.actual[month]} onCommit={(v) => onMetric(mt, v)} label={`${mt.name} ${r.channel}`} />
                 {mt.target[month] ? <span className="share">cíl {num(mt.target[month])}</span> : null}
               </label>
             ))}
+            {/* poměrové ukazatele se nezadávají — ukážou se spočtené */}
+            {r.metrics.filter((mt) => mt.derived).map((mt) => {
+              const v = mt.actual[month];
+              const d = DERIVED[mt.derived!];
+              return (
+                <span key={mt.id ?? mt.name} className="fill-metric fill-derived" title={`Počítá se: ${d.formula}`}>
+                  <span>{mt.name}</span>
+                  <b>{v != null ? `${num(Math.round(v * 100) / 100) || "0"} ${mt.unit}` : "—"}</b>
+                  {v == null && <span className="share">spočte se z čerpání a čísel vlevo</span>}
+                  {mt.target[month] ? <span className="share">cíl {num(mt.target[month])}</span> : null}
+                </span>
+              );
+            })}
           </td>
         </tr>
       )}

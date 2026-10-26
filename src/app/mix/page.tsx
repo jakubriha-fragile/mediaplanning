@@ -38,7 +38,7 @@ export default async function MixPage({ searchParams }: { searchParams: Promise<
 
   return (
     <Chrome active="mix" user={chrome} planId={planId} title={{ client: plan.clientName, period: planTitle(plan) }}>
-      <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />
+      {allPlans.length > 1 && <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />}
       <MixView
         mix={mix}
         planName={plan.name}

@@ -18,7 +18,7 @@ export type UndoOp =
   | { t: "metricTarget"; metricId: string; month: string; target: number }
   | { t: "metricActual"; metricId: string; month: string; value: number }
   | { t: "note"; tacticId: string; month: string; text: string }
-  | { t: "tactic"; tacticId: string; channel: string; mediaType: "Paid" | "Owned" | "Earned"; messageLineId: string }
+  | { t: "tactic"; tacticId: string; channel: string; mediaType: "Paid" | "Owned" | "Earned"; messageLineId: string; label?: string | null }
   | { t: "line"; id: string; message: string; audience: string; phase: "Awareness" | "Consideration" | "Conversion"; code: string }
   | { t: "positions"; items: Array<{ id: string; position: number; messageLineId: string }> }
   | { t: "dropTactic"; id: string }
@@ -88,7 +88,11 @@ export async function applyOps(ops: UndoOp[]) {
         break;
       case "tactic":
         await db.update(tactics)
-          .set({ channel: op.channel, mediaType: op.mediaType, messageLineId: op.messageLineId })
+          .set({
+            channel: op.channel, mediaType: op.mediaType, messageLineId: op.messageLineId,
+            // starší záznamy krátký název neznají — ty ho nechají být
+            ...(op.label !== undefined ? { label: op.label } : {}),
+          })
           .where(eq(tactics.id, op.tacticId));
         break;
       case "line":

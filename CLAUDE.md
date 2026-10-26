@@ -45,6 +45,9 @@ src/lib/dashboard.ts     data pro Přehled (/prehled): zásah a frekvence v čas
                          filtry (?oblast, ?medium), modelový scénář „méně TV v přetížení"
 src/lib/costKind.ts      média / agenturní práce / smíšené — podle názvu položky
 src/lib/mix.ts           data pro Finální mix (/mix): média, měsíce, oblasti, modelový zásah
+src/lib/metrics.ts       poměrové ukazatele (CPM, CPC, CPA, CTR, ROAS) se počítají z čerpání a základních čísel
+src/lib/displayName.ts   krátký název položky (tactic.label, jinak bez poznámek v závorkách)
+src/components/ClientPlan.tsx  Plán pro klienta — jen čtení, offline/online, bez agenturních nástrojů
 src/app/vyplnit/         K vyplnění — jen položky, kam smí uživatel zapisovat (hlavní stránka klienta)
 src/components/AccessEditor.tsx   přidělení přístupu: plán → co smí → na čem (offline/online/položky)
 src/components/ReachCalibration.tsx  zadání naměřených vln (TRP + zásah 1+) → křivka (fitCurve)
@@ -91,6 +94,11 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
 
 6. **Poměrové ukazatele (CPM, CPA, CTR, ROAS) se nikdy neškálují časem.**
    Porovnávají se přímo s plánem. Přes měsíce se váží skutečným čerpáním.
+   **A nezadávají se** — počítají se v `resolveMetrics` z čerpání a základních
+   čísel; `setMetricActual` zápis do poměrového ukazatele odmítne.
+   `setBaseMetricActual` smí založit chybějící základní ukazatel jen tehdy,
+   když ho potřebuje poměrový ukazatel téže položky (jinak by přes skutečnost
+   šlo zakládat strukturu plánu).
 
 7. **Vrácení zpět ukládá PŮVODNÍ HODNOTU**, ne opačnou operaci. A je to zápis:
    `undoLast` každou operaci znovu ověří přes `assertCanUndo` proti dnešním
@@ -105,7 +113,10 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    (viz `recentChanges`). Přesuny taktik a bloků mezi plány jsou zakázané.
 
 9. **Klient má vlastní pohled** (navigace: K vyplnění, Plán, Finální mix; po přihlášení
-   jde rovnou na K vyplnění) (`role === "CLIENT"` → `clientView` v `PlanTable`,
+   jde rovnou na K vyplnění). Plán klienta je samostatná komponenta `ClientPlan`,
+   ne `PlanTable` s výjimkami; offline/online místo Paid/Owned/Earned (u BENU je vše
+   Paid — agentura P/O/E chce vidět dál), zásah jen při `seesWholePlan`.
+   Frekvence je všude TÝDNÍ (`weeksIn`/`weeksOf` v period.ts). (`role === "CLIENT"` → `clientView` v `PlanTable`,
    `ReachPanel`, `PerfTable`). Nevidí agenturní sloupce (Jednotka, Cena), dopočty
    GRP v buňkách, odborný panel zásahu ani texty typu „před sdílením s klientem".
    Komentář agentury nesmí měnit ani na serveru (`setAccountNote`). Výhrada
@@ -150,7 +161,7 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
 
 ```bash
 npx tsc --noEmit
-npm test                                    # 52 testů oprávnění + 74 cross-média
+npm test                                    # 52 testů oprávnění + 91 cross-média
 npx next build
 env -u DATABASE_URL -u AUTH_SECRET npx next build   # build nesmí potřebovat proměnné
 ```

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ReachSummary } from "@/lib/queries";
-import { kc, big, pct, monthShort } from "@/lib/period";
+import { kc, big, pct, monthShort, weeksIn, weeksOf } from "@/lib/period";
 import { effectiveReach, frequencyOf } from "@/lib/crossmedia";
 
 const TYPE_COLOR: Record<string, string> = {
@@ -17,6 +17,12 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 const freq = (f: number) => (f ? f.toFixed(1).replace(".", ",") + "×" : "—");
+/**
+ * Frekvence všude TÝDNĚ — stejně jako v Přehledu. Dřív se tu ukazovala za celé
+ * období (stovky ×), což vedle „4,6× týdně" v Přehledu působilo jako chyba.
+ * Kontakty za období ÷ zásah ÷ počet týdnů období.
+ */
+const weekly = (grp: number, reach: number, weeks: number) => (weeks > 0 ? frequencyOf(grp, reach) / weeks : 0);
 
 /** Kolik kontaktů už se počítá jako účinný zásah — 3+ je zvyk, ne zákon. */
 const MIN_CONTACTS = [2, 3, 4, 5] as const;
@@ -73,6 +79,7 @@ export function ReachPanel({
   // se počítá z čistého, ne ze součtu médií — jinak by překryv počítal dvakrát
   const totalFreq = frequencyOf(total.grp, total.net);
   const totalEff = effectiveReach(total.net, totalFreq, minC);
+  const weeks = weeksOf(months.map((m) => m.month));
 
   const live = months.filter((m) => m.net > 0);
   const peak = Math.max(0.01, ...months.map((m) => m.gross));
@@ -106,9 +113,9 @@ export function ReachPanel({
             </div>
             {!SHOW_EFFECTIVE && (
               <div className="kpi">
-                <div className="k">Průměrná frekvence</div>
-                <div className="v num">{freq(totalFreq)}</div>
-                <div className="d">kolikrát reklamu uvidí zasažený</div>
+                <div className="k">Frekvence týdně</div>
+                <div className="v num">{freq(weekly(total.grp, total.net, weeks))}</div>
+                <div className="d">kolikrát týdně reklamu uvidí zasažený (průměr období)</div>
               </div>
             )}
             {SHOW_EFFECTIVE && <div className="kpi">
@@ -158,7 +165,7 @@ export function ReachPanel({
                   <th>Nosič</th>
                   <th className="r">GRP</th>
                   <th className="r">Zásah</th>
-                  <th className="r">Frekvence</th>
+                  <th className="r" title="Průměrně týdně za celé období">Frekvence týdně</th>
                   {SHOW_EFFECTIVE && <th className="r">Zásah {minC}+</th>}
                   <th className="r">Rozpočet (Kč)</th>
                   <th className="r">Podíl rozpočtu</th>
@@ -175,7 +182,7 @@ export function ReachPanel({
                     </td>
                     <td className="r num">{Math.round(b.grp).toLocaleString("cs-CZ")}</td>
                     <td className="r num">{pct(b.reach)}</td>
-                    <td className="r share num">{freq(frequencyOf(b.grp, b.reach))}</td>
+                    <td className="r share num">{freq(weekly(b.grp, b.reach, weeks))}</td>
                     {SHOW_EFFECTIVE && <td className="r num">{pct(effectiveReach(b.reach, frequencyOf(b.grp, b.reach), minC))}</td>}
                     <td className="r num">{kc(b.budget)}</td>
                     <td className="r share num">{total.budget ? pct(b.budget / total.budget) : "—"}</td>
@@ -204,6 +211,7 @@ export function ReachPanel({
                     <th>Měsíc</th>
                     <th className="r">Čistý zásah</th>
                     {SHOW_EFFECTIVE && <th className="r">Zásah {minC}+</th>}
+                    <th className="r">Frekvence týdně</th>
                     <th className="r">Překryv</th>
                     <th className="r">GRP</th>
                     <th className="r">Rozpočet (Kč)</th>
@@ -216,6 +224,7 @@ export function ReachPanel({
                       <td>{monthShort(m.month)}</td>
                       <td className="r num">{m.net ? pct(m.net) : "—"}</td>
                       {SHOW_EFFECTIVE && <td className="r num">{m.net ? pct(effectiveReach(m.net, frequencyOf(m.grp, m.net), minC)) : "—"}</td>}
+                      <td className="r num">{m.net ? freq(weekly(m.grp, m.net, weeksIn(m.month))) : "—"}</td>
                       <td className="r share num">{m.overlap ? pct(m.overlap) : "—"}</td>
                       <td className="r num">{m.grp ? Math.round(m.grp).toLocaleString("cs-CZ") : "—"}</td>
                       <td className="r num">{m.budget ? kc(m.budget) : "—"}</td>
@@ -268,6 +277,7 @@ function ClientReach({
   const [open, setOpen] = useState(false);
   const f = frequencyOf(total.grp, total.net);
   const eff3 = effectiveReach(total.net, f, 3);
+  const fWeek = weekly(total.grp, total.net, weeksOf(months.map((m) => m.month)));
   const live = months.filter((m) => m.net > 0);
 
   return (
@@ -298,9 +308,9 @@ function ClientReach({
               <div className="d num">{big(eff3 * universe)} osob</div>
             </div>}
             <div className="kpi">
-              <div className="k">Průměrná frekvence</div>
-              <div className="v num">{f ? f.toFixed(1).replace(".", ",") + "×" : "—"}</div>
-              <div className="d">kolikrát reklamu uvidí zasažený</div>
+              <div className="k">Frekvence týdně</div>
+              <div className="v num">{freq(fWeek)}</div>
+              <div className="d">kolikrát týdně reklamu uvidí zasažený</div>
             </div>
           </div>
 

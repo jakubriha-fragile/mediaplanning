@@ -1,7 +1,7 @@
 import type { ChannelType, PlanUnit } from "@/db/schema";
 import { derive, combineReach, reachFromGrp } from "@/lib/crossmedia";
 import { costKind, type CostKind } from "@/lib/costKind";
-import { monthsBetween } from "@/lib/period";
+import { monthsBetween, weeksIn } from "@/lib/period";
 import { canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
 import { getPlan, loadPlan, crossContext, getThemes, sharesByTactic, type CrossContext } from "@/lib/queries";
 
@@ -84,15 +84,6 @@ type Cell = {
   shares: Array<{ themeId: string; share: number }>;
 };
 
-/**
- * Týdnů v měsíci (dny ÷ 7). Frekvence se ukazuje týdně, protože tak o tlaku
- * mluví plánovači; plán je ale po měsících, takže jde o rovnoměrné rozložení
- * měsíce do týdnů — skutečný průběh uvnitř měsíce z dat neplyne.
- */
-function weeksIn(month: string) {
-  const [y, m] = month.split("-").map(Number);
-  return new Date(Date.UTC(y, m, 0)).getUTCDate() / 7;
-}
 /** Kontakty na zasaženou ženu za týden. */
 const weekly = (grp: number, net: number, month: string) => (net > 0 ? grp / 100 / net / weeksIn(month) : 0);
 

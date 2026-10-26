@@ -41,7 +41,7 @@ export default async function PerfPage({
   return (
     <Chrome active="plneni" user={{ name: user.name, email: user.email, role: user.role }}
       planId={planId} title={{ client: plan.clientName, period: planTitle(plan) }}>
-      <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />
+      {allPlans.length > 1 && <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />}
       {me.role === "CLIENT" ? (
         <div className="banner info">
           <span>

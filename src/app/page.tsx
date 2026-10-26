@@ -6,11 +6,13 @@ import {
 } from "@/lib/queries";
 import { myUndoStack } from "@/lib/actions";
 import { can, seesWholePlan } from "@/lib/permissions";
-import { planTitle, monthsBetween, monthLabel, quarterGroups, periodLabel, kc, pct } from "@/lib/period";
+import { planTitle, monthsBetween, monthLabel, monthShort, quarterGroups, periodLabel, kc, pct } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
 import { PlanSwitcher } from "@/components/PlanSwitcher";
 import { ReachPanel } from "@/components/ReachPanel";
 import { PlanTable, type PlanRow } from "@/components/PlanTable";
+import { ClientPlan } from "@/components/ClientPlan";
+import { channelGroupOf } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +79,64 @@ export default async function PlanPage({
   const readOnlyPlan = !rows.some((r) => months.some((m) => r.editable[m]));
   const tgName = tgs.find((t) => t.id === plan.targetGroupId)?.name ?? "bez cílové skupiny";
 
+  // klient: čitelný přehled bez agenturních nástrojů — offline/online místo
+  // Paid/Owned/Earned, zásah jen když vidí celý plán (jinak by „0 %" mátlo)
+  if (me.role === "CLIENT") {
+    const whole = seesWholePlan(me, planId);
+    const sumOf = (online: boolean) => rows.filter((r) => (channelGroupOf(r.channelType) === "online") === online)
+      .reduce((s, r) => s + months.reduce((a, m) => a + r.budgets[m], 0), 0);
+    const fillable = (await getFillRows(me, planId)).length > 0;
+    const crossYear = plan.periodStart.slice(0, 4) !== plan.periodEnd.slice(0, 4);
+    return (
+      <Chrome active="plan" user={{ name: user.name, email: user.email, role: user.role }}
+        planId={planId} title={{ client: plan.clientName, period: planTitle(plan) }}>
+        {allPlans.length > 1 && <PlanSwitcher plans={allPlans} current={planId} canCreate={false} />}
+        <div className="kpis" style={{ marginTop: 12 }}>
+          <div className="kpi">
+            <div className="k">{whole ? `Plán ${periodName}` : "Vaše položky"}</div>
+            <div className="v num">{kc(total)}<span className="cur">Kč</span></div>
+            <div className="d">{rows.length} {rows.length === 1 ? "položka" : rows.length < 5 ? "položky" : "položek"}</div>
+          </div>
+          {[false, true].map((online) => {
+            const v = sumOf(online);
+            if (!v && !whole) return null;
+            return (
+              <div className="kpi" key={String(online)}>
+                <div className="k">{online ? "Online" : "Offline"}</div>
+                <div className="v num">{kc(v)}<span className="cur">Kč</span></div>
+                <div className="d num">{total ? pct(v / total) : "—"}</div>
+              </div>
+            );
+          })}
+          <div className="kpi">
+            <div className="k">Čerpáno</div>
+            <div className="v num">{kc(spent)}<span className="cur">Kč</span></div>
+            <div className="d num">{total ? pct(spent / total) : "—"} plánu</div>
+          </div>
+        </div>
+        {whole && (
+          <ReachPanel planId={planId} showCalculator={false} clientView months={reach.months} total={reach.total}
+            universe={reach.universe} hasUniverse={reach.hasUniverse} targetGroupName={tgName} />
+        )}
+        <div className="banner info">
+          <span>
+            Mediaplán připravila agentura Fragile. <b>Částky jsou včetně agenturního fee.</b>{" "}
+            {fillable ? <>Svoje položky vyplňujete v záložce <a href={`/vyplnit?plan=${planId}`}>K vyplnění</a>. </> : null}
+            Souhrn najdete ve <a href={`/mix?plan=${planId}`}>Finálním mixu</a>; s dotazy se obraťte na svého accounta.
+          </span>
+        </div>
+        <ClientPlan
+          rows={rows.map((r) => ({
+            id: r.id, name: r.name, full: r.channel, block: r.campaign, channelType: r.channelType,
+            online: channelGroupOf(r.channelType) === "online", budgets: r.budgets,
+          }))}
+          months={months}
+          monthLabels={Object.fromEntries(months.map((m) => [m, crossYear ? `${monthShort(m)} ${m.slice(2, 4)}` : monthShort(m)]))}
+        />
+      </Chrome>
+    );
+  }
+
   return (
     <Chrome active="plan" user={{ name: user.name, email: user.email, role: user.role }}
       planId={planId} title={{ client: plan.clientName, period: planTitle(plan) }}>
@@ -116,8 +176,7 @@ export default async function PlanPage({
 
       <ReachPanel
         planId={planId}
-        showCalculator={me.role !== "CLIENT"}
-        clientView={me.role === "CLIENT"}
+        showCalculator
         months={reach.months}
         total={reach.total}
         universe={reach.universe}
@@ -125,7 +184,7 @@ export default async function PlanPage({
         targetGroupName={tgName}
       />
 
-      {readOnlyPlan && me.role !== "CLIENT" && (
+      {readOnlyPlan && (
         <div className="banner info">
           <span>
             <b>Plán máte jen ke čtení.</b> Rozpočty mění media plánovač. Skutečné čerpání vyplňujete
@@ -134,22 +193,12 @@ export default async function PlanPage({
         </div>
       )}
 
-      {me.role === "CLIENT" ? (
-        <div className="banner info">
-          <span>
-            Mediaplán připravila agentura Fragile. <b>Částky jsou včetně agenturního fee.</b>{" "}
-            Svoje položky vyplňujete v záložce{" "}
-            <a href={`/vyplnit?plan=${planId}`}>K vyplnění</a>; s dotazy se obraťte na svého accounta.
-          </span>
-        </div>
-      ) : (
-        <div className="banner">
-          <span>
-            <b>Pracovní podklad.</b> Rozdělení rozpočtu, mediamix, odhady zásahu i částky vyžadují
-            validaci media specialistou před sdílením s klientem. Částky jsou vč. agenturního fee.
-          </span>
-        </div>
-      )}
+      <div className="banner">
+        <span>
+          <b>Pracovní podklad.</b> Rozdělení rozpočtu, mediamix, odhady zásahu i částky vyžadují
+          validaci media specialistou před sdílením s klientem. Částky jsou vč. agenturního fee.
+        </span>
+      </div>
 
       <PlanTable
         rows={rows as unknown as PlanRow[]}
@@ -161,7 +210,6 @@ export default async function PlanPage({
         periodName={periodName}
         canEditPlan={canEditPlan}
         undoLabel={undo[0]?.label ?? null}
-        clientView={me.role === "CLIENT"}
         themes={themeList.map((t) => ({ id: t.id, name: t.name }))}
       />
     </Chrome>

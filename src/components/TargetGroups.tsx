@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { saveTargetGroup } from "@/lib/actions";
 import { kc } from "@/lib/period";
 
@@ -18,7 +19,10 @@ export type TargetGroupRow = {
  * proto je editovatelná a u každé skupiny je vidět zdroj.
  */
 export function TargetGroups({ rows, canEdit }: { rows: TargetGroupRow[]; canEdit: boolean }) {
+  const router = useRouter();
   const [data, setData] = useState(rows);
+  // po založení skupiny přijde ze serveru nový seznam — bez toho nová skupina „zmizela"
+  useEffect(() => setData(rows), [rows]);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -95,6 +99,7 @@ export function TargetGroups({ rows, canEdit }: { rows: TargetGroupRow[]; canEdi
                   startTransition(async () => {
                     const res = await saveTargetGroup({ name, universe, clientId: null, source: "", note: "" });
                     if (!res.ok) setError(res.error ?? "Založení se nezdařilo.");
+                    else { setError(null); router.refresh(); }
                   });
                 }} />
             )}
