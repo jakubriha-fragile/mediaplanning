@@ -40,6 +40,8 @@ export type Dashboard = {
   months: string[];
   universe: number;
   freqLimit: number;
+  /** zásah TV je z naměřených dat TV nákupu, ne předpoklad */
+  tvCalibrated: boolean;
   points: MonthPoint[];
   total: {
     cost: number;
@@ -236,6 +238,7 @@ export async function getDashboard(
     months,
     universe,
     freqLimit: limit,
+    tvCalibrated: ctx.calibrated("TV", null),
     points,
     total: {
       cost,

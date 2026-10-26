@@ -47,6 +47,7 @@ export function Overview({
   const sp = useSearchParams();
   const [pending, start] = useTransition();
   const [limitDraft, setLimitDraft] = useState(String(data.freqLimit));
+  const [allTodos, setAllTodos] = useState(false);
 
   const setFilter = (key: "oblast" | "medium", value: string | null) => {
     const q = new URLSearchParams(sp.toString());
@@ -119,34 +120,10 @@ export function Overview({
   }
 
   const maxCell = Math.max(1, ...data.matrix.flatMap((r) => Object.values(r.byType).map((v) => v ?? 0)));
+  const topTheme = [...data.matrix].filter((r) => r.id !== UNASSIGNED).sort((a, b) => b.cost - a.cost)[0];
 
   return (
     <div className={`db ${pending ? "db-pending" : ""}`}>
-      {/* filtry a úplnost dat */}
-      <div className="db-bar">
-        <label className="db-filter">Oblast
-          <select value={filter.themeId ?? ""} onChange={(e) => setFilter("oblast", e.target.value || null)}>
-            <option value="">všechny</option>
-            {themes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </label>
-        <label className="db-filter">Médium
-          <select value={filter.channelType ?? ""} onChange={(e) => setFilter("medium", e.target.value || null)}>
-            <option value="">všechna</option>
-            {data.matrixTypes.map((t) => <option key={t} value={t}>{tl(t)}</option>)}
-          </select>
-        </label>
-        {(filter.themeId || filter.channelType) && (
-          <button className="db-clear" onClick={() => router.push(`${path}?plan=${planId}`, { scroll: false })}>Zrušit filtr</button>
-        )}
-        <div className="db-coverage" title="Podíl mediálního rozpočtu, ke kterému má plán GRP nebo imprese. Agenturní práce se nepočítá.">
-          Model počítá se <b>{pct0(coverage)}</b> mediálního rozpočtu
-          <span className="db-meter"><i style={{ width: `${Math.round(coverage * 100)}%` }} /></span>
-          {total.estimated > 0 && <span className="db-muted">· z toho {pct0(total.estimated / (media || 1))} odhadem z ceníku</span>}
-          {total.mediaNoData > 0 && <a href={`/kalkulacka?plan=${planId}#cenik`}>Doplnit ceník →</a>}
-        </div>
-      </div>
-
       {/* první obrazovka: věta + tři čísla */}
       <section className="db-hero">
         <div className="db-card db-lead">
@@ -159,7 +136,24 @@ export function Overview({
           </p>
           <span className="db-sub">{periodName} · modelový odhad <Help>Zásah = kolik lidí z cílové skupiny uvidí reklamu aspoň jednou.
             Lidé, kteří vidí víc médií, se počítají jen jednou. Frekvence = kolikrát ji zasažený člověk uvidí za týden
-            (měsíční kontakty rozložené rovnoměrně do týdnů). Zásah TV je předpoklad: téměř celá cílovka.</Help></span>
+            (měsíční kontakty rozložené rovnoměrně do týdnů). {data.tvCalibrated
+              ? "Zásah TV vychází z naměřených vln TV nákupu."
+              : "Zásah TV je zatím předpoklad (téměř celá cílovka), dokud nepřijdou data od TV nákupu."}</Help></span>
+          {/* filtry patří k větě, kterou mění — ne do samostatné lišty nad stránkou */}
+          <div className="db-filters">
+            <span className="db-muted">Zobrazit</span>
+            <select aria-label="Oblast" value={filter.themeId ?? ""} onChange={(e) => setFilter("oblast", e.target.value || null)}>
+              <option value="">všechny oblasti</option>
+              {themes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <select aria-label="Médium" value={filter.channelType ?? ""} onChange={(e) => setFilter("medium", e.target.value || null)}>
+              <option value="">všechna média</option>
+              {data.matrixTypes.map((t) => <option key={t} value={t}>{tl(t)}</option>)}
+            </select>
+            {(filter.themeId || filter.channelType) && (
+              <button className="linkbtn" onClick={() => router.push(`${path}?plan=${planId}`, { scroll: false })}>zrušit filtr</button>
+            )}
+          </div>
         </div>
         <div className="db-card db-kpi">
           <span className="db-label">Rozpočet včetně fee</span>
@@ -218,7 +212,7 @@ export function Overview({
           <p className="db-note">Doporučení se počítají z plánu a modelu zásahu.</p>
           {todos.length ? (
             <ul className="db-todos">
-              {todos.map((t) => (
+              {(allTodos ? todos : todos.slice(0, 3)).map((t) => (
                 <li key={t.title} className={t.alert ? "is-alert" : ""}>
                   <b>{t.title}</b>
                   <span>{t.text}</span>
@@ -227,12 +221,21 @@ export function Overview({
               ))}
             </ul>
           ) : <p className="db-note">Plán je vyvážený: žádné přetížení ani chybějící data.</p>}
+          {todos.length > 3 && (
+            <button className="linkbtn" style={{ marginTop: 12 }} onClick={() => setAllTodos((v) => !v)}>
+              {allTodos ? "méně" : `další doporučení (${todos.length - 3})`}
+            </button>
+          )}
         </section>
       </div>
 
-      <section className="db-card">
-        <h3>Kam jdou peníze</h3>
-        <p className="db-note">Tematické oblasti × média. Klik na oblast vyfiltruje celý přehled.</p>
+      {/* matice je pro hledání souvislostí, ne pro první pohled — otevře se sama, když je vybraná oblast */}
+      <details className="db-card db-fold" open={!!filter.themeId}>
+        <summary>
+          Kam jdou peníze — oblasti × média
+          {topTheme && <span className="db-muted"> · nejvíc {topTheme.name} ({pct0(topTheme.cost / (total.cost || 1))})</span>}
+        </summary>
+        <p className="db-note">Klik na oblast vyfiltruje celý přehled.</p>
         <div className="db-tablewrap">
           <table className="db-table db-matrix">
             <thead>
@@ -268,7 +271,7 @@ export function Overview({
             </tbody>
           </table>
         </div>
-      </section>
+      </details>
 
       <details className="db-card db-drawer">
         <summary>Jak to počítáme, předpoklady a slovníček</summary>
@@ -285,13 +288,20 @@ export function Overview({
             <h4>Předpoklady</h4>
             <ul className="db-list">
               <li>Cílová skupina {tgName}, {mil(data.universe)} osob.</li>
-              <li>Křivky zásahu a koeficienty překryvu jsou výchozí odhady, ne kalibrovaná data.</li>
+              <li>Koeficienty překryvu a křivky zásahu ostatních médií jsou výchozí odhady, ne kalibrovaná data.</li>
               <li>Frekvence je za týden: měsíční kontakty rozložené rovnoměrně do týdnů (plán je po měsících).</li>
-              <li>Zásah TV: předpoklad, že TV zasáhne téměř celou cílovku (rozhodnutí zadavatele, říjen 2026), dokud nebude TV report.</li>
+              <li>{data.tvCalibrated
+                ? "Zásah TV: z naměřených vln TV nákupu (Kalkulačka → Kalibrace zásahu)."
+                : "Zásah TV: předpoklad, že TV zasáhne téměř celou cílovku (rozhodnutí zadavatele, říjen 2026), dokud nepřijdou data od TV nákupu."}</li>
             </ul>
           </div>
           <div>
-            <h4>Chybí doručení</h4>
+            <h4>Úplnost dat</h4>
+            <p className="db-note" style={{ margin: "0 0 6px" }}>
+              Model počítá se <b>{pct0(coverage)}</b> mediálního rozpočtu
+              {total.estimated > 0 ? `, z toho ${pct0(total.estimated / (media || 1))} odhadem z ceníku` : ""}.
+              {total.mediaNoData > 0 && <> <a href={`/kalkulacka?plan=${planId}#cenik`}>Doplnit ceník →</a></>}
+            </p>
             <ul className="db-list">
               {data.missing.slice(0, 6).map((m) => (
                 <li key={m.channel}>{m.channel} <span className="db-muted">({mil(m.cost)} Kč{m.kind === "mixed" ? ", práce i média dohromady" : ""})</span></li>

@@ -167,13 +167,12 @@ jednotlivým médiem a sto procenty.
 
 ### Přehled
 
-První záložka pro agenturu (klient ji nevidí). Úvodní obrazovka odpoví bez rolování:
-jedna věta se zásahem a frekvencí, rozpočet, náklad na zasaženou osobu a počet přetížených
-měsíců; pod tím zásah a frekvence v jednom grafu se společnou osou měsíců a vpravo
-**Co s tím** — doporučení spočítaná modelem (např. kolik uvolní −30 % TRP v přetížených
-měsících). Níž matice **oblasti × média** (klik na oblast filtruje celý přehled) a sbalený
-panel s metodikou, předpoklady a slovníčkem. Pojmy jsou vysvětlené za otazníkem.
-Hranici přehlcení nastavuje plánovač u plánu.
+První stránka pro agenturu (klient ji nevidí), celá na jednu obrazovku: **jedna věta** se zásahem
+a týdenní frekvencí (vedle ní filtr oblasti a média), pod ní tři čísla — rozpočet, náklad na
+zasaženou osobu a počet přetížených měsíců — a pak graf zásahu a frekvence s doporučeními
+**Co s tím** (tři nejdůležitější, další na kliknutí). Matice **oblasti × média** je pod
+rozbalením a otevře se sama, když je vybraná oblast. Úplnost dat, předpoklady a slovníček jsou
+ve sbaleném panelu dole. Text o zásahu TV se řídí tím, jestli je křivka zkalibrovaná.
 
 ### Ceník pro odhad doručení
 

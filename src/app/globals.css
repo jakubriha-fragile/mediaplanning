@@ -840,3 +840,25 @@ table .btn, .toolbar .btn[style*="font-size: 11"] { min-height: 24px; padding: 0
 .banner { border-radius: var(--radius); }
 .shell > .banner:first-child { margin-top: 0; }
 .field input, .field select { height: var(--ctl-h); padding: 0 10px; font-size: 13px; }
+
+/* Přehled: filtry ve větě, matice pod rozbalením */
+.db-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; font-size: 12.5px; }
+.db-filters select {
+  font: inherit; font-size: 12.5px; color: var(--brand-ink); font-weight: 500; min-height: 28px;
+  border: 1px solid var(--line-strong); border-radius: var(--ctl-r); background: var(--surface); padding: 0 8px;
+}
+.db-fold summary { cursor: pointer; font-size: 14px; font-weight: 500; }
+.db-fold summary .db-muted { font-weight: 300; font-size: 12.5px; }
+.db-fold[open] summary { margin-bottom: 6px; }
+/* hlavní věta přes celou šířku, filtry vpravo vedle ní, tři čísla pod ní —
+   vedle levého menu by se věta ve čtvrtinovém sloupci lámala po dvou slovech */
+.db-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.db-hero .db-lead { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; align-items: end; }
+.db-hero .db-lead p { grid-column: 1; }
+.db-hero .db-lead .db-sub { grid-column: 1; }
+.db-hero .db-lead .db-filters { grid-column: 2; grid-row: 1 / span 2; margin: 0; align-self: end; }
+@media (max-width: 1000px) {
+  .db-hero { grid-template-columns: 1fr; }
+  .db-hero .db-lead { grid-template-columns: 1fr; }
+  .db-hero .db-lead .db-filters { grid-column: 1; grid-row: auto; }
+}

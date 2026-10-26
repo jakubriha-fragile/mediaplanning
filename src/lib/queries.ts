@@ -88,6 +88,8 @@ export async function getTargetGroups() {
 export type CrossContext = {
   universeOf: (tacticTgId: string | null) => number;
   curveOf: (ct: ChannelType, tacticTgId: string | null) => Curve;
+  /** křivka média je z naměřených dat (Kalibrace zásahu), ne předpoklad */
+  calibrated: (ct: ChannelType, tacticTgId: string | null) => boolean;
   dup: Record<string, number>;
   /**
    * Jednotková cena pro výpočet: zadaná cena, a když chybí, cena z ceníku
@@ -124,6 +126,11 @@ export async function crossContext(planTargetGroupId: string | null, clientId?: 
       const generic = real.find((c) => c.channelType === ct && c.targetGroupId === null);
       const found = exact ?? generic;
       return found ? { rMax: found.rMax, k: found.k } : DEFAULT_CURVE[ct] ?? DEFAULT_CURVE.Digital;
+    },
+    calibrated: (ct, tgId) => {
+      const target = tgId ?? planTargetGroupId;
+      return curves.some((c) => c.channelType === ct && c.source !== UNCALIBRATED_SOURCE &&
+        (c.targetGroupId === target || c.targetGroupId === null));
     },
     dup,
     priceFor: (row, driver, unitPrice) => {
