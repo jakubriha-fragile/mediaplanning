@@ -34,7 +34,7 @@ export default async function PlanPage({
 
   // klient přichází hlavně vyplňovat — bez výslovně vybraného plánu ho pošleme na jeho položky
   if (me.role === "CLIENT" && !sp.plan && planId && (await getFillRows(me, planId)).length) {
-    redirect(`/vyplnit?plan=${planId}`);
+    redirect(`/vysledky?plan=${planId}`);
   }
 
   if (!planId) {
@@ -121,7 +121,7 @@ export default async function PlanPage({
         <div className="banner info">
           <span>
             Mediaplán připravila agentura Fragile. <b>Částky jsou včetně agenturního fee.</b>{" "}
-            {fillable ? <>Svoje položky vyplňujete v záložce <a href={`/vyplnit?plan=${planId}`}>K vyplnění</a>. </> : null}
+            {fillable ? <>Svoje položky vyplňujete v záložce <a href={`/vysledky?plan=${planId}`}>K vyplnění</a>. </> : null}
             Souhrn najdete ve <a href={`/mix?plan=${planId}`}>Finálním mixu</a>; s dotazy se obraťte na svého accounta.
           </span>
         </div>
@@ -188,7 +188,7 @@ export default async function PlanPage({
         <div className="banner info">
           <span>
             <b>Plán máte jen ke čtení.</b> Rozpočty mění media plánovač. Skutečné čerpání vyplňujete
-            v záložce <a href={`/vyplnit?plan=${planId}`}>K vyplnění</a>, a to jen tam, kde k tomu máte oprávnění.
+            v záložce <a href={`/vysledky?plan=${planId}`}>Výsledky</a>, a to jen tam, kde k tomu máte oprávnění.
           </span>
         </div>
       )}

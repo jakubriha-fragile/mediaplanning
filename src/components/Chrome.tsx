@@ -12,15 +12,14 @@ const ROLE_LABEL: Record<string, string> = {
   VIEWER: "čtenář",
 };
 
-type Section = "prehled" | "plan" | "mix" | "plneni" | "vyplnit" | "kalkulacka" | "sprava" | "nastaveni";
+type Section = "prehled" | "plan" | "mix" | "vysledky" | "kalkulacka" | "sprava" | "nastaveni";
 
 /** Jednoduché ikony kreslené čarou — bez knihovny, barva z textu. */
 const ICON: Record<Section, string> = {
   prehled: "M4 19V10M10 19V5M16 19v-7M22 19H2",
   plan: "M3 5h18v14H3zM3 10h18M9 5v14",
   mix: "M12 3a9 9 0 1 0 9 9h-9z M14 2.5A8 8 0 0 1 21.5 10H14z",
-  plneni: "M4 12l5 5L20 6",
-  vyplnit: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
+  vysledky: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
   kalkulacka: "M6 3h12v18H6zM9 7h6M9 12h1M14 12h1M9 16h1M14 16h1",
   sprava: "M16 11a4 4 0 1 0-8 0M4 21a8 8 0 0 1 16 0",
   nastaveni: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2",
@@ -47,7 +46,7 @@ function groups(role: string): Array<{ title: string | null; items: Item[] }> {
     return [{
       title: null,
       items: [
-        { key: "vyplnit", href: "/vyplnit", label: "K vyplnění" },
+        { key: "vysledky", href: "/vysledky", label: "K vyplnění" },
         { key: "plan", href: "/", label: "Plán" },
         { key: "mix", href: "/mix", label: "Finální mix" },
       ],
@@ -65,8 +64,7 @@ function groups(role: string): Array<{ title: string | null; items: Item[] }> {
     {
       title: "Vyhodnocení",
       items: [
-        { key: "plneni", href: "/plneni", label: "Plnění" },
-        { key: "vyplnit", href: "/vyplnit", label: "K vyplnění" },
+        { key: "vysledky", href: "/vysledky", label: "Výsledky" },
       ],
     },
     {
@@ -77,8 +75,7 @@ function groups(role: string): Array<{ title: string | null; items: Item[] }> {
 }
 
 const PAGE_TITLE: Record<Section, string> = {
-  prehled: "Přehled", plan: "Plánování", mix: "Finální mix", plneni: "Plnění",
-  vyplnit: "K vyplnění", kalkulacka: "Kalkulačka a předpoklady", sprava: "Uživatelé a přístupy",
+  prehled: "Přehled", plan: "Plánování", mix: "Finální mix", vysledky: "Výsledky", kalkulacka: "Kalkulačka a předpoklady", sprava: "Uživatelé a přístupy",
   nastaveni: "Nastavení",
 };
 
@@ -103,7 +100,9 @@ export function Chrome({
   children: React.ReactNode;
 }) {
   const link = (href: string) => (planId && !href.startsWith("/sprava") && !href.startsWith("/nastaveni") ? `${href}?plan=${planId}` : href);
-  const pageTitle = active === "plan" && user.role === "CLIENT" ? "Plán" : PAGE_TITLE[active];
+  const pageTitle = user.role === "CLIENT" && active === "plan" ? "Plán"
+    : user.role === "CLIENT" && active === "vysledky" ? "K vyplnění"
+    : PAGE_TITLE[active];
 
   return (
     <div className="app">

@@ -32,7 +32,11 @@
   --bad-soft: #ffe3e2;
   --bad-pure: #ff514b;
   --idle-soft: #f1f1f3;
-  --radius: 5px;
+  --radius: 6px;
+  /* jednotná výška ovládacích prvků — tlačítka, pole i výběry stojí v řadě stejně vysoko */
+  --ctl-h: 32px;
+  --ctl-r: 5px;
+  --focus: 0 0 0 3px var(--brand-soft);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -658,8 +662,6 @@ details.adv summary { padding: 8px 14px; font-size: 11.5px; color: var(--muted);
 details.adv summary:hover { color: var(--brand-ink); }
 
 /* ---------------------------------------------------- K vyplnění */
-.fill-head { display: flex; align-items: flex-end; gap: 12px; margin: 4px 0 12px; }
-.fill-title { font-size: 20px; font-weight: 200; letter-spacing: -.01em; margin-bottom: 3px; }
 .fill-months { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
 .fill-month {
   font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 999px; cursor: pointer; position: relative;
@@ -676,7 +678,6 @@ details.adv summary:hover { color: var(--brand-ink); }
 .seg button { font: inherit; font-size: 12px; padding: 6px 12px; border: none; background: var(--surface); color: var(--ink-2); cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--line-strong); }
 .seg button.on { background: var(--brand-soft); color: var(--brand-ink); font-weight: 500; }
-.filltable td { padding: 9px 10px; }
 .money { display: inline-flex; align-items: center; gap: 5px; position: relative; }
 .moneyin {
   font: inherit; font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; width: 140px;
@@ -687,8 +688,6 @@ details.adv summary:hover { color: var(--brand-ink); }
 .money.saved .moneyin { border-color: var(--ok); }
 .savedmark { color: var(--ok); font-weight: 700; position: absolute; right: -14px; }
 .linkbtn { font: inherit; font-size: 11px; background: none; border: none; color: var(--brand-ink); cursor: pointer; text-decoration: underline; padding: 0; }
-.fill-metrics td { background: var(--surface-2); padding: 6px 10px !important; }
-.fill-metric { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; font-size: 12px; }
 
 /* ---------------------------------------------------- Finální mix */
 .mix { display: grid; gap: 16px; padding-bottom: 24px; }
@@ -732,7 +731,6 @@ details.adv summary:hover { color: var(--brand-ink); }
 input.txt.blockname { width: auto; font-weight: 500; font-size: 12.5px; padding: 2px 5px; }
 td.r.editable input.cell { border: 1px dashed var(--line-strong); }
 td.r.editable input.cell:focus { border-style: solid; }
-.fill-derived b { font-weight: 500; color: var(--brand-ink); font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------- plán pro klienta */
 .cplan td, .cplan th { white-space: nowrap; }
@@ -763,3 +761,82 @@ table.plan tr.grp:hover .blockact, table.plan tr.grp .blockact:focus-visible { o
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .sb-nav a[aria-current="page"] { color: #131230; }
 }
+
+/* ---------------------------------------------------- Výsledky */
+.res { display: grid; gap: 12px; }
+.res-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.res-card {
+  font: inherit; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius); color: var(--ink); cursor: pointer;
+}
+.res-card.plain { cursor: default; }
+.res-card.bad { border-left-color: var(--bad-pure); }
+.res-card.ok { border-left-color: var(--ok); cursor: default; }
+button.res-card.bad:hover { border-color: var(--bad-pure); }
+.res-card .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+.res-card .v { font-size: 26px; font-weight: 200; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.res-card .v small { font-size: 12px; color: var(--muted); }
+.res-card.bad .v { color: var(--bad); }
+.res-card .d { font-size: 11.5px; color: var(--muted); }
+.restable td { padding: 9px 10px; }
+.restable tr.res-todo td:first-child { box-shadow: inset 3px 0 0 0 var(--bad-pure); }
+.res-act { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+.res-note { border: 1px solid var(--line) !important; }
+.res-metrics td { background: var(--surface-2); padding: 6px 10px 8px !important; }
+.res-metrics td > .share:first-child { margin-right: 6px; }
+.res-chip {
+  display: inline-flex; align-items: center; gap: 6px; margin: 2px 8px 2px 0; padding: 3px 4px 3px 10px;
+  border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 12px;
+}
+.res-chip.s-ok { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.res-chip.s-warn { border-color: var(--line-strong); }
+.res-chip.s-bad { border-color: var(--bad-pure); }
+.res-chip-name { color: var(--ink-2); }
+.res-chip b { font-weight: 500; color: var(--brand-ink); }
+.res-chip .moneyin { padding: 3px 7px; font-size: 12px; }
+.res-chip-x { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0 4px; }
+.res-chip-x:hover { color: var(--bad); }
+.res-add { margin-left: 4px; }
+.res-new { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.moneyin.saved { border-color: var(--ok); }
+
+/* ====================================================================
+   Jednotný vizuální systém. Jedna výška, jedno zaoblení a jedno zvýraznění
+   fokusu pro všechna tlačítka a pole — dřív měla každá stránka vlastní
+   varianty (4px/5px, 26–36 px na výšku). Pořadí: tohle je na konci souboru
+   a přebíjí starší pravidla stejné specifičnosti.
+   ==================================================================== */
+.btn, .access-select, .moneyin, .seg, .planbar .txt, .field input, .field select {
+  min-height: var(--ctl-h); border-radius: var(--ctl-r);
+}
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 14px; font-size: 12.5px; font-weight: 400; line-height: 1;
+  transition: border-color .12s, background-color .12s, color .12s;
+}
+.btn:hover:not(:disabled) { border-color: var(--brand); color: var(--brand-ink); background: color-mix(in srgb, var(--brand-soft) 35%, var(--surface)); }
+.btn.primary:hover:not(:disabled) { background: var(--brand); filter: brightness(1.1); color: #fff; }
+.btn.danger { background: var(--surface); }
+.btn.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); background: var(--bad-soft); }
+.btn:focus-visible, .seg button:focus-visible, .chip:focus-visible, .fill-month:focus-visible, .res-card:focus-visible, .linkbtn:focus-visible {
+  outline: none; box-shadow: var(--focus), 0 0 0 1px var(--brand);
+}
+.access-select, .moneyin, .planbar .txt { padding-top: 0; padding-bottom: 0; }
+.access-select:focus, .moneyin:focus, .planbar .txt:focus, .field input:focus, .field select:focus {
+  outline: none; border-color: var(--brand); box-shadow: var(--focus);
+}
+.seg { align-items: stretch; }
+.seg button { padding: 0 14px; }
+/* menší tlačítka v řádcích tabulek a štítky zůstávají kompaktní */
+table .btn, .toolbar .btn[style*="font-size: 11"] { min-height: 24px; padding: 0 9px; }
+.res-chip .moneyin { min-height: 26px; }
+
+/* karty: stejný rám, stín a vnitřní odsazení všude */
+.panel, .db-card, .res-card, .kpis, .mix-kpis { box-shadow: 0 1px 2px rgba(32, 32, 42, .04); }
+.kpi { padding: 12px 16px; }
+.kpi .v { font-size: 24px; }
+.toolbar { padding: 10px 14px; gap: 10px; }
+.banner { border-radius: var(--radius); }
+.shell > .banner:first-child { margin-top: 0; }
+.field input, .field select { height: var(--ctl-h); padding: 0 10px; font-size: 13px; }

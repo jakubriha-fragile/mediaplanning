@@ -38,7 +38,7 @@ V plánu 2027 je navíc blok *UKÁZKA cross-media* — po prohlédnutí ho smaž
 
 Klient bez přidělených přístupů nevidí nic. Jako administrátor mu v *Uživatelé & přístupy*
 přidělte třeba „vyplňuje skutečnost — vybrané položky — Vybrat, co platí klient sám",
-pak se přihlaste jako `klient@benu.cz`: otevře se mu rovnou *K vyplnění* jen s jeho
+pak se přihlaste jako `klient@benu.cz`: otevře se mu rovnou *K vyplnění* (stránka Výsledky) jen s jeho
 položkami. Cizí položky nevidí, a kdyby někdo zápis zkusil obejít, odmítne ho server.
 
 ---
@@ -116,7 +116,7 @@ src/
   lib/auth.ts           Google SSO + testovací přihlášení
   middleware.ts         přesměrování nepřihlášených; běží na Edge, proto bez databáze
   app/page.tsx          plán: rozpočty, filtry, souhrny
-  app/plneni/page.tsx   detail a plnění: pacing, metriky, poznámky
+  app/vysledky/page.tsx výsledky: plnění, vyplňování skutečnosti, pacing, ukazatele, komentáře
   app/sprava/page.tsx   uživatelé, oprávnění, historie změn
   app/nastaveni/page.tsx plány, cílové skupiny a universa, kontrola nasazení
 scripts/
@@ -210,7 +210,7 @@ importovaný součet se součtem v Excelu. Data klienta zůstávají mimo repozi
 ### Sekce aplikace
 
 Menu je **vlevo** a nese i kontext otevřeného plánu (klient, období). Je rozdělené
-na *Plán* (Přehled, Plánování, Finální mix), *Vyhodnocení* (Plnění, K vyplnění),
+na *Plán* (Přehled, Plánování, Finální mix), *Vyhodnocení* (Výsledky),
 *Model* (Kalkulačka a předpoklady) a u administrátora *Správu*.
 
 **Plánování jako v Excelu:** Enter a šipky přeskakují mezi měsíci, Tab doprava.
@@ -225,12 +225,11 @@ do souhrnného pruhu (zásah, týdenní frekvence, překryv).
 | **Přehled** | agentura | zásah a frekvence v čase, oblasti × média, doporučení |
 | **Plánování** | agentura | tabulka plánu — rozpočty, GRP, imprese, bloky, oblasti |
 | **Finální mix** | všichni | výsledek plánu na jedné stránce: rozdělení rozpočtu, mediamix po měsících, oblasti; tisk do PDF |
-| **Plnění** | agentura | plán vs. skutečnost, cíle a výsledky ukazatelů (KPI), komentáře |
-| **K vyplnění** | klient i agentura | jen položky, kam smí uživatel zapisovat, po měsících — jedno pole na měsíc |
+| **Výsledky** | agentura i klient (u něj „K vyplnění") | co chybí vyplnit a co je ve skluzu, plán vs. skutečnost po měsících, ukazatele a cíle, komentáře |
 | **Kalkulačka** | agentura | Sainsbury, ceník, kalibrace zásahu, koeficienty duplikace |
 
-Klient vidí jen *K vyplnění*, *Plán* (čtení) a *Finální mix*; po přihlášení se mu otevře
-*K vyplnění*. Otevřený plán se mezi záložkami přenáší.
+Klient vidí jen *K vyplnění* (= Výsledky), *Plán* (čtení) a *Finální mix*; po přihlášení se mu
+otevře *K vyplnění*. Staré adresy /plneni a /vyplnit přesměrují na Výsledky. Otevřený plán se mezi záložkami přenáší.
 
 **Plán pro klienta** je samostatný jednoduchý pohled: součet, offline/online (ne Paid/Owned/Earned),
 čerpáno a tabulka položek po měsících s odstínem podle výše částky — bez filtrů, kódů sdělení
@@ -250,7 +249,14 @@ modelový zásah 1+ za období, pruh rozdělení rozpočtu, tabulka médií (dor
 impresích, cena za jednotku jen pro agenturu, zásah) s **flowchartem po měsících** a rozpadem
 na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* schová navigaci.
 
-### K vyplnění
+### Výsledky (dřív Plnění a K vyplnění)
+
+Nahoře tři karty: **chybí vyplnit**, **ve skluzu** a **čerpáno** — kliknutím na první dvě se
+seznam vyfiltruje. Pod tím měsíce (s počtem chybějících údajů) a *Celé období*. U položky je plán,
+skutečnost (pole, kde smí uživatel zapisovat), průběh vůči uplynulému času, stav a komentář agentury;
+pod ní ukazatele s cíli. Agentura tu zadává i cíle ukazatelů a ukazatele přidává a maže; klient
+vidí jen hodnoty a svoje pole.
+
 
 Měsíce jako záložky s červeným počtem chybějících údajů, pod tím jen položky uživatele:
 plán, pole *Skutečnost* (ukládá se samo po opuštění pole) a stav — vyplněno / chybí /
@@ -260,7 +266,7 @@ položka ukazatele (konverze, CPA…), vyplňují se pod ní. Rozpočet tu jde m
 
 ### Ukazatele (KPI)
 
-V *Plnění* jde u každé položky **přidat ukazatel** (název, jednotka, typ: načítá se /
+Ve *Výsledcích* jde u každé položky **přidat ukazatel** (název, jednotka, typ: načítá se /
 nižší = lépe / vyšší = lépe), zadat jeho **cíl** po měsících (sloupec Plán / cíl, v režimu
 jednoho měsíce) a smazat ho. Skutečnost ukazatelů vyplňuje ten, kdo má zápis do skutečnosti.
 

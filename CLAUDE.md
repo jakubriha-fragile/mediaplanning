@@ -49,7 +49,8 @@ src/lib/metrics.ts       poměrové ukazatele (CPM, CPC, CPA, CTR, ROAS) se poč
 src/lib/displayName.ts   krátký název položky (tactic.label, jinak bez poznámek v závorkách)
 src/components/ClientPlan.tsx  Plán pro klienta — jen čtení, offline/online, bez agenturních nástrojů
 src/components/Chrome.tsx      kostra: menu vlevo (role → položky), tenká hlavička stránky (.top)
-src/app/vyplnit/         K vyplnění — jen položky, kam smí uživatel zapisovat (hlavní stránka klienta)
+src/app/vysledky/        Výsledky = plnění + vyplňování skutečnosti (Results.tsx); klient ji vidí jako „K vyplnění".
+                         /plneni a /vyplnit jen přesměrují (staré odkazy)
 src/components/AccessEditor.tsx   přidělení přístupu: plán → co smí → na čem (offline/online/položky)
 src/components/ReachCalibration.tsx  zadání naměřených vln (TRP + zásah 1+) → křivka (fitCurve)
 scripts/import-strategicky-plan.ts   import týdenního flowchartu BENU z Excelu
@@ -120,7 +121,7 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    ne `PlanTable` s výjimkami; offline/online místo Paid/Owned/Earned (u BENU je vše
    Paid — agentura P/O/E chce vidět dál), zásah jen při `seesWholePlan`.
    Frekvence je všude TÝDNÍ (`weeksIn`/`weeksOf` v period.ts). (`role === "CLIENT"` → `clientView` v `PlanTable`,
-   `ReachPanel`, `PerfTable`). Nevidí agenturní sloupce (Jednotka, Cena), dopočty
+   `ReachPanel`, `Results`). Nevidí agenturní sloupce (Jednotka, Cena), dopočty
    GRP v buňkách, odborný panel zásahu ani texty typu „před sdílením s klientem".
    Komentář agentury nesmí měnit ani na serveru (`setAccountNote`). Výhrada
    „modelový odhad, ne měření" u zásahu zůstává i v jeho pohledu.
@@ -154,7 +155,7 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.
 
 15. **Skutečnost: nula ≠ prázdno.** `setActualSpend` a `setMetricActual` uloží i první
-   nulu — „nečerpáno" je odpověď a K vyplnění podle existence řádku pozná, co chybí.
+   nulu — „nečerpáno" je odpověď a Výsledky podle existence řádku poznají, co chybí.
 
 16. **Kalibrace zásahu** (`reach_measurement` → `fitCurve` → `reach_curve`) se přepočítá
    při každém přidání/smazání měření; bez měření se řádek křivky smaže a platí
@@ -259,7 +260,7 @@ Zadavatel si vyžádal tento směr (zbývá z původního seznamu):
 Technický dluh:
 
 - Tematické oblasti nejde přejmenovat ani smazat (jen založit).
-- K vyplnění: „chybí" = měsíc ≤ dnešní a plán > 0 bez zapsané skutečnosti. Čerpání se
+- Výsledky: „chybí" = měsíc ≤ dnešní a plán > 0 bez zapsané skutečnosti. Čerpání se
   ale vykazuje se zpožděním — možná posunout o měsíc, až se ozve klient.
 
 - Import a export XLSX (zadání §9) — data se zatím nahrávají seedem.

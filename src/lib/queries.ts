@@ -559,6 +559,8 @@ export type FillMonth = {
   actual: number | null;
   canPlan: boolean;
   canActual: boolean;
+  /** komentář agentury k měsíci (vysvětlení odchylky) */
+  note: string;
 };
 
 export type FillRow = {
@@ -571,6 +573,8 @@ export type FillRow = {
   online: boolean;
   months: Record<string, FillMonth>;
   metrics: ResolvedMetric[];
+  /** smí přidávat a mazat ukazatele (plán taktiky napříč měsíci) */
+  canManageMetrics: boolean;
 };
 
 /** Ukazatele taktiky včetně dopočtu poměrových (viz src/lib/metrics.ts). */
@@ -590,11 +594,21 @@ function tacticMetrics(tacticId: string, months: string[], loaded: Awaited<Retur
  * Prázdná skutečnost (žádný řádek) se liší od nuly: nula je „nečerpáno".
  */
 export async function getFillRows(me: Principal, planId: string): Promise<FillRow[]> {
+  const rows = await getResultRows(me, planId);
+  return rows.filter((r) => Object.values(r.months).some((c) => c.canPlan || c.canActual));
+}
+
+/**
+ * Řádky stránky Výsledky: všechny položky, které uživatel vidí, s plánem,
+ * skutečností, komentářem a ukazateli po měsících, a u každé buňky jestli
+ * do ní smí zapisovat. Plnění i K vyplnění stojí na tomhle jednom zdroji.
+ */
+export async function getResultRows(me: Principal, planId: string): Promise<FillRow[]> {
   const plan = await getPlan(planId);
   if (!plan || !canSeePlan(me, planId)) return [];
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
   const loaded = await loadPlan(planId);
-  const { budgets, spends, mets, targets, mActuals } = loaded;
+  const { budgets, spends, notes } = loaded;
 
   const out: FillRow[] = [];
   for (const r of loaded.rows) {
@@ -609,9 +623,9 @@ export async function getFillRows(me: Principal, planId: string): Promise<FillRo
         actual: s ? s.amount : null,
         canPlan: can(me, "write", { area: "plan", ...coords, month: m }),
         canActual: can(me, "write", { area: "actuals", ...coords, month: m }),
+        note: notes.find((n) => n.tacticId === r.tacticId && n.month === m)?.text ?? "",
       }];
     })) as Record<string, FillMonth>;
-    if (!months.some((m) => cells[m].canPlan || cells[m].canActual)) continue;
 
     out.push({
       id: r.tacticId,
@@ -622,6 +636,7 @@ export async function getFillRows(me: Principal, planId: string): Promise<FillRo
       online: channelGroupOf(r.channelType) === "online",
       months: cells,
       metrics: tacticMetrics(r.tacticId, months, loaded),
+      canManageMetrics: can(me, "write", { area: "plan", ...coords, month: null }),
     });
   }
   return out;

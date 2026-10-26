@@ -338,7 +338,7 @@ export async function setMetricTarget(raw: z.input<typeof metricTargetInput>): P
     await pushUndo(me!.id, label, [{ t: "metricTarget", metricId, month, target: before?.target ?? 0 }]);
     await log(me!.id, "plan", [label]);
     revalidatePath("/");
-    revalidatePath("/plneni");
+    revalidatePath("/vysledky");
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -369,7 +369,7 @@ export async function createMetric(raw: z.input<typeof newMetric>): Promise<Resu
       .where(eq(metrics.tacticId, data.tacticId));
     await db.insert(metrics).values({ ...data, slot: Number(max) + 1 });
     await log(me!.id, "plan", [`Nový ukazatel „${data.name}" u ${c.channel}`]);
-    revalidatePath("/plneni");
+    revalidatePath("/vysledky");
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -386,7 +386,7 @@ export async function deleteMetric(metricId: string): Promise<Result> {
     assertCan(me, "write", at(c, "plan", null));
     await db.delete(metrics).where(eq(metrics.id, metricId));
     await log(me!.id, "plan", [`Smazán ukazatel „${metric.name}" u ${c.channel}`]);
-    revalidatePath("/plneni");
+    revalidatePath("/vysledky");
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -427,8 +427,7 @@ export async function setActualSpend(raw: z.input<typeof actualInput>): Promise<
     const label = `Čerpání ${channel} / ${monthLabel(month)}: ${kc(before?.amount ?? 0)} → ${kc(amount)}`;
     await pushUndo(me!.id, label, [{ t: "actual", tacticId, month, amount: before?.amount ?? 0 }]);
     await log(me!.id, "actuals", [label]);
-    revalidatePath("/plneni");
-    revalidatePath("/vyplnit");
+    revalidatePath("/vysledky");
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -467,7 +466,7 @@ export async function setMetricActual(raw: z.input<typeof metricActualInput>): P
     const label = `Realita ${metric.name} ${channel} / ${monthLabel(month)}: ${num(before?.value ?? 0) || "—"} → ${num(value) || "—"}`;
     await pushUndo(me!.id, label, [{ t: "metricActual", metricId, month, value: before?.value ?? 0 }]);
     await log(me!.id, "actuals", [label]);
-    revalidatePath("/plneni");
+    revalidatePath("/vysledky");
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -510,7 +509,6 @@ export async function setBaseMetricActual(raw: z.input<typeof baseActualInput>):
       await log(me!.id, "plan", [`Doplněn ukazatel „${metric.name}" u ${c.channel} (potřebuje ho poměrový ukazatel)`]);
     }
     const res = await setMetricActual({ metricId: metric.id, month: data.month, value: data.value });
-    revalidatePath("/vyplnit");
     return res;
   } catch (e) {
     return fail(e);
@@ -553,7 +551,7 @@ export async function setAccountNote(raw: z.input<typeof noteInput>): Promise<Re
     const label = `Poznámka accountu ${channel} / ${monthLabel(month)}: „${text || "—"}“`;
     await pushUndo(me!.id, label, [{ t: "note", tacticId, month, text: before?.text ?? "" }]);
     await log(me!.id, "actuals", [label]);
-    revalidatePath("/plneni");
+    revalidatePath("/vysledky");
     return { ok: true };
   } catch (e) {
     return fail(e);
@@ -1389,7 +1387,7 @@ export async function undoLast(): Promise<Result & { label?: string }> {
     if (!label) return { ok: false, error: "Není co vrátit." };
     await log(me.id, "plan", [`Vráceno zpět: ${label}`]);
     revalidatePath("/");
-    revalidatePath("/plneni");
+    revalidatePath("/vysledky");
     return { ok: true, label };
   } catch (e) {
     return fail(e);
@@ -1679,7 +1677,7 @@ export async function updatePlan(raw: z.input<typeof planPatch>): Promise<Result
           await db.delete(metricActuals).where(and(inArray(metricActuals.metricId, metricIds), notInArray(metricActuals.month, keep)));
         }
       }
-      revalidatePath("/plneni");
+      revalidatePath("/vysledky");
     }
     await log(me!.id, "plan", items);
     revalidatePath("/prehled");
@@ -1734,7 +1732,7 @@ export async function deletePlan(raw: { planId: string; confirmName: string }): 
       `Smazán plán „${plan.name}" (${periodLabel(plan.periodStart, plan.periodEnd)}), ${ids.length} taktik — nelze vrátit`,
     ]);
     revalidatePath("/");
-    revalidatePath("/plneni");
+    revalidatePath("/vysledky");
     return { ok: true };
   } catch (e) {
     return fail(e);
