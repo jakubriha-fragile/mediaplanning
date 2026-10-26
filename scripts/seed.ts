@@ -304,7 +304,7 @@ async function main() {
 
 // hodnoty držíme tady, aby seed nezávisel na importu z app kódu
 const DEFAULT_CURVES: Record<s.ChannelType, { rMax: number; k: number }> = {
-  TV: { rMax: 0.92, k: 1.05 },
+  TV: { rMax: 0.98, k: 1.5 }, // předpoklad zadavatele: TV zasáhne téměř celou cílovku
   Rádio: { rMax: 0.68, k: 0.8 },
   OOH: { rMax: 0.85, k: 1.3 },
   Print: { rMax: 0.45, k: 0.7 },

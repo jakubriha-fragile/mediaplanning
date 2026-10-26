@@ -22,7 +22,7 @@ export type MonthPoint = {
   tvReach: number;
   net: number;
   cumNet: number;
-  /** průměrný počet kontaktů na zasaženou ženu v měsíci */
+  /** průměrný počet kontaktů na zasaženou ženu ZA TÝDEN (měsíc ÷ počet týdnů v něm) */
   frequency: number;
 };
 
@@ -32,8 +32,8 @@ export type MatrixRow = {
   byType: Partial<Record<ChannelType, number>>;
   cost: number;
   net: number;
-  /** průměr měsíčních frekvencí v měsících, kdy oblast běží */
-  monthlyFrequency: number;
+  /** průměr týdenních frekvencí v měsících, kdy oblast běží */
+  weeklyFrequency: number;
 };
 
 export type Dashboard = {
@@ -51,8 +51,8 @@ export type Dashboard = {
     fee: number;
     net: number;
     people: number;
-    /** průměr měsíčních frekvencí přes aktivní měsíce — to, co si člověk představí pod „za měsíc" */
-    avgMonthlyFrequency: number;
+    /** průměr týdenních frekvencí přes aktivní měsíce — „žena spot uvidí X× týdně" */
+    avgWeeklyFrequency: number;
     costPerPerson: number;
     /** průměrný měsíční přínos ostatních médií k TV (p.b.) */
     avgIncrement: number;
@@ -83,6 +83,18 @@ type Cell = {
   estimated: boolean;
   shares: Array<{ themeId: string; share: number }>;
 };
+
+/**
+ * Týdnů v měsíci (dny ÷ 7). Frekvence se ukazuje týdně, protože tak o tlaku
+ * mluví plánovači; plán je ale po měsících, takže jde o rovnoměrné rozložení
+ * měsíce do týdnů — skutečný průběh uvnitř měsíce z dat neplyne.
+ */
+function weeksIn(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate() / 7;
+}
+/** Kontakty na zasaženou ženu za týden. */
+const weekly = (grp: number, net: number, month: string) => (net > 0 ? grp / 100 / net / weeksIn(month) : 0);
 
 function netFromGrp(grpByType: Map<ChannelType, number>, ctx: CrossContext) {
   const parts = [...grpByType.entries()].map(([channelType, grp]) => ({
@@ -160,7 +172,7 @@ export async function getDashboard(
       tvReach: net.parts.find((p) => p.channelType === "TV")?.reach ?? 0,
       net: net.net,
       cumNet: cum.net,
-      frequency: net.net > 0 ? total(g) / 100 / net.net : 0,
+      frequency: weekly(total(g), net.net, m),
     };
   });
 
@@ -182,8 +194,7 @@ export async function getDashboard(
     const freqIn = (w: (c: Cell) => number) => {
       const fs = over.map((m) => {
         const g = sumGrp(monthOf(m), w);
-        const n = netFromGrp(g, ctx).net;
-        return n > 0 ? total(g) / 100 / n : 0;
+        return weekly(total(g), netFromGrp(g, ctx).net, m);
       });
       return fs.reduce((a, b) => a + b, 0) / fs.length;
     };
@@ -207,8 +218,7 @@ export async function getDashboard(
     for (const c of mine) byType[c.row.channelType] = (byType[c.row.channelType] ?? 0) + c.cost * w(c);
     const freqs = months.map((m) => {
       const g = sumGrp(mine.filter((c) => c.month === m), w);
-      const n = netFromGrp(g, ctx).net;
-      return n > 0 ? total(g) / 100 / n : 0;
+      return weekly(total(g), netFromGrp(g, ctx).net, m);
     }).filter((f) => f > 0);
     return {
       id,
@@ -216,7 +226,7 @@ export async function getDashboard(
       byType,
       cost: mine.reduce((a, c) => a + c.cost * w(c), 0),
       net: netFromGrp(sumGrp(mine, w), ctx).net,
-      monthlyFrequency: freqs.length ? freqs.reduce((a, b) => a + b, 0) / freqs.length : 0,
+      weeklyFrequency: freqs.length ? freqs.reduce((a, b) => a + b, 0) / freqs.length : 0,
     };
   }).sort((a, b) => b.cost - a.cost);
 
@@ -244,7 +254,7 @@ export async function getDashboard(
       fee,
       net: period.net,
       people,
-      avgMonthlyFrequency: live.length ? live.reduce((a, p) => a + p.frequency, 0) / live.length : 0,
+      avgWeeklyFrequency: live.length ? live.reduce((a, p) => a + p.frequency, 0) / live.length : 0,
       costPerPerson: people > 0 ? cost / people : 0,
       avgIncrement: withTv.length ? withTv.reduce((a, p) => a + Math.max(0, p.net - p.tvReach), 0) / withTv.length : 0,
     },

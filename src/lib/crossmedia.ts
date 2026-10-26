@@ -39,8 +39,12 @@ export const UNIT_LABEL: Record<PlanUnit, string> = {
 export type Curve = { rMax: number; k: number };
 
 /** Výchozí křivky, než se zkalibrují na panelová data. */
+/** Zdroj, pod kterým seed zapisuje výchozí křivky — takové řádky nejsou kalibrace. */
+export const UNCALIBRATED_SOURCE = "Modelový odhad — zkalibrovat na panelová data";
 export const DEFAULT_CURVE: Record<ChannelType, Curve> = {
-  TV:      { rMax: 0.92, k: 1.05 },
+  // Předpoklad zadavatele (říjen 2026): TV zasáhne téměř celou cílovku — 300 TRP
+  // za měsíc ≈ 97 %, 500+ TRP ≈ 98 %. Platí, dokud křivku nezkalibruje TV report.
+  TV:      { rMax: 0.98, k: 1.5 },
   Rádio:   { rMax: 0.68, k: 0.80 },
   OOH:     { rMax: 0.85, k: 1.30 },
   Print:   { rMax: 0.45, k: 0.70 },

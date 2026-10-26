@@ -77,8 +77,8 @@ export function Overview({
     todos.push({
       alert: true,
       title: `Ubrat TV v ${sc.months.length} ${sc.months.length === 1 ? "přetíženém měsíci" : "přetížených měsících"}`,
-      text: <>Uvidí ji v průměru {freq(sc.freqBefore)}. Model: o {Math.round(SCENARIO_CUT * 100)} % méně TRP v těchto měsících
-        uvolní <b>{mil(sc.saving)} Kč</b>, frekvence klesne na {freq(sc.freqAfter)} a zásah
+      text: <>Zasažená žena ji v nich uvidí v průměru {freq(sc.freqBefore)} týdně. Model: o {Math.round(SCENARIO_CUT * 100)} % méně TRP v těchto měsících
+        uvolní <b>{mil(sc.saving)} Kč</b>, frekvence klesne na {freq(sc.freqAfter)} týdně a zásah
         {Math.abs(sc.netAfter - sc.netBefore) < 0.0005 ? " zůstane prakticky stejný" : ` se změní o ${pp(sc.netAfter - sc.netBefore)}`}.</>,
       href: `/kalkulacka?plan=${planId}`, cta: "Ověřit v kalkulačce",
     });
@@ -105,8 +105,8 @@ export function Overview({
   if (over.length && live.length > over.length) {
     const calm = live.filter((p) => p.frequency <= limit && p.frequency > 0).sort((a, b) => a.frequency - b.frequency)[0];
     if (calm) todos.push({
-      title: `${monthLabels[calm.month]} je nejklidnější měsíc (${freq(calm.frequency)})`,
-      text: <>Sem jde přesunout tlak z přetížených měsíců, aniž by se překročila hranice {limit}×.</>,
+      title: `${monthLabels[calm.month]} je nejklidnější měsíc (${freq(calm.frequency)} týdně)`,
+      text: <>Sem jde přesunout tlak z přetížených měsíců, aniž by se překročila hranice {limit}× týdně.</>,
     });
   }
   const unassigned = data.matrix.find((m) => m.name === "Nezařazeno");
@@ -155,10 +155,11 @@ export function Overview({
             {" "}{tgName.replace(/^Ženy\s*/, "")}
             <span className="db-muted"> ({mil(total.people)})</span>.
             {" "}Zasažená {tgName.toLowerCase().startsWith("ženy") ? "žena" : "osoba"} ji uvidí v průměru
-            {" "}<b>{freq(total.avgMonthlyFrequency)} za měsíc</b>.
+            {" "}<b>{freq(total.avgWeeklyFrequency)} týdně</b>.
           </p>
           <span className="db-sub">{periodName} · modelový odhad <Help>Zásah = kolik lidí z cílové skupiny uvidí reklamu aspoň jednou.
-            Lidé, kteří vidí víc médií, se počítají jen jednou. Frekvence = kolikrát ji zasažený člověk uvidí za měsíc.</Help></span>
+            Lidé, kteří vidí víc médií, se počítají jen jednou. Frekvence = kolikrát ji zasažený člověk uvidí za týden
+            (měsíční kontakty rozložené rovnoměrně do týdnů). Zásah TV je předpoklad: téměř celá cílovka.</Help></span>
         </div>
         <div className="db-card db-kpi">
           <span className="db-label">Rozpočet včetně fee</span>
@@ -174,7 +175,7 @@ export function Overview({
         <div className={`db-card db-kpi ${over.length ? "is-alert" : ""}`}>
           <span className="db-label">Měsíce s přehlcením</span>
           <span className="db-big">{over.length} z {live.length}</span>
-          <span className="db-sub">frekvence nad {limit}× za měsíc</span>
+          <span className="db-sub">frekvence nad {limit}× týdně</span>
         </div>
       </section>
 
@@ -183,10 +184,10 @@ export function Overview({
           <div className="db-cardhead">
             <div>
               <h3>Zásah a frekvence po měsících</h3>
-              <p className="db-note">Nahoře kolik lidí reklama zasáhne, dole kolikrát ji uvidí. Šedý pás je rozumná frekvence,
-                oranžově kontakty navíc.</p>
+              <p className="db-note">Nahoře kolik lidí reklama zasáhne, dole kolikrát ji zasažený uvidí za týden.
+                Šedý pás je rozumná frekvence, oranžově kontakty navíc.</p>
             </div>
-            <label className="db-limit">Rozumná frekvence do
+            <label className="db-limit">Rozumná frekvence za týden do
               {canEdit ? (
                 <input value={limitDraft} inputMode="numeric" onChange={(e) => setLimitDraft(e.target.value)}
                   onBlur={saveLimit} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
@@ -240,7 +241,7 @@ export function Overview({
                 {data.matrixTypes.map((t) => <th key={t}>{tl(t)}</th>)}
                 <th>Celkem</th><th>Podíl</th>
                 <th>Zásah <Help>Za celé období, jen z médií s doručením.</Help></th>
-                <th>Frekvence za měsíc</th>
+                <th>Frekvence za týden</th>
               </tr>
             </thead>
             <tbody>
@@ -261,7 +262,7 @@ export function Overview({
                   <td><b>{mil(r.cost)}</b></td>
                   <td>{pct0(r.cost / (total.cost || 1))}</td>
                   <td>{r.net ? pct0(r.net) : "—"}</td>
-                  <td className={r.monthlyFrequency > limit ? "db-warncell" : ""}>{freq(r.monthlyFrequency)}</td>
+                  <td className={r.weeklyFrequency > limit ? "db-warncell" : ""}>{freq(r.weeklyFrequency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -285,7 +286,8 @@ export function Overview({
             <ul className="db-list">
               <li>Cílová skupina {tgName}, {mil(data.universe)} osob.</li>
               <li>Křivky zásahu a koeficienty překryvu jsou výchozí odhady, ne kalibrovaná data.</li>
-              <li>Frekvence je průměr za měsíc; skutečné kontakty bývají rozložené nerovnoměrněji.</li>
+              <li>Frekvence je za týden: měsíční kontakty rozložené rovnoměrně do týdnů (plán je po měsících).</li>
+              <li>Zásah TV: předpoklad, že TV zasáhne téměř celou cílovku (rozhodnutí zadavatele, říjen 2026), dokud nebude TV report.</li>
             </ul>
           </div>
           <div>

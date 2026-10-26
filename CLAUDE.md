@@ -113,7 +113,9 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
 
 12. **Agenturní práce není „chybějící data".** `costKind()` ji pozná z názvu
    (ag. práce, fee, natáčení, ambasador…) a Přehled ji z pokrytí modelu vyřazuje.
-   Hranice přehlcení je u plánu (`plan.freq_limit`), ne v prohlížeči — doporučení
+   Frekvence v Přehledu je **týdenní** (měsíční kontakty ÷ zásah ÷ dny/7 — plán je
+   po měsících, takže rovnoměrné rozložení). Hranice přehlcení je týdenní,
+   u plánu (`plan.freq_limit`, výchozí 5), ne v prohlížeči — doporučení
    musí vidět všichni stejná. Doporučení „ubrat TV" je spočítané modelem
    (SCENARIO_CUT), ne odhadnuté.
 
@@ -229,9 +231,10 @@ Technický dluh:
 - Rozhraní pro kalibraci křivek zásahu (duplikace, cílové skupiny i ceník editovatelné jsou).
 - Plán: řádek bloku se při vodorovném rolování neukotvuje (název bloku odjede);
   ukotvené jsou jen úchyt a sdělení.
-  **Výchozí křivka TV je příliš strmá** — nasytí se už kolem 300–500 TRP, takže
-  na plánu BENU 2027 vychází zásah ~92 % v každém měsíci i v každé oblasti a liší
-  se jen frekvence. Zkalibrovat podle TV reportu, až ho zadavatel pošle.
+  **TV křivka = předpoklad zadavatele** (říjen 2026): TV zasáhne téměř celou cílovku
+  (rMax 0,98, k 1,5 → 300 TRP ≈ 97 %). Řádky křivek, které do DB zapsal seed se
+  zdrojem `UNCALIBRATED_SOURCE`, se ignorují — přednost má kód; skutečná kalibrace
+  (jiný zdroj) má přednost před kódem. Až přijde TV report, nahradit.
 - **Zásah = 1+.** Zadavatel pracuje jen se zásahem 1+ a frekvencí; efektivní zásah 3+
   je v panelu zásahu schovaný (`SHOW_EFFECTIVE` v `ReachPanel.tsx`), výpočet a testy zůstaly.
   GRP/TRP v plánu BENU jsou podklad pro zásah 1+ (potvrzeno, říjen 2026).

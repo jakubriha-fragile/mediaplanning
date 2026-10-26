@@ -10,7 +10,7 @@ import { monthsBetween } from "@/lib/period";
 import { costKind } from "@/lib/costKind";
 import { can, canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
 import {
-  derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey,
+  derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey, UNCALIBRATED_SOURCE,
   type Curve, type Derived,
 } from "@/lib/crossmedia";
 
@@ -115,8 +115,11 @@ export async function crossContext(planTargetGroupId: string | null, clientId?: 
     universeOf: (tgId) => (tgId ? universeById.get(tgId) ?? 0 : planUniverse),
     curveOf: (ct, tgId) => {
       const target = tgId ?? planTargetGroupId;
-      const exact = curves.find((c) => c.channelType === ct && c.targetGroupId === target);
-      const generic = curves.find((c) => c.channelType === ct && c.targetGroupId === null);
+      // seed do DB zapsal výchozí křivky jako „modelový odhad" — ty nejsou kalibrace,
+      // přednost má výchozí hodnota z kódu (ta nese aktuální předpoklady)
+      const real = curves.filter((c) => c.source !== UNCALIBRATED_SOURCE);
+      const exact = real.find((c) => c.channelType === ct && c.targetGroupId === target);
+      const generic = real.find((c) => c.channelType === ct && c.targetGroupId === null);
       const found = exact ?? generic;
       return found ? { rMax: found.rMax, k: found.k } : DEFAULT_CURVE[ct] ?? DEFAULT_CURVE.Digital;
     },
