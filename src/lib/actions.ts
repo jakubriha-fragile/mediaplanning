@@ -1350,7 +1350,9 @@ export async function deleteTactic(tacticId: string): Promise<Result> {
     assertCan(me, "write", at(before, "plan", null));
     // smazání zpět vrátit neumíme (kaskádou padnou i rozpočty a metriky),
     // proto zásobník raději vyprázdníme, ať se uživatel nespoléhá
+    const [t] = await db.select({ lineId: tactics.messageLineId }).from(tactics).where(eq(tactics.id, tacticId));
     await db.delete(tactics).where(eq(tactics.id, tacticId));
+    if (t) await dropEmptyLines(before.campaignId, t.lineId);
     await log(me!.id, "plan", [`Smazána taktika „${before.channel}" (nelze vrátit zpět)`]);
     revalidatePath("/");
     return { ok: true };
@@ -1433,12 +1435,28 @@ const newLine = z.object({
 });
 
 /** Další volný kód linky v bloku. Unikátnost (kód × blok) hlídá i index. */
+/**
+ * Smaže sdělení bloku, která nemají žádný řádek (taktiku). V tabulce nejsou
+ * vidět — řádky jsou taktiky — a jen by blokovala čísla. Jedno sdělení blok
+ * vždy podrží, aby šlo dál přidávat „+ Taktika". `only` = zkontrolovat jen tohle.
+ */
+async function dropEmptyLines(campaignId: string, only?: string) {
+  const lines = await db.select({ id: messageLines.id }).from(messageLines).where(eq(messageLines.campaignId, campaignId));
+  const used = new Set((await db.select({ l: tactics.messageLineId }).from(tactics)
+    .where(inArray(tactics.messageLineId, lines.map((l) => l.id).concat("—")))).map((x) => x.l));
+  const empty = lines.filter((l) => !used.has(l.id) && (!only || l.id === only));
+  const keepOne = used.size === 0 ? 1 : 0;
+  const drop = empty.slice(keepOne).map((l) => l.id);
+  if (drop.length) await db.delete(messageLines).where(inArray(messageLines.id, drop));
+}
+
 function nextLineCode(campaignName: string, existing: string[]): string {
   const base =
     existing.map((c) => c.match(/^(.*)-\d+$/)?.[1]).find(Boolean) ??
     (campaignName.toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) || "NOVA");
+  // nejnižší volné číslo — po smazání sdělení se číslo znovu použije a řada zůstane souvislá
   const taken = new Set(existing);
-  let n = existing.length + 1;
+  let n = 1;
   while (taken.has(`${base}-${n}`)) n++;
   return `${base}-${n}`;
 }
@@ -1454,6 +1472,8 @@ export async function createMessageLine(raw: z.input<typeof newLine>): Promise<R
     assertCan(me, "write", { area: "plan", mediaType: null, planId: await campaignPlan(data.campaignId), campaignId: data.campaignId, month: null });
 
     const [camp] = await db.select({ name: campaigns.name }).from(campaigns).where(eq(campaigns.id, data.campaignId));
+    // sdělení bez řádků (zbylá po dřívějším mazání) nejsou vidět, ale blokovala by čísla
+    await dropEmptyLines(data.campaignId);
     const existing = await db
       .select({ code: messageLines.code })
       .from(messageLines)
