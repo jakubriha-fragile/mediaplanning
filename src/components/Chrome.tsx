@@ -148,6 +148,12 @@ export function Chrome({
           <form action={async () => { "use server"; await signOut({ redirectTo: "/prihlaseni" }); }}>
             <button className="btn sb-out" type="submit">Odhlásit</button>
           </form>
+          {/* verze v menu, ne v patičce — ať je vidět bez rolování na konec stránky */}
+          <div className="sb-ver" title={`Čas posledního nasazení: ${buildLabel()}`}>
+            <span>Mediaplán <b>v{VERSION}</b>{COMMIT && <> · {COMMIT}</>}</span>
+            <span>Aktualizováno {buildLabel()}{buildAge() && <> · {buildAge()}</>}</span>
+            <span>Fragile · KNOWLIMITS Group</span>
+          </div>
         </div>
       </aside>
 
@@ -168,12 +174,6 @@ export function Chrome({
             </div>
           )}
           {children}
-          <footer className="foot">
-            <span>Mediaplán <b>v{VERSION}</b>{COMMIT && <span className="share"> · {COMMIT}</span>}</span>
-            <span className="share">Naposledy aktualizováno {buildLabel()}{buildAge() && <> · {buildAge()}</>}</span>
-            <span className="spacer" />
-            <span className="share">Fragile · KNOWLIMITS Group</span>
-          </footer>
         </div>
       </div>
     </div>

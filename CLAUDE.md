@@ -248,7 +248,7 @@ prostředí (ty se projeví až po redeploy).
 Ve Vercelu musí být *Framework Preset* = **Next.js**, jinak build spadne na
 „No Output Directory named public". Nastavení v dashboardu přebíjí `vercel.json`.
 
-Verze a čas nasazení jsou v patičce — zapéká je `next.config.mjs` při buildu.
+Verze a čas nasazení jsou v menu pod Odhlásit — zapéká je `next.config.mjs` při buildu.
 Verzi zvyšovat ručně: `npm version patch --no-git-tag-version`.
 
 ## Práce s terminálem u zadavatele
