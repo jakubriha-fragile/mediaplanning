@@ -327,6 +327,8 @@ export function PlanTable({
 
   const campaignLines = (campaignId: string) =>
     campaigns.find((c) => c.id === campaignId)?.lines ?? [];
+  /** text sdělení podle linky — do nabídky „přesunout pod sdělení" */
+  const lineText = useMemo(() => new Map(rows.map((r) => [r.messageLineId, r.message])), [rows]);
 
   return (
     <div className="panel sticky">
@@ -589,7 +591,27 @@ export function PlanTable({
                               }
                             }} />
                           <div className="share" style={{ paddingLeft: 6, display: "flex", gap: 8, alignItems: "center" }}>
-                            {r.code}
+                            {canEditPlan ? (
+                              /* přeřazení řádku pod jiné sdělení — např. z -2 na -1; nabídka hlavně z vlastního bloku */
+                              <select className="linesel" value={r.messageLineId} aria-label="Sdělení řádku"
+                                title="Přesunout řádek pod jiné sdělení"
+                                onChange={(e) => {
+                                  const id = e.target.value;
+                                  const prev = { messageLineId: r.messageLineId, message: r.message, code: r.code };
+                                  const target = campaigns.flatMap((c) => c.lines).find((l) => l.id === id);
+                                  run(() => patchRow(r.id, { messageLineId: id, message: lineText.get(id) ?? r.message, code: target?.code ?? r.code }),
+                                      () => patchRow(r.id, prev),
+                                      () => updateTactic({ tacticId: r.id, messageLineId: id }));
+                                }}>
+                                {[...campaigns].sort((a, b) => Number(b.id === r.campaignId) - Number(a.id === r.campaignId)).map((c) => (
+                                  <optgroup key={c.id} label={c.id === r.campaignId ? `${c.name} (tento blok)` : c.name}>
+                                    {c.lines.map((l) => (
+                                      <option key={l.id} value={l.id}>{l.code}{lineText.get(l.id) ? ` · ${lineText.get(l.id)}` : ""}</option>
+                                    ))}
+                                  </optgroup>
+                                ))}
+                              </select>
+                            ) : r.code}
                             {/* nový řádek patří k TOMUHLE sdělení — tlačítko v bloku přidává k prvnímu */}
                             {canEditPlan && (
                               <button className="linkbtn rowadd" title={`Přidat řádek ke sdělení „${r.message}"`}

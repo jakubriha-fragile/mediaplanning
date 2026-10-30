@@ -886,3 +886,9 @@ table.plan tr:hover .rowadd, table.plan .rowadd:focus-visible { opacity: 1; }
 .catalog-add { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .catalog-row .btn.danger { opacity: 0; }
 .catalog-row:hover .btn.danger, .catalog-row .btn.danger:focus-visible { opacity: 1; }
+/* kód sdělení pod názvem jde přepnout — vypadá jako text, šipka až pod myší */
+select.linesel {
+  font: inherit; font-size: 11px; color: var(--muted); border: 1px solid transparent; background: transparent;
+  border-radius: 3px; padding: 0 2px; max-width: 150px; cursor: pointer; appearance: none; -webkit-appearance: none;
+}
+table.plan tr:hover select.linesel, select.linesel:focus { border-color: var(--line-strong); color: var(--ink-2); appearance: auto; -webkit-appearance: auto; }
