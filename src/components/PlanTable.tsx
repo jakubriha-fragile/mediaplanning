@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
-  setTacticThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks,
+  setTacticThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks, setTacticCatalog, autofillCatalog,
 } from "@/lib/actions";
+import type { CatalogMedium } from "@/lib/catalog";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
 import { Combo, type ComboOption } from "@/components/Combo";
 import { isGrpPriced, priceLabel, priceHint, UNIT_LABEL } from "@/lib/crossmedia";
@@ -27,6 +28,8 @@ export type PlanRow = {
   name: string;
   mediaType: "Paid" | "Owned" | "Earned";
   channelType: ChannelType;
+  mediumId: string | null;
+  platformId: string | null;
   targetGroupId: string | null;
   /** tematické oblasti a podíly (součet 1); prázdné = nezařazeno */
   themes: ThemeShare[];
@@ -78,13 +81,15 @@ type Col =
 // Vždy viditelné: úchyt, sdělení, typ (Paid/Owned/Earned), kanál, oblast, nosič.
 // Pod „Podrobnostmi" fáze a cílení, u agentury navíc jednotka a cena — mění se
 // zřídka a plánovač je nepotřebuje mít před očima pořád.
-const BASE_COLS = 6;
+const BASE_COLS = 8;
 const RIGHT_COLS = 3;  // celkem, podíl, smazat
 
 export function PlanTable({
   rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel, clientView = false,
-  themes = [], weeks = null,
+  themes = [], weeks = null, catalog = [],
 }: {
+  /** číselník médií a platforem */
+  catalog?: CatalogMedium[];
   /** plán po týdnech — sloupce jsou týdny, sbalit jde po měsících */
   weeks?: PlanWeek[] | null;
   rows: PlanRow[];
@@ -159,7 +164,11 @@ export function PlanTable({
 
   const [types, setTypes] = useState<Record<string, boolean>>({ Paid: true, Owned: true, Earned: true });
   const [msgSel, setMsgSel] = useState<Set<string>>(new Set());
-  const [chanSel, setChanSel] = useState<Set<string>>(new Set());
+  const [medSel, setMedSel] = useState<Set<string>>(new Set());
+  const [platSel, setPlatSel] = useState<Set<string>>(new Set());
+  const mediumOf = (r: PlanRow) => catalog.find((m) => m.id === r.mediumId) ?? null;
+  const platformOf = (r: PlanRow) => mediumOf(r)?.platforms.find((p) => p.id === r.platformId) ?? null;
+  const NO_MEDIUM = "— bez média —";
   const [audSel, setAudSel] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
 
@@ -168,25 +177,30 @@ export function PlanTable({
 
   const opts = useMemo(() => ({
     msg: [...new Set(rows.map((r) => r.code))].sort((a, b) => a.localeCompare(b, "cs")),
-    chan: [...new Set(rows.map((r) => r.channel))].sort((a, b) => a.localeCompare(b, "cs")),
+    med: [...new Set(rows.map((r) => mediumOf(r)?.name ?? NO_MEDIUM))].sort((a, b) => a.localeCompare(b, "cs")),
+    plat: [...new Set(rows
+      .filter((r) => !medSel.size || medSel.has(mediumOf(r)?.name ?? NO_MEDIUM))
+      .map((r) => platformOf(r)?.name).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, "cs")),
     aud: [...new Set(rows.map((r) => r.audience))].sort((a, b) => a.localeCompare(b, "cs")),
-  }), [rows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [rows, catalog, medSel]);
 
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return data.filter((r) => {
       if (!types[r.mediaType]) return false;
       if (msgSel.size && !msgSel.has(r.code)) return false;
-      if (chanSel.size && !chanSel.has(r.channel)) return false;
+      if (medSel.size && !medSel.has(mediumOf(r)?.name ?? NO_MEDIUM)) return false;
+      if (platSel.size && !platSel.has(platformOf(r)?.name ?? "")) return false;
       if (audSel.size && !audSel.has(r.audience)) return false;
       if (!needle) return true;
       return [r.channel, r.code, r.message, r.audience, r.campaign, r.phase]
         .join(" ").toLowerCase().includes(needle);
     });
-  }, [data, types, msgSel, chanSel, audSel, q]);
+  }, [data, types, msgSel, medSel, platSel, audSel, q, catalog]);
 
   const anyFilter =
-    msgSel.size || chanSel.size || audSel.size || q.trim() || !types.Paid || !types.Owned || !types.Earned;
+    msgSel.size || medSel.size || platSel.size || audSel.size || q.trim() || !types.Paid || !types.Owned || !types.Earned;
 
   const rowTotal = (r: PlanRow) => months.reduce((s, m) => s + r.budgets[m], 0);
   const colOf = (r: PlanRow, c: Col) => c.kind === "w"
@@ -347,14 +361,17 @@ export function PlanTable({
           </span>
         )}
         <MultiSelect label="Sdělení" options={opts.msg} selected={msgSel} onChange={setMsgSel} />
-        <MultiSelect label="Kanál" options={opts.chan} selected={chanSel} onChange={setChanSel} />
+        <MultiSelect label="Médium" options={opts.med} selected={medSel}
+          onChange={(v) => { setMedSel(v); setPlatSel(new Set()); }} />
+        {/* platformy jen vybraných médií — jinak by se v nabídce míchaly Search ze Skliku i z Googlu */}
+        <MultiSelect label="Platforma" options={opts.plat} selected={platSel} onChange={setPlatSel} />
         <MultiSelect label="Cílová skupina" options={opts.aud} selected={audSel} onChange={setAudSel} />
         <input placeholder="Hledat…" value={q} onChange={(e) => setQ(e.target.value)}
           style={{ font: "inherit", fontSize: 12, padding: "5px 10px", minWidth: 130, maxWidth: 200,
             border: "1px solid var(--line-strong)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
         {anyFilter ? (
           <button className="btn danger" onClick={() => {
-            setMsgSel(new Set()); setChanSel(new Set()); setAudSel(new Set());
+            setMsgSel(new Set()); setMedSel(new Set()); setPlatSel(new Set()); setAudSel(new Set());
             setQ(""); setTypes({ Paid: true, Owned: true, Earned: true });
           }}>✕ Zrušit filtry</button>
         ) : null}
@@ -379,6 +396,20 @@ export function PlanTable({
           <span><b>Zápis odmítnut.</b> {error}</span>
         </div>
       )}
+      {canEditPlan && catalog.length > 0 && data.some((r) => !r.mediumId) && (
+        <div className="banner info" style={{ margin: 0, borderRadius: 0 }}>
+          <span>
+            <b>{data.filter((r) => !r.mediumId).length} položek nemá médium.</b> Médium a platformu vyberete v řádku,
+            nebo je nechte doplnit podle názvů (např. „META“ → Meta Ads, „SEA“ → Google Ads · Search). Co se nepozná, zůstane prázdné.
+          </span>
+          <span className="spacer" />
+          <button className="btn" disabled={pending} onClick={() => run(() => {}, () => {}, async () => {
+            const res = await autofillCatalog(planId);
+            if (res.ok) setInfo(`Doplněno ${res.filled ?? 0} položek, ručně zbývá ${res.left ?? 0}.`);
+            return res;
+          })}>Doplnit podle názvů</button>
+        </div>
+      )}
       {info && !error && (
         <div className="banner info" style={{ margin: 0, borderRadius: 0 }}>
           <span>{info}</span>
@@ -397,8 +428,10 @@ export function PlanTable({
               {details && <th>Fáze</th>}
               {details && <th>Cílení</th>}
               <th>Typ</th>
-              <th>Kanál</th>
+              <th title="Název položky — jak ji znáte z plánu">Položka</th>
               {showUnit && <th title="Jak položku uvidí klient a souhrny. Prázdné = zkrátí se automaticky (bez poznámek v závorkách).">Krátký název</th>}
+              <th title="Kde se nakupuje (Google Ads, Meta Ads, Nova…). Určuje nosič.">Médium</th>
+              <th title="Typ kampaně nebo prostor v médiu (Search, Performance Max, YouTube…)">Platforma</th>
               <th title="Na kterou tematickou oblast položka míří — u smíšených podíl v %">Oblast</th>
               <th>Nosič</th>
               {showUnit && <th>Jednotka</th>}
@@ -465,6 +498,7 @@ export function PlanTable({
                       <span className="share" style={{ fontWeight: 300 }}>{g.rows.length} taktik</span>
                       {canEditPlan && lines[0] && (
                         <button className="btn blockact" style={{ marginLeft: 10, fontSize: 11, padding: "2px 8px" }}
+                          title="Přidá řádek k prvnímu sdělení bloku — k jinému sdělení použijte „+ řádek“ u něj"
                           onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: lines[0].id }))}>
                           + Taktika
                         </button>
@@ -554,7 +588,16 @@ export function PlanTable({
                                     () => updateMessageLine({ messageLineId: r.messageLineId, message: text }));
                               }
                             }} />
-                          <div className="share" style={{ paddingLeft: 6 }}>{r.code}</div>
+                          <div className="share" style={{ paddingLeft: 6, display: "flex", gap: 8, alignItems: "center" }}>
+                            {r.code}
+                            {/* nový řádek patří k TOMUHLE sdělení — tlačítko v bloku přidává k prvnímu */}
+                            {canEditPlan && (
+                              <button className="linkbtn rowadd" title={`Přidat řádek ke sdělení „${r.message}"`}
+                                onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: r.messageLineId }))}>
+                                + řádek
+                              </button>
+                            )}
+                          </div>
                         </td>
 
                         {details && <td>
@@ -618,6 +661,36 @@ export function PlanTable({
                             }} />
                         </td>}
 
+                        <td style={{ minWidth: 150 }}>
+                          <select className="txt" value={r.mediumId ?? ""} disabled={!canEditPlan}
+                            title={mediumOf(r) ? `${mediumOf(r)!.name} · nosič ${mediumOf(r)!.channelType}` : "Vyberte médium — určí i nosič"}
+                            onChange={(e) => {
+                              const m = catalog.find((x) => x.id === e.target.value) ?? null;
+                              const prev = { mediumId: r.mediumId, platformId: r.platformId, channelType: r.channelType };
+                              run(() => patchRow(r.id, { mediumId: m?.id ?? null, platformId: null, ...(m ? { channelType: m.channelType } : {}) }),
+                                  () => patchRow(r.id, prev),
+                                  () => setTacticCatalog({ tacticId: r.id, mediumId: m?.id ?? null, platformId: null }));
+                            }}>
+                            <option value="">— vybrat —</option>
+                            {[...new Set(catalog.map((m) => m.channelType))].map((ct) => (
+                              <optgroup key={ct} label={ct}>
+                                {catalog.filter((m) => m.channelType === ct).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                              </optgroup>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ minWidth: 140 }}>
+                          <select className="txt" value={r.platformId ?? ""} disabled={!canEditPlan || !mediumOf(r)}
+                            title={mediumOf(r) ? "Platforma vybraného média" : "Nejdřív vyberte médium"}
+                            onChange={(e) => {
+                              const pid = e.target.value || null, prev = r.platformId;
+                              run(() => patchRow(r.id, { platformId: pid }), () => patchRow(r.id, { platformId: prev }),
+                                  () => setTacticCatalog({ tacticId: r.id, mediumId: r.mediumId, platformId: pid }));
+                            }}>
+                            <option value="">{mediumOf(r) ? "— vybrat —" : "—"}</option>
+                            {mediumOf(r)?.platforms.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                        </td>
                         <td style={{ minWidth: 130 }}>
                           <ThemeCell
                             value={r.themes}

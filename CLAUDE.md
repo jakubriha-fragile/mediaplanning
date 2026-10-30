@@ -38,6 +38,7 @@ src/lib/crossmedia.ts    přepočty jednotek, křivky zásahu, zásah a překryv
 src/lib/pacing.ts        výpočty plnění (plán vs. realita v čase)
 src/lib/period.ts        měsíce, kvartály a týdny (weeksOfPeriod) odvozené z období plánu
 src/lib/weeks.ts         plán po týdnech: přepočet týdny → měsíce, převod měsíce → týdny
+src/lib/catalog.ts       číselník Médium → Platforma (výchozí z technické karty, naplní prázdnou tabulku), guessCatalog
 src/lib/actions.ts       VŠECHNY zápisy; každý projde assertCan()
 src/lib/queries.ts       čtení dat pro stránky
 src/lib/undo.ts          zásobník vrácení zpět (10 kroků na uživatele)

@@ -6,6 +6,8 @@ import { getUser, getTargetGroups, getPlans } from "@/lib/queries";
 import { Chrome } from "@/components/Chrome";
 import { Copyable } from "@/components/Copyable";
 import { TargetGroups } from "@/components/TargetGroups";
+import { MediaCatalog } from "@/components/MediaCatalog";
+import { getCatalog } from "@/lib/catalog";
 import { periodLabel } from "@/lib/period";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +104,8 @@ export default async function SetupPage() {
           </table>
         </div>
       </div>
+
+      <MediaCatalog rows={await getCatalog()} canEdit />
 
       <TargetGroups
         rows={tgs.map((t) => ({ id: t.id, name: t.name, universe: t.universe, source: t.source, note: t.note }))}

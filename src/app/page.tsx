@@ -12,6 +12,7 @@ import { PlanSwitcher } from "@/components/PlanSwitcher";
 import { ReachPanel } from "@/components/ReachPanel";
 import { PlanTable, type PlanRow } from "@/components/PlanTable";
 import { ClientPlan } from "@/components/ClientPlan";
+import { getCatalog } from "@/lib/catalog";
 import { channelGroupOf } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -211,6 +212,7 @@ export default async function PlanPage({
         canEditPlan={canEditPlan}
         undoLabel={undo[0]?.label ?? null}
         themes={themeList.map((t) => ({ id: t.id, name: t.name }))}
+        catalog={await getCatalog()}
         weeks={plan.granularity === "week"
           ? weeksOfPeriod(plan.periodStart, plan.periodEnd).map((w) => ({ key: w.key, label: w.label, title: weekRange(w.key), home: weekHome(w) }))
           : null}

@@ -52,6 +52,11 @@ export function ThemeCell({
   );
 }
 
+/**
+ * Výběr oblastí zaškrtnutím: jedna oblast = 100 %, víc oblastí = rovným dílem.
+ * Procenta se objeví až u dvou a víc oblastí a jdou upravit (TV spot, kde jeden
+ * produkt má víc času). Dřív se všechno zadávalo procenty — i obyčejných 100.
+ */
 function ThemeEditor({
   value, themes, pos, onClose, onSave, onCreate,
 }: {
@@ -62,54 +67,73 @@ function ThemeEditor({
   onSave: (shares: ThemeShare[]) => void;
   onCreate: (name: string) => Promise<string | null>;
 }) {
+  const fmt = (n: number) => String(Math.round(n * 10) / 10).replace(".", ",");
   // procenta jako text — během psaní se nic nepřepočítává pod rukama
   const [pctById, setPct] = useState<Record<string, string>>(
-    Object.fromEntries(value.map((x) => [x.themeId, String(Math.round(x.share * 1000) / 10).replace(".", ",")])),
+    Object.fromEntries(value.map((x) => [x.themeId, fmt(x.share * 100)])),
   );
   const [extra, setExtra] = useState<ThemeOption[]>([]);
   const [newName, setNewName] = useState("");
   const all = [...themes, ...extra.filter((e) => !themes.some((t) => t.id === e.id))];
   const num = (s: string | undefined) => Number(String(s ?? "").replace(",", ".")) || 0;
-  const sum = all.reduce((a, t) => a + num(pctById[t.id]), 0);
-  const picked = all.filter((t) => num(pctById[t.id]) > 0);
+  const picked = all.filter((t) => pctById[t.id] !== undefined);
+  const sum = picked.reduce((a, t) => a + num(pctById[t.id]), 0);
 
-  const evenly = () => {
-    const ids = picked.length ? picked.map((t) => t.id) : [];
-    if (!ids.length) return;
-    const each = String(Math.round((100 / ids.length) * 10) / 10).replace(".", ",");
-    setPct(Object.fromEntries(ids.map((id) => [id, each])));
+  /** zaškrtnutí přepočte rovným dílem — ruční procenta se dělají až potom */
+  const toggle = (id: string) => {
+    const ids = pctById[id] !== undefined ? picked.map((t) => t.id).filter((x) => x !== id) : [...picked.map((t) => t.id), id];
+    setPct(Object.fromEntries(ids.map((x) => [x, fmt(100 / ids.length)])));
   };
 
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50 }} />
       <div className="themeeditor" role="dialog" aria-label="Tematické oblasti taktiky" style={{ top: pos.top, left: pos.left }}>
-        <div className="share" style={{ marginBottom: 6 }}>Podíl taktiky na oblastech (%)</div>
-        {all.map((t) => (
-          <label key={t.id} className="themerow">
-            <span>{t.name}</span>
-            <input inputMode="decimal" value={pctById[t.id] ?? ""} placeholder="0"
-              onChange={(e) => setPct((p) => ({ ...p, [t.id]: e.target.value }))} />
-          </label>
-        ))}
+        <div className="share" style={{ marginBottom: 6 }}>Na co položka míří — zaškrtněte jednu nebo víc oblastí</div>
+        {all.map((t) => {
+          const on = pctById[t.id] !== undefined;
+          return (
+            <div key={t.id} className={`themerow ${on ? "on" : ""}`}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, cursor: "pointer" }}>
+                <input type="checkbox" checked={on} onChange={() => toggle(t.id)} style={{ accentColor: "var(--brand)" }} />
+                <span>{t.name}</span>
+              </label>
+              {on && picked.length > 1 && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                  <input inputMode="decimal" aria-label={`Podíl ${t.name} v %`} value={pctById[t.id]}
+                    onChange={(e) => setPct((p) => ({ ...p, [t.id]: e.target.value }))} />
+                  <span className="share">%</span>
+                </span>
+              )}
+            </div>
+          );
+        })}
         <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
           <input className="txt" style={{ border: "1px solid var(--line-strong)" }} placeholder="nová oblast"
             value={newName} onChange={(e) => setNewName(e.target.value)} />
           <button type="button" className="btn" disabled={!newName.trim()}
             onClick={async () => {
               const id = await onCreate(newName.trim());
-              if (id) { setExtra((x) => [...x, { id, name: newName.trim() }]); setPct((p) => ({ ...p, [id]: "100" })); setNewName(""); }
+              if (id) {
+                setExtra((x) => [...x, { id, name: newName.trim() }]);
+                const ids = [...picked.map((t) => t.id), id];
+                setPct(Object.fromEntries(ids.map((x) => [x, fmt(100 / ids.length)])));
+                setNewName("");
+              }
             }}>Přidat</button>
         </div>
-        <div className="share" style={{ margin: "8px 0", color: Math.abs(sum - 100) > 0.5 && sum > 0 ? "var(--bad)" : undefined }}>
-          Součet {String(Math.round(sum * 10) / 10).replace(".", ",")} %{sum > 0 && Math.abs(sum - 100) > 0.5 ? " — při uložení se přepočte na 100 %" : ""}
-        </div>
-        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-          <button type="button" className="btn" onClick={evenly} disabled={picked.length < 2}
-            title="Rozdělí rovným dílem mezi vyplněné oblasti">Rovnoměrně</button>
+        {picked.length > 1 && (
+          <div className="share" style={{ margin: "8px 0 0", color: Math.abs(sum - 100) > 0.5 ? "var(--bad)" : undefined }}>
+            Součet {fmt(sum)} %{Math.abs(sum - 100) > 0.5 ? " — při uložení se přepočte na 100 %" : ""}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 10 }}>
+          {picked.length > 0 && (
+            <button type="button" className="btn" onClick={() => setPct({})} title="Položka nebude patřit žádné oblasti">Nezařazeno</button>
+          )}
           <button type="button" className="btn" onClick={onClose}>Zrušit</button>
           <button type="button" className="btn primary"
-            onClick={() => onSave(picked.map((t) => ({ themeId: t.id, share: num(pctById[t.id]) / 100 })))}>Uložit</button>
+            onClick={() => onSave(picked.map((t) => ({ themeId: t.id, share: (num(pctById[t.id]) || 100 / picked.length) / 100 })))}>Uložit</button>
         </div>
       </div>
     </>

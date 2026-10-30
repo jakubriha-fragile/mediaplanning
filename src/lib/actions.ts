@@ -16,7 +16,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, tacticBudgetWeeks, duplications, themes, tacticThemes, rateCards,
-  reachMeasurements, reachCurves,
+  reachMeasurements, reachCurves, media, platforms,
   metrics, metricTargets, actualSpends, metricActuals, accountNotes, grants,
   users, changeLog,
   channelTypeEnum, planUnitEnum, mediaTypeEnum,
@@ -26,6 +26,7 @@ import { currentPrincipal } from "@/lib/auth";
 import { assertCan, canManageUsers, canSeePlan, PermissionError, ACCESS_LEVEL_LABEL } from "@/lib/permissions";
 import { monthLabel, monthsBetween, periodLabel, shiftYears, kc, num, weekMonths, weekRange, weeksOfPeriod } from "@/lib/period";
 import { createId } from "@/lib/id";
+import { getCatalog, guessCatalog } from "@/lib/catalog";
 import { syncMonthsFromWeeks, monthsToWeeks, pruneWeeks, weekRow } from "@/lib/weeks";
 import { BASE, DERIVED, baseOf, derivedOf, type BaseKey } from "@/lib/metrics";
 import { derive, isGrpPriced, dupKey, DEFAULT_DUPLICATION, DEFAULT_CURVE, K_MIN, K_MAX, fitCurve } from "@/lib/crossmedia";
@@ -1287,13 +1288,25 @@ async function insertTactic(
     .limit(1);
   if (!plan) throw new Error("Blok neexistuje");
 
-  const [{ max }] = await db
-    .select({ max: sql<number>`coalesce(max(${tactics.position}), -1)` })
-    .from(tactics);
+  // nový řádek patří hned pod poslední řádek svého sdělení, ne na konec bloku
+  const [{ lineMax }] = await db
+    .select({ lineMax: sql<number | null>`max(${tactics.position})` })
+    .from(tactics)
+    .where(eq(tactics.messageLineId, line.id));
+  let position: number;
+  if (lineMax !== null && lineMax !== undefined) {
+    position = Number(lineMax) + 1;
+    await db.update(tactics).set({ position: sql`${tactics.position} + 1` }).where(sql`${tactics.position} > ${Number(lineMax)}`);
+  } else {
+    const [{ max }] = await db
+      .select({ max: sql<number>`coalesce(max(${tactics.position}), -1)` })
+      .from(tactics);
+    position = Number(max) + 1;
+  }
 
   const [t] = await db
     .insert(tactics)
-    .values({ messageLineId: line.id, channel, mediaType, position: Number(max) + 1 })
+    .values({ messageLineId: line.id, channel, mediaType, position })
     .returning();
 
   await db.insert(tacticBudgets).values(
@@ -1630,6 +1643,7 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
             const [nt] = await db.insert(tactics).values({
               messageLineId: nl.id, channel: t.channel, mediaType: t.mediaType,
               channelType: t.channelType, targetGroupId: t.targetGroupId,
+              mediumId: t.mediumId, platformId: t.platformId, label: t.label,
               position: t.position, note: t.note,
             }).returning();
 
@@ -2014,6 +2028,17 @@ export async function setTacticMedia(raw: z.input<typeof tacticMedia>): Promise<
           await db.update(tacticBudgets).set({ planned }).where(eq(tacticBudgets.id, r.id));
         }
       }
+      // plán po týdnech: přepočítat týdny a měsíce z nich, jinak by je sync přepsal starými částkami
+      const weeks = await db.select().from(tacticBudgetWeeks).where(eq(tacticBudgetWeeks.tacticId, data.tacticId));
+      if (weeks.length) {
+        for (const w of weeks) {
+          const planned = Math.round(derive({
+            channelType, driver: w.driver as PlanUnit, driverValue: w.driverValue, unitPrice: w.unitPrice, universe,
+          }).budget);
+          if (planned !== w.planned) await db.update(tacticBudgetWeeks).set({ planned }).where(eq(tacticBudgetWeeks.id, w.id));
+        }
+        await syncMonthsFromWeeks(data.tacticId);
+      }
     }
 
     await log(me!.id, "plan", items);
@@ -2353,6 +2378,152 @@ export async function deleteReachMeasurement(id: string): Promise<Result> {
     await log(me!.id, "plan", [`Smazáno měření zásahu ${row.channelType}${row.label ? ` (${row.label})` : ""}`, what]);
     revalidatePath("/kalkulacka");
     revalidatePath("/prehled");
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ------------------------------------------------- médium a platforma
+
+/**
+ * Médium a platforma taktiky z číselníku. Médium určuje nosič — když se liší,
+ * nosič se změní přes setTacticMedia (s jeho kontrolou oprávnění i přepočtem
+ * rozpočtů). Platforma musí patřit vybranému médiu.
+ */
+export async function setTacticCatalog(raw: { tacticId: string; mediumId: string | null; platformId: string | null }): Promise<Result> {
+  try {
+    const data = z.object({ tacticId: z.string().min(1), mediumId: z.string().nullable(), platformId: z.string().nullable() }).parse(raw);
+    const me = await currentPrincipal();
+    const before = await tacticCoords(data.tacticId);
+    assertCan(me, "write", at(before, "plan", null));
+    const [medium] = data.mediumId ? await db.select().from(media).where(eq(media.id, data.mediumId)) : [];
+    if (data.mediumId && !medium) return { ok: false, error: "Médium neexistuje." };
+    if (data.platformId) {
+      const [pl] = await db.select().from(platforms).where(eq(platforms.id, data.platformId));
+      if (!pl || pl.mediumId !== data.mediumId) return { ok: false, error: "Platforma nepatří k vybranému médiu." };
+    }
+    if (medium && medium.channelType !== before.channelType) {
+      const res = await setTacticMedia({ tacticId: data.tacticId, channelType: medium.channelType });
+      if (!res.ok) return res;
+    }
+    await db.update(tactics).set({ mediumId: data.mediumId, platformId: data.platformId }).where(eq(tactics.id, data.tacticId));
+    await log(me!.id, "plan", [`Médium ${before.channel}: ${medium?.name ?? "—"}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Doplní médium a platformu položkám plánu, které je nemají, podle názvu
+ * (guessCatalog). Jen jisté shody — zbytek zůstane k ručnímu doplnění.
+ */
+export async function autofillCatalog(planId: string): Promise<Result & { filled?: number; left?: number }> {
+  try {
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, planId, campaignId: null, month: null });
+    const cat = await getCatalog();
+    const rows = await db
+      .select({ id: tactics.id, channel: tactics.channel, channelType: tactics.channelType, mediumId: tactics.mediumId })
+      .from(tactics)
+      .innerJoin(messageLines, eq(tactics.messageLineId, messageLines.id))
+      .innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
+      .where(eq(campaigns.planId, planId));
+    let filled = 0, left = 0;
+    for (const r of rows.filter((x) => !x.mediumId)) {
+      const g = guessCatalog(r.channel, r.channelType);
+      const m = g && cat.find((x) => x.name === g.medium);
+      // odhad jen v rámci téhož nosiče — automatika nemá měnit, jak se počítá zásah
+      if (!m || m.channelType !== r.channelType) { left++; continue; }
+      const p = g.platform ? m.platforms.find((x) => x.name === g.platform) : null;
+      await db.update(tactics).set({ mediumId: m.id, platformId: p?.id ?? null }).where(eq(tactics.id, r.id));
+      filled++;
+    }
+    if (filled) await log(me!.id, "plan", [`Média doplněna podle názvů: ${filled} položek, ${left} zbývá ručně`]);
+    revalidatePath("/");
+    return { ok: true, filled, left };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const mediumInput = z.object({
+  id: z.string().optional(),
+  name: z.string().trim().min(1).max(80),
+  channelType: z.enum(channelTypeEnum.enumValues),
+});
+
+/** Číselník médií — úpravy smí, kdo smí kalibrovat model (administrátor, plánovač). */
+export async function saveMedium(raw: z.input<typeof mediumInput>): Promise<Result> {
+  try {
+    const data = mediumInput.parse(raw);
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    const [clash] = await db.select({ id: media.id }).from(media).where(eq(media.name, data.name));
+    if (clash && clash.id !== data.id) return { ok: false, error: `Médium „${data.name}" už existuje.` };
+    if (data.id) {
+      await db.update(media).set({ name: data.name, channelType: data.channelType }).where(eq(media.id, data.id));
+    } else {
+      const [{ max }] = await db.select({ max: sql<number>`coalesce(max(${media.position}), -1)` }).from(media);
+      await db.insert(media).values({ name: data.name, channelType: data.channelType, position: Number(max) + 1 });
+    }
+    await log(me!.id, "plan", [`Číselník: médium „${data.name}" (${data.channelType})`]);
+    revalidatePath("/nastaveni");
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function deleteMedium(id: string): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    const [m] = await db.delete(media).where(eq(media.id, id)).returning();
+    if (m) await log(me!.id, "plan", [`Číselník: smazáno médium „${m.name}" (položky ho ztratí, čísla zůstanou)`]);
+    revalidatePath("/nastaveni");
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function savePlatform(raw: { id?: string; mediumId: string; name: string }): Promise<Result> {
+  try {
+    const data = z.object({ id: z.string().optional(), mediumId: z.string().min(1), name: z.string().trim().min(1).max(80) }).parse(raw);
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    const [clash] = await db.select({ id: platforms.id }).from(platforms)
+      .where(and(eq(platforms.mediumId, data.mediumId), eq(platforms.name, data.name)));
+    if (clash && clash.id !== data.id) return { ok: false, error: `Platforma „${data.name}" u média už je.` };
+    if (data.id) {
+      await db.update(platforms).set({ name: data.name }).where(eq(platforms.id, data.id));
+    } else {
+      const [{ max }] = await db.select({ max: sql<number>`coalesce(max(${platforms.position}), -1)` })
+        .from(platforms).where(eq(platforms.mediumId, data.mediumId));
+      await db.insert(platforms).values({ mediumId: data.mediumId, name: data.name, position: Number(max) + 1 });
+    }
+    await log(me!.id, "plan", [`Číselník: platforma „${data.name}"`]);
+    revalidatePath("/nastaveni");
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function deletePlatform(id: string): Promise<Result> {
+  try {
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    const [p] = await db.delete(platforms).where(eq(platforms.id, id)).returning();
+    if (p) await log(me!.id, "plan", [`Číselník: smazána platforma „${p.name}"`]);
+    revalidatePath("/nastaveni");
     revalidatePath("/");
     return { ok: true };
   } catch (e) {

@@ -248,6 +248,20 @@ modelový zásah 1+ za období, pruh rozdělení rozpočtu, tabulka médií (dor
 impresích, cena za jednotku jen pro agenturu, zásah) s **flowchartem po měsících** a rozpadem
 na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* schová navigaci.
 
+### Médium a platforma
+
+Každá položka má **Médium** (kde se nakupuje: Google Ads, Sklik, Meta Ads, TikTok Ads, AdForm,
+DV360, Nova, Prima, Radiohouse…) a **Platformu** (typ kampaně v médiu: Search, Performance Max,
+Demand Gen, YouTube…). Platforma nabízí jen to, co k vybranému médiu patří; médium samo nastaví
+nosič, ze kterého se počítá zásah. V Plánování jde filtrovat podle média i platformy.
+Číselník (podle technické karty Fragile) se upravuje v **Nastavení → Média a platformy**.
+Položkám bez média je doplní tlačítko **Doplnit podle názvů** (jen jisté shody, např.
+„META" → Meta Ads, „SEA" → Google Ads · Search).
+
+**Řádky a sdělení:** „+ řádek" u sdělení (pod myší) přidá položku právě k tomuto sdělení.
+**Oblast** se vybírá zaškrtnutím — jedna oblast = 100 %, víc oblastí rovným dílem
+(procenta jdou upravit).
+
 ### Plán po týdnech
 
 V **Nastavení plánu → Plánovat po: Měsících / Týdnech** (jeden přepínač pro celý plán).

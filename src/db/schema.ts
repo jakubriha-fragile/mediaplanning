@@ -212,6 +212,35 @@ export const duplications = pgTable(
   (t) => ({ uq: uniqueIndex("duplication_uq").on(t.typeA, t.typeB) }),
 );
 
+/**
+ * Číselník médií a platforem (podle technické karty Fragile): Médium = kde se
+ * nakupuje (Google Ads, Sklik, Meta Ads, Nova, Radiohouse…), Platforma = typ
+ * kampaně nebo prostor v něm (Search, Performance Max, YouTube…). Médium určuje
+ * nosič — vybráním média se taktice nastaví i nosič, ze kterého se počítá zásah.
+ * Platí pro celou agenturu, ne pro klienta: je to know-how nákupu.
+ */
+export const media = pgTable(
+  "medium",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    name: text("name").notNull(),
+    channelType: channelTypeEnum("channel_type").notNull(),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => ({ uq: uniqueIndex("medium_uq").on(t.name) }),
+);
+
+export const platforms = pgTable(
+  "platform",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    mediumId: text("medium_id").notNull().references(() => media.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => ({ uq: uniqueIndex("platform_uq").on(t.mediumId, t.name) }),
+);
+
 export const campaigns = pgTable(
   "campaign",
   {
@@ -248,6 +277,9 @@ export const tactics = pgTable(
     label: text("label"),
     mediaType: mediaTypeEnum("media_type").notNull(),
     channelType: channelTypeEnum("channel_type").notNull().default("Digital"),
+    /** Médium a platforma z číselníku (NULL = zatím nevybráno). */
+    mediumId: text("medium_id").references(() => media.id, { onDelete: "set null" }),
+    platformId: text("platform_id").references(() => platforms.id, { onDelete: "set null" }),
     /** NULL = použije se cílová skupina plánu. */
     targetGroupId: text("target_group_id").references(() => targetGroups.id, { onDelete: "set null" }),
     position: integer("position").notNull().default(0),

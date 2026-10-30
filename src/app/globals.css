@@ -865,3 +865,24 @@ table .btn, .toolbar .btn[style*="font-size: 11"] { min-height: 24px; padding: 0
 .sb-ver { display: flex; flex-direction: column; gap: 1px; font-size: 10.5px; color: var(--muted); line-height: 1.45; }
 .sb-ver b { font-weight: 500; color: var(--brand-ink); }
 .shell { padding-bottom: 24px; }
+.themerow input[type="checkbox"] { width: auto; padding: 0; }
+.themerow span.share, .themerow > span { flex: none; }
+.themerow.on label span { font-weight: 500; color: var(--brand-ink); }
+/* „+ řádek" u sdělení jen pod myší — v každém řádku by rušil */
+table.plan .rowadd { opacity: 0; font-size: 11px; text-decoration: none; }
+table.plan tr:hover .rowadd, table.plan .rowadd:focus-visible { opacity: 1; }
+@media (hover: none) { table.plan .rowadd { opacity: 1; } }
+
+/* číselník médií */
+.catalog { display: grid; gap: 4px; padding: 8px 14px; }
+.catalog-ct { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); padding: 10px 0 4px; }
+.catalog-row { display: grid; grid-template-columns: 300px 1fr auto; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.catalog-medium { display: flex; gap: 6px; align-items: center; }
+.catalog-medium input { font-weight: 500; }
+.catalog-medium select { width: 96px; }
+.catalog-plats { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.catalog-plats .chip { display: inline-flex; align-items: center; gap: 2px; cursor: default; }
+.catalog-new { width: 130px !important; border: 1px dashed var(--line-strong) !important; }
+.catalog-add { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.catalog-row .btn.danger { opacity: 0; }
+.catalog-row:hover .btn.danger, .catalog-row .btn.danger:focus-visible { opacity: 1; }
