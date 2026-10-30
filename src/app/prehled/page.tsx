@@ -4,7 +4,7 @@ import { getUser, getVisiblePlans, pickPlan, getPlan, getTargetGroups, getThemes
 import { can } from "@/lib/permissions";
 import { channelTypeEnum, type ChannelType } from "@/db/schema";
 import { getDashboard } from "@/lib/dashboard";
-import { planTitle, monthShort, periodLabel } from "@/lib/period";
+import { planTitle, monthShort, periodLabel, weeksOfPeriod } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
 import { PlanSwitcher } from "@/components/PlanSwitcher";
 import { Overview } from "@/components/dashboard/Overview";
@@ -53,9 +53,17 @@ export default async function OverviewPage({
 
   // u ročního plánu přes přelom roku je potřeba vidět rok, jinak stačí měsíc
   const crossYear = plan.periodStart.slice(0, 4) !== plan.periodEnd.slice(0, 4);
-  const monthLabels = Object.fromEntries(data.months.map((m) => [
+  const monthLabels: Record<string, string> = Object.fromEntries(data.months.map((m) => [
     m, crossYear ? `${monthShort(m)} ${m.slice(2, 4)}` : monthShort(m),
   ]));
+  // plán po týdnech: popisky týdnů („T5") pro graf
+  if (plan.granularity === "week") {
+    // týden 5 může být v ročním plánu dvakrát (únor 2027 i únor 2028) — u druhého roku přidáme rok
+    const y0 = plan.periodStart.slice(0, 4);
+    for (const w of weeksOfPeriod(plan.periodStart, plan.periodEnd)) {
+      monthLabels[w.key] = w.key.slice(0, 4) === y0 || w.num > 40 ? w.label : `${w.label} ’${w.key.slice(2, 4)}`;
+    }
+  }
 
   return (
     <Chrome active="prehled" user={chrome} planId={planId} title={{ client: plan.clientName, period: planTitle(plan) }}>

@@ -60,7 +60,12 @@ export function Overview({
     start(async () => { await updatePlan({ planId, freqLimit: v }); router.refresh(); });
   };
 
-  const { points, total, freqLimit: limit } = data;
+  const { total, freqLimit: limit } = data;
+  // plán po týdnech: graf i přetížení po skutečných týdnech
+  const weekly = !!data.weekPoints;
+  const points = data.weekPoints ?? data.points;
+  const unit = weekly ? { one: "týden", few: "týdny", many: "týdnů", calm: "nejklidnější týden", over: "Týdny s přehlcením" }
+    : { one: "měsíc", few: "měsíce", many: "měsíců", calm: "nejklidnější měsíc", over: "Měsíce s přehlcením" };
   const live = points.filter((p) => p.cost > 0);
   const labels = points.map((p) => monthLabels[p.month]);
   const over = points.filter((p) => p.frequency > limit);
@@ -106,7 +111,7 @@ export function Overview({
   if (over.length && live.length > over.length) {
     const calm = live.filter((p) => p.frequency <= limit && p.frequency > 0).sort((a, b) => a.frequency - b.frequency)[0];
     if (calm) todos.push({
-      title: `${monthLabels[calm.month]} je nejklidnější měsíc (${freq(calm.frequency)} týdně)`,
+      title: `${monthLabels[calm.month]} je ${unit.calm} (${freq(calm.frequency)} týdně)`,
       text: <>Sem jde přesunout tlak z přetížených měsíců, aniž by se překročila hranice {limit}× týdně.</>,
     });
   }
@@ -167,7 +172,7 @@ export function Overview({
           <span className="db-sub">za celé období</span>
         </div>
         <div className={`db-card db-kpi ${over.length ? "is-alert" : ""}`}>
-          <span className="db-label">Měsíce s přehlcením</span>
+          <span className="db-label">{unit.over}</span>
           <span className="db-big">{over.length} z {live.length}</span>
           <span className="db-sub">frekvence nad {limit}× týdně</span>
         </div>
@@ -177,7 +182,7 @@ export function Overview({
         <section className="db-card">
           <div className="db-cardhead">
             <div>
-              <h3>Zásah a frekvence po měsících</h3>
+              <h3>Zásah a frekvence po {weekly ? "týdnech" : "měsících"}</h3>
               <p className="db-note">Nahoře kolik lidí reklama zasáhne, dole kolikrát ji zasažený uvidí za týden.
                 Šedý pás je rozumná frekvence, oranžově kontakty navíc.</p>
             </div>
@@ -196,7 +201,7 @@ export function Overview({
             <span><i className="db-sw" style={{ background: "var(--bad-pure)" }} />Kontakty nad rozumnou frekvencí</span>
           </div>
           <ReachFrequency
-            caption="Zásah a frekvence po měsících"
+            caption={`Zásah a frekvence po ${weekly ? "týdnech" : "měsících"}`}
             labels={labels}
             tv={points.map((p) => p.tvReach)}
             inc={points.map((p) => Math.max(0, p.net - p.tvReach))}

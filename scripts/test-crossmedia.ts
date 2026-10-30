@@ -9,7 +9,7 @@ import {
   derive, combineReach, incrementalReach, reachFromGrp, grpForReach,
   effectiveReach, duplicationOf, DEFAULT_CURVE, isGrpPriced, kFromMeasured,
 } from "../src/lib/crossmedia";
-import { periodLabel } from "../src/lib/period";
+import { periodLabel, weeksOfPeriod, monthsBetween } from "../src/lib/period";
 import { costKind } from "../src/lib/costKind";
 import { shortName, displayName } from "../src/lib/displayName";
 import { resolveMetrics, derivedOf, baseOf } from "../src/lib/metrics";
@@ -185,6 +185,26 @@ console.log("\nTyp nákladu (agenturní práce vs. média)");
   ok("ambasador je honorář", costKind("BENU Longevity - ambasádor") === "fee");
   ok("TV spot jsou média", costKind("TV – hlavní brandový spot") === "media");
   ok("partnerství / event / OOH je smíšené", costKind("Partnerství / event / OOH (bude upřesněno)") === "mixed");
+}
+
+console.log("\nTýdny plánu");
+{
+  const w = weeksOfPeriod("2027-02", "2028-01");
+  const feb = w[0];
+  ok("první týden začíná pondělím 1. 2. 2027", feb.key === "2027-02-01", feb.key);
+  ok("1. 2. 2027 je ISO týden 5 (jako v Excelu BENU)", feb.num === 5, String(feb.num));
+  const split = w.find((x) => x.key === "2027-03-29")!;
+  ok("týden 29. 3.–4. 4. se dělí 3 dny březen / 4 duben",
+    split.parts.length === 2 && split.parts[0].days === 3 && split.parts[1].days === 4, JSON.stringify(split.parts));
+  const daysPerMonth = new Map<string, number>();
+  for (const x of w) for (const p of x.parts) daysPerMonth.set(p.month, (daysPerMonth.get(p.month) ?? 0) + p.days);
+  ok("každý měsíc plánu má všechny své dny", monthsBetween("2027-02", "2028-01").every((m) => {
+    const [y, mo] = m.split("-").map(Number);
+    return daysPerMonth.get(m) === new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  }));
+  ok("dny mimo období se nepočítají", w.at(-1)!.parts.every((p) => p.month <= "2028-01"));
+  const jan = weeksOfPeriod("2027-01", "2027-01");
+  ok("leden 2027 začíná týdnem 53 roku 2026", jan[0].num === 53 && jan[0].parts[0].days === 3, `${jan[0].num} ${JSON.stringify(jan[0].parts)}`);
 }
 
 console.log("\nKrátké názvy položek");

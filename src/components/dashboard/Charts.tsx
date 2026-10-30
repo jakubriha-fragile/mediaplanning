@@ -226,6 +226,10 @@ export function ReachFrequency({
   const yF = (v: number) => f0 + FH - (v / fTop) * FH;
   const fmtF = (v: number) => (v ? v.toFixed(1).replace(".", ",") + "×" : "—");
   const lowBand = Math.min(3, limit);
+  // u týdnů (~53 sloupců) se popisky nevejdou: osa ukáže každý n-tý, hodnoty
+  // nad sloupci jen když je místo — přesné číslo je v nápovědě po najetí myší
+  const step = Math.max(1, Math.ceil(labels.length / Math.max(1, Math.floor(iw / 36))));
+  const showValues = band >= 26;
 
   return (
     <div className="db-chart" ref={ref}>
@@ -252,14 +256,16 @@ export function ReachFrequency({
           const tvH = tv[i] * RH, incH = inc[i] * RH;
           const f = freq[i], base = Math.min(f, limit);
           return (
-            <g key={lab}>
+            <g key={i}>
               {hover === i && <rect x={L + band * i} y={T} width={band} height={H - T - 6} className="db-hoverband" />}
               {tvH > 0 && <path d={topRounded(x, yR(tv[i]) + (incH > 0 ? 2 : 0), bw, tvH - (incH > 0 ? 2 : 0))} style={{ fill: "var(--m-tv)" }} />}
               {incH > 0 && <path d={topRounded(x, yR(tv[i] + inc[i]), bw, incH)} style={{ fill: "var(--m-inc)" }} />}
               {f > 0 && <path d={topRounded(x, yF(base) + (f > limit ? 2 : 0), bw, yF(0) - yF(base) - (f > limit ? 2 : 0))} style={{ fill: "var(--m-tv)" }} />}
               {f > limit && <path d={topRounded(x, yF(f), bw, yF(limit) - yF(f))} style={{ fill: "var(--bad-pure)" }} />}
-              {f > 0 && <text x={x + bw / 2} y={yF(f) - 6} textAnchor="middle" className="db-vlab">{fmtF(f)}</text>}
-              <text x={x + bw / 2} y={T + RH + 20} textAnchor="middle" className={hover === i ? "db-xlab on" : "db-xlab"}>{lab}</text>
+              {f > 0 && (showValues || hover === i) && <text x={x + bw / 2} y={yF(f) - 6} textAnchor="middle" className="db-vlab">{fmtF(f)}</text>}
+              {(i % step === 0 || hover === i) && (
+                <text x={x + bw / 2} y={T + RH + 20} textAnchor="middle" className={hover === i ? "db-xlab on" : "db-xlab"}>{lab}</text>
+              )}
               <rect x={L + band * i} y={T} width={band} height={H - T} fill="transparent" onMouseEnter={() => setHover(i)} />
             </g>
           );
@@ -285,10 +291,10 @@ export function ReachFrequency({
       {table && (
         <div className="db-tablewrap">
           <table className="db-table">
-            <thead><tr><th>Měsíc</th><th>Zasáhne TV</th><th>Navíc ostatní</th><th>Celkem</th><th>Od začátku</th><th>Frekvence</th></tr></thead>
+            <thead><tr><th>Období</th><th>Zasáhne TV</th><th>Navíc ostatní</th><th>Celkem</th><th>Od začátku</th><th>Frekvence</th></tr></thead>
             <tbody>
               {labels.map((l, i) => (
-                <tr key={l}><td>{l}</td><td>{formatPct(tv[i])}</td><td>{formatPct(inc[i])}</td>
+                <tr key={i}><td>{l}</td><td>{formatPct(tv[i])}</td><td>{formatPct(inc[i])}</td>
                   <td>{formatPct(tv[i] + inc[i])}</td><td>{formatPct(cum[i])}</td><td>{fmtF(freq[i])}</td></tr>
               ))}
             </tbody>

@@ -36,7 +36,8 @@ JWT session) · Vercel.
 src/lib/permissions.ts   JEDINÉ místo, kde se rozhoduje o oprávněních
 src/lib/crossmedia.ts    přepočty jednotek, křivky zásahu, zásah a překryv
 src/lib/pacing.ts        výpočty plnění (plán vs. realita v čase)
-src/lib/period.ts        měsíce a kvartály odvozené z období plánu
+src/lib/period.ts        měsíce, kvartály a týdny (weeksOfPeriod) odvozené z období plánu
+src/lib/weeks.ts         plán po týdnech: přepočet týdny → měsíce, převod měsíce → týdny
 src/lib/actions.ts       VŠECHNY zápisy; každý projde assertCan()
 src/lib/queries.ts       čtení dat pro stránky
 src/lib/undo.ts          zásobník vrácení zpět (10 kroků na uživatele)
@@ -160,6 +161,15 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
 16. **Kalibrace zásahu** (`reach_measurement` → `fitCurve` → `reach_curve`) se přepočítá
    při každém přidání/smazání měření; bez měření se řádek křivky smaže a platí
    `DEFAULT_CURVE`. Jedno měření určí jen k (strop z předpokladu), dvě a víc i strop.
+
+17. **Plán po týdnech** (`plan.granularity = "week"`, přepínač v Nastavení plánu — jeden
+   pro celý plán, ne po médiích). Týdny žijí v `tactic_budget_week` (klíč = pondělí),
+   měsíce v `tactic_budget` se z nich VŽDY sečtou (`syncMonthsFromWeeks`); týden přes
+   přelom se dělí podle dnů. Všechno měsíční (součty, Výsledky, zásah, oprávnění)
+   tak funguje beze změny. Měsíční zápisy plánu jsou v týdenním plánu zakázané
+   (`assertMonthly`). Zápis týdne vyžaduje právo ke VŠEM měsícům, do kterých týden
+   zasahuje. Převod měsíce → týdny drží měsíční součty přesně (přelomové týdny se
+   ořežou, zbytek dorovnají týdny uvnitř měsíce). Skutečnost zůstává po měsících.
 
 ## Ověřování — pouštět před každou dodávkou
 

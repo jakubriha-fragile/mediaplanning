@@ -124,6 +124,10 @@ export const plans = pgTable(
     /** Hranice přehlcení — průměrná TÝDENNÍ frekvence, nad kterou Přehled hlásí
      *  přetížení. U plánu, ne v prohlížeči: všichni mají vidět stejná doporučení. */
     freqLimit: integer("freq_limit").notNull().default(5),
+    /** Plánuje se po měsících, nebo po týdnech. Jeden přepínač pro celý plán —
+     *  různá granularita pro různá média by byla zmatek (zadavatel, říjen 2026).
+     *  Po týdnech: hodnoty žijí v tactic_budget_week a měsíce se z nich dopočítají. */
+    granularity: text("granularity").$type<"month" | "week">().notNull().default("month"),
     position: integer("position").notNull().default(0),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -317,6 +321,26 @@ export const tacticBudgets = pgTable(
     unitPrice: doublePrecision("unit_price").notNull().default(0),
   },
   (t) => ({ uq: uniqueIndex("tactic_budget_uq").on(t.tacticId, t.month) }),
+);
+
+/**
+ * Plán po týdnech (jen když plan.granularity = "week"). Týden = pondělí–neděle,
+ * klíč je datum pondělí. Měsíční řádky v tactic_budget se z týdnů DOPOČÍTÁVAJÍ
+ * (týden přes přelom podle dnů) — všechny součty, Výsledky i model zásahu
+ * dál pracují s měsíci a o týdnech nemusí vědět.
+ */
+export const tacticBudgetWeeks = pgTable(
+  "tactic_budget_week",
+  {
+    id: text("id").primaryKey().$defaultFn(createId),
+    tacticId: text("tactic_id").notNull().references(() => tactics.id, { onDelete: "cascade" }),
+    week: text("week").notNull(),
+    planned: integer("planned").notNull().default(0),
+    driver: planUnitEnum("driver").notNull().default("budget"),
+    driverValue: doublePrecision("driver_value").notNull().default(0),
+    unitPrice: doublePrecision("unit_price").notNull().default(0),
+  },
+  (t) => ({ uq: uniqueIndex("tactic_budget_week_uq").on(t.tacticId, t.week) }),
 );
 
 export const metrics = pgTable(

@@ -60,6 +60,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
         currentMonth={currentMonth}
         clientView={me.role === "CLIENT"}
         undoLabel={undo[0]?.label ?? null}
+        weekly={plan.granularity === "week"}
       />
     </Chrome>
   );

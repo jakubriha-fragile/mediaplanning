@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
-  setTacticThemes, createTheme, renameCampaign, setPlannedBudgets,
+  setTacticThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks,
 } from "@/lib/actions";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
 import { Combo, type ComboOption } from "@/components/Combo";
@@ -42,7 +42,12 @@ export type PlanRow = {
   actuals: Record<string, number>;
   /** které měsíce smí tenhle uživatel u téhle taktiky editovat (rozhodl server) */
   editable: Record<string, boolean>;
+  /** plán po týdnech: buňky týdnů (klíč = pondělí); null = plán po měsících */
+  weekCells: Record<string, PlanRow["cells"][string]> | null;
+  weekEditable: Record<string, boolean> | null;
 };
+
+export type PlanWeek = { key: string; label: string; title: string; home: string };
 
 export type CampaignInfo = {
   id: string;
@@ -67,7 +72,8 @@ const UNITS: PlanUnit[] = ["budget", "grp", "impressions"];
 /** Sloupec tabulky je buď měsíc, nebo sbalený kvartál. */
 type Col =
   | { kind: "m"; key: string; label: string; months: string[] }
-  | { kind: "q"; key: string; label: string; months: string[] };
+  | { kind: "q"; key: string; label: string; months: string[] }
+  | { kind: "w"; key: string; label: string; months: string[]; title: string };
 
 // Vždy viditelné: úchyt, sdělení, typ (Paid/Owned/Earned), kanál, oblast, nosič.
 // Pod „Podrobnostmi" fáze a cílení, u agentury navíc jednotka a cena — mění se
@@ -77,8 +83,10 @@ const RIGHT_COLS = 3;  // celkem, podíl, smazat
 
 export function PlanTable({
   rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel, clientView = false,
-  themes = [],
+  themes = [], weeks = null,
 }: {
+  /** plán po týdnech — sloupce jsou týdny, sbalit jde po měsících */
+  weeks?: PlanWeek[] | null;
   rows: PlanRow[];
   campaigns: CampaignInfo[];
   planId: string;
@@ -121,8 +129,22 @@ export function PlanTable({
   /** Sbalený kvartál se ukáže jako jeden součtový sloupec. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
+  // skupiny, které jde sbalit do jednoho sloupce: kvartály, u týdenního plánu měsíce
+  const groupsOfCols = useMemo(() => (weeks
+    ? months.map((m) => ({ key: m, label: monthLabels[m] ?? m, months: [m] }))
+    : quarters), [weeks, months, monthLabels, quarters]);
+
   const cols: Col[] = useMemo(() => {
     const out: Col[] = [];
+    if (weeks) {
+      for (const g of groupsOfCols) {
+        if (collapsed.has(g.key)) { out.push({ kind: "q", key: g.key, label: g.label, months: g.months }); continue; }
+        weeks.filter((w) => w.home === g.key).forEach((w, i) => {
+          out.push({ kind: "w", key: w.key, label: i === 0 ? `${g.label} · ${w.label}` : w.label, months: [g.key], title: w.title });
+        });
+      }
+      return out;
+    }
     for (const q of quarters) {
       if (collapsed.has(q.key)) {
         out.push({ kind: "q", key: q.key, label: q.label, months: q.months });
@@ -133,7 +155,7 @@ export function PlanTable({
       }
     }
     return out;
-  }, [quarters, collapsed, monthLabels]);
+  }, [quarters, collapsed, monthLabels, weeks, groupsOfCols]);
 
   const [types, setTypes] = useState<Record<string, boolean>>({ Paid: true, Owned: true, Earned: true });
   const [msgSel, setMsgSel] = useState<Set<string>>(new Set());
@@ -167,11 +189,16 @@ export function PlanTable({
     msgSel.size || chanSel.size || audSel.size || q.trim() || !types.Paid || !types.Owned || !types.Earned;
 
   const rowTotal = (r: PlanRow) => months.reduce((s, m) => s + r.budgets[m], 0);
-  const colOf = (r: PlanRow, c: Col) => c.months.reduce((s, m) => s + (r.budgets[m] ?? 0), 0);
+  const colOf = (r: PlanRow, c: Col) => c.kind === "w"
+    ? r.weekCells?.[c.key]?.budget ?? 0
+    : c.months.reduce((s, m) => s + (r.budgets[m] ?? 0), 0);
   const grand = data.reduce((s, r) => s + rowTotal(r), 0);
   const selTotal = visible.reduce((s, r) => s + rowTotal(r), 0);
   const colTotal = (c: Col) => visible.reduce((s, r) => s + colOf(r, c), 0);
-  const axisMax = Math.max(50000, ...data.flatMap((r) => months.map((m) => r.budgets[m])));
+  // pruh v buňce měří peníze na společném měřítku — u týdnů týdenní, jinak měsíční
+  const axisMax = weeks
+    ? Math.max(10000, ...data.flatMap((r) => Object.values(r.weekCells ?? {}).map((c) => c.budget)))
+    : Math.max(50000, ...data.flatMap((r) => months.map((m) => r.budgets[m])));
 
   /** Řídicí jednotka a cena jsou vlastností řádku — bereme je z prvního měsíce. */
   const rowUnit = (r: PlanRow): PlanUnit => r.cells[months[0]]?.driver ?? "budget";
@@ -238,22 +265,25 @@ export function PlanTable({
     const lines = text.replace(/\r/g, "").split("\n");
     if (lines.length && !lines[lines.length - 1].trim()) lines.pop();
     // hodnoty jdou jen do měsíců — sbalený kvartál se přeskočí
-    const monthCols = cols.map((c, i) => ({ c, i })).filter((x) => x.c.kind === "m" && x.i >= c0);
-    const items: Array<{ tacticId: string; month: string; driver: PlanUnit; value: number }> = [];
+    const editCols = cols.map((c, i) => ({ c, i })).filter((x) => (x.c.kind === "m" || x.c.kind === "w") && x.i >= c0);
+    const items: Array<{ tacticId: string; key: string; driver: PlanUnit; value: number }> = [];
     let skipped = 0;
     lines.forEach((line, i) => {
       const row = flat[r0 + i];
       line.split("\t").forEach((raw, j) => {
         const t = raw.trim();
         if (!t) return; // prázdná buňka v Excelu nic nepřepisuje
-        const mc = monthCols[j];
-        if (!row || !mc || !row.editable[mc.c.key]) { skipped++; return; }
-        items.push({ tacticId: row.id, month: mc.c.key, driver: rowUnit(row), value: parseNum(t) });
+        const ec = editCols[j];
+        const ok = row && ec && (weeks ? row.weekEditable?.[ec.c.key] : row.editable[ec.c.key]);
+        if (!ok) { skipped++; return; }
+        items.push({ tacticId: row.id, key: ec.c.key, driver: rowUnit(row), value: parseNum(t) });
       });
     });
     if (!items.length) { setInfo(skipped ? "Nic se nevložilo — cílové buňky jsou mimo tabulku nebo k nim nemáte oprávnění." : null); return; }
     run(() => {}, () => {}, async () => {
-      const res = await setPlannedBudgets({ items });
+      const res = weeks
+        ? await setPlannedWeeks({ items: items.map(({ key, ...x }) => ({ ...x, week: key })) })
+        : await setPlannedBudgets({ items: items.map(({ key, ...x }) => ({ ...x, month: key })) });
       if (res.ok) {
         const n = res.changed ?? 0;
         setInfo(`Vloženo z Excelu: ${n} ${n === 1 ? "hodnota" : n >= 2 && n <= 4 ? "hodnoty" : "hodnot"}` +
@@ -294,11 +324,11 @@ export function PlanTable({
               : { borderRadius: 999, color: "var(--muted)" }}
             onClick={() => setTypes((t) => ({ ...t, [ty]: !t[ty] }))}>{ty}</button>
         ))}
-        {quarters.length > 1 && (
-          <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-            <span className="share" style={{ marginRight: 2 }}>Kvartály</span>
-            {quarters.map((q) => (
-              <button key={q.key} className="btn" title={collapsed.has(q.key) ? "Rozbalit na měsíce" : "Sbalit do jednoho sloupce"}
+        {groupsOfCols.length > 1 && (
+          <span style={{ display: "inline-flex", gap: 3, alignItems: "center", flexWrap: "wrap" }}>
+            <span className="share" style={{ marginRight: 2 }}>{weeks ? "Měsíce" : "Kvartály"}</span>
+            {groupsOfCols.map((q) => (
+              <button key={q.key} className="btn" title={collapsed.has(q.key) ? (weeks ? "Rozbalit na týdny" : "Rozbalit na měsíce") : "Sbalit do jednoho sloupce"}
                 style={{ borderRadius: 999, fontSize: 11, padding: "2px 9px",
                   color: collapsed.has(q.key) ? "var(--muted)" : "var(--brand-ink)",
                   borderColor: collapsed.has(q.key) ? undefined : "var(--brand)" }}
@@ -311,8 +341,8 @@ export function PlanTable({
               </button>
             ))}
             <button className="btn" style={{ borderRadius: 999, fontSize: 11, padding: "2px 9px" }}
-              onClick={() => setCollapsed((c) => (c.size === quarters.length ? new Set() : new Set(quarters.map((q) => q.key))))}>
-              {collapsed.size === quarters.length ? "Rozbalit vše" : "Sbalit vše"}
+              onClick={() => setCollapsed((c) => (c.size === groupsOfCols.length ? new Set() : new Set(groupsOfCols.map((q) => q.key))))}>
+              {collapsed.size === groupsOfCols.length ? "Rozbalit vše" : "Sbalit vše"}
             </button>
           </span>
         )}
@@ -375,7 +405,7 @@ export function PlanTable({
               {showUnit && <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc kontaktů)">Cena (Kč)</th>}
               {cols.map((c) => (
                 <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
-                    title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : undefined}>
+                    title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : c.kind === "w" ? `Týden ${c.title}` : undefined}>
                   {c.label}
                 </th>
               ))}
@@ -656,6 +686,32 @@ export function PlanTable({
                               </td>
                             );
                           }
+                          if (c.kind === "w") {
+                            const wc = r.weekCells?.[c.key];
+                            return (
+                              <td key={c.key} className="budgetcell">
+                                <BudgetCell
+                                  value={wc?.driverValue ?? 0}
+                                  unit={unit}
+                                  budget={wc?.budget ?? 0}
+                                  grp={wc?.grp ?? 0}
+                                  impressions={wc?.impressions ?? 0}
+                                  reach={wc?.reach ?? 0}
+                                  actual={0} max={axisMax} type={r.mediaType}
+                                  disabled={!r.weekEditable?.[c.key]}
+                                  showDerived={!clientView}
+                                  estimated={!!wc?.estimated}
+                                  grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
+                                  onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
+                                  onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
+                                  onCommit={(v) => {
+                                    if ((wc?.driverValue ?? 0) === v) return;
+                                    run(() => {}, () => {},
+                                        () => setPlannedWeeks({ items: [{ tacticId: r.id, week: c.key, driver: unit, value: v }] }));
+                                  }} />
+                              </td>
+                            );
+                          }
                           const m = c.key;
                           const cell = r.cells[m];
                           return (
@@ -726,7 +782,9 @@ export function PlanTable({
         {canEditPlan && <><b>Jako v Excelu:</b> Enter a šipky přeskakují mezi měsíci, Tab doprava.
         Blok zkopírovaný z Excelu vložíte Ctrl+V (⌘V) do první buňky — rozloží se doprava a dolů,
         prázdné buňky nic nepřepíšou a celé vložení vrátíte jedním Zpět.<br /></>}
-        Délka pruhu = investice v měsíci na společném měřítku 0–{kc(axisMax)} Kč, oranžový proužek u dna =
+        {weeks && <><b>Plán po týdnech:</b> zadáváte týdny, měsíce (i sbalené) jsou jejich součet. Týden přes přelom
+        se do měsíců dělí podle dnů. Přepnout zpět na měsíce jde v Nastavení plánu.<br /></>}
+        Délka pruhu = investice v {weeks ? "týdnu" : "měsíci"} na společném měřítku 0–{kc(axisMax)} Kč, oranžový proužek u dna =
         skutečné čerpání. Barevný proužek u levého okraje řádku = kampaň.
         {canEditPlan && <> Úchyt ⠿ u řádku přetáhne taktiku — mezi řádky změní pořadí, na jiný blok ji přesune;
         úchyt u názvu bloku přetahuje celý blok.</>}

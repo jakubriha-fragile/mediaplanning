@@ -248,6 +248,20 @@ modelový zásah 1+ za období, pruh rozdělení rozpočtu, tabulka médií (dor
 impresích, cena za jednotku jen pro agenturu, zásah) s **flowchartem po měsících** a rozpadem
 na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* schová navigaci.
 
+### Plán po týdnech
+
+V **Nastavení plánu → Plánovat po: Měsících / Týdnech** (jeden přepínač pro celý plán).
+Po týdnech má tabulka sloupec na každý týden (T5, T6… — pondělí až neděle) a měsíce jdou
+sbalit do součtu; ovládání i vložení z Excelu fungují stejně. **Měsíce se z týdnů sčítají
+samy** — týden přes přelom (např. 29. 3.–4. 4.) se dělí podle dnů. Skutečnost, Výsledky,
+Finální mix i oprávnění zůstávají po měsících. Přehled ukazuje zásah a **skutečnou týdenní
+frekvenci** po týdnech, takže je vidět i nárazová vlna.
+
+Při přepnutí na týdny se každý měsíc rozloží rovnoměrně do svých dnů — měsíční i celkové
+součty zůstanou stejné, vlny pak upravíte. Přepnutí zpět na měsíce týdenní rozpis zahodí.
+Excel BENU má TRP po měsících (týdny jen jako dny na přelomu), takže skutečné vlny
+po týdnech je potřeba zadat ručně nebo vložit z podkladů TV nákupu.
+
 ### Výsledky (dřív Plnění a K vyplnění)
 
 Nahoře tři karty: **chybí vyplnit**, **ve skluzu** a **čerpáno** — kliknutím na první dvě se

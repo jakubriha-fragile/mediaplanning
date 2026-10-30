@@ -122,3 +122,72 @@ export function weeksIn(month: Month): number {
 
 /** Týdnů v celém období (součet měsíců). */
 export const weeksOf = (months: Month[]) => months.reduce((s, m) => s + weeksIn(m), 0);
+
+// ------------------------------------------------------------------ týdny
+
+/**
+ * Týden plánu: pondělí–neděle, klíč = datum pondělí („2027-02-01").
+ * `parts` říká, kolik dní týdne padne do kterého měsíce plánu — týden přes
+ * přelom se dělí podle dnů (rozhodnutí zadavatele, říjen 2026; odpovídá
+ * řádku „Days" a „Dec II" v Excelu BENU). Dny mimo období plánu se nepočítají.
+ */
+export type Week = {
+  key: string;
+  /** číslo týdne podle ISO 8601 */
+  num: number;
+  label: string;
+  parts: Array<{ month: Month; days: number }>;
+};
+
+const DAY = 86_400_000;
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+const monthOf = (d: Date): Month => isoDate(d).slice(0, 7);
+
+/** Číslo týdne podle ISO 8601 (týden patří roku, kde leží jeho čtvrtek). */
+export function isoWeekNumber(monday: Date): number {
+  const thu = new Date(monday.getTime() + 3 * DAY);
+  const jan1 = Date.UTC(thu.getUTCFullYear(), 0, 1);
+  return Math.floor((thu.getTime() - jan1) / DAY / 7) + 1;
+}
+
+export function weeksOfPeriod(start: Month, end: Month): Week[] {
+  const a = parseMonth(start);
+  const b = parseMonth(end);
+  const first = new Date(Date.UTC(a.year, a.month - 1, 1));
+  const last = new Date(Date.UTC(b.year, b.month, 0));
+  // pondělí na začátku prvního týdne (getUTCDay: 0 = neděle)
+  const mon = new Date(first.getTime() - ((first.getUTCDay() + 6) % 7) * DAY);
+  const out: Week[] = [];
+  for (let w = mon; w <= last; w = new Date(w.getTime() + 7 * DAY)) {
+    const parts: Week["parts"] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(w.getTime() + i * DAY);
+      if (d < first || d > last) continue;
+      const m = monthOf(d);
+      const p = parts.find((x) => x.month === m);
+      if (p) p.days++; else parts.push({ month: m, days: 1 });
+    }
+    const num = isoWeekNumber(w);
+    out.push({ key: isoDate(w), num, label: `T${num}`, parts });
+  }
+  return out;
+}
+
+/** „1.–7. 2." — rozsah týdne do nápovědy. */
+export function weekRange(key: string): string {
+  const d = new Date(key + "T00:00:00Z");
+  const e = new Date(d.getTime() + 6 * DAY);
+  const f = (x: Date) => `${x.getUTCDate()}. ${x.getUTCMonth() + 1}.`;
+  return d.getUTCMonth() === e.getUTCMonth() ? `${d.getUTCDate()}.–${f(e)}` : `${f(d)} – ${f(e)}`;
+}
+
+/** Měsíc, pod který se týden zobrazuje (kde leží většina jeho dnů v plánu). */
+export const weekHome = (w: Week): Month => [...w.parts].sort((x, y) => y.days - x.days)[0]?.month ?? "";
+
+/** Měsíce, do kterých zasahují dny týdne (bez ohledu na období plánu). */
+export function weekMonths(key: string): Month[] {
+  const d = new Date(key + "T00:00:00Z");
+  const out = new Set<Month>();
+  for (let i = 0; i < 7; i++) out.add(monthOf(new Date(d.getTime() + i * DAY)));
+  return [...out];
+}

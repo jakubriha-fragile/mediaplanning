@@ -15,7 +15,7 @@ import { and, eq, desc, asc, sql, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
-  tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, duplications, themes, tacticThemes, rateCards,
+  tactics, messageLines, campaigns, plans, clients, targetGroups, tacticBudgets, tacticBudgetWeeks, duplications, themes, tacticThemes, rateCards,
   reachMeasurements, reachCurves,
   metrics, metricTargets, actualSpends, metricActuals, accountNotes, grants,
   users, changeLog,
@@ -24,8 +24,9 @@ import {
 } from "@/db/schema";
 import { currentPrincipal } from "@/lib/auth";
 import { assertCan, canManageUsers, canSeePlan, PermissionError, ACCESS_LEVEL_LABEL } from "@/lib/permissions";
-import { monthLabel, monthsBetween, periodLabel, shiftYears, kc, num } from "@/lib/period";
+import { monthLabel, monthsBetween, periodLabel, shiftYears, kc, num, weekMonths, weekRange, weeksOfPeriod } from "@/lib/period";
 import { createId } from "@/lib/id";
+import { syncMonthsFromWeeks, monthsToWeeks, pruneWeeks, weekRow } from "@/lib/weeks";
 import { BASE, DERIVED, baseOf, derivedOf, type BaseKey } from "@/lib/metrics";
 import { derive, isGrpPriced, dupKey, DEFAULT_DUPLICATION, DEFAULT_CURVE, K_MIN, K_MAX, fitCurve } from "@/lib/crossmedia";
 import {
@@ -149,6 +150,7 @@ export async function setPlannedBudget(raw: z.input<typeof budgetInput>): Promis
     const me = await currentPrincipal();
     const c = await tacticCoords(tacticId);
     assertCan(me, "write", at(c, "plan", month));
+    await assertMonthly(c.planId);
 
     const done = await writeBudget(c, month, driver, value, unitPrice);
     if (!done) return { ok: true };
@@ -243,6 +245,7 @@ export async function setPlannedBudgets(raw: z.input<typeof budgetsInput>): Prom
     }
     const planIds = new Set([...coords.values()].map((c) => c.planId));
     if (planIds.size > 1) throw new PermissionError("Vložení přes víc plánů najednou není dovolené.");
+    await assertMonthly([...planIds][0]);
 
     const undo: UndoOp[] = [];
     const labels: string[] = [];
@@ -260,6 +263,142 @@ export async function setPlannedBudgets(raw: z.input<typeof budgetsInput>): Prom
   }
 }
 
+// ------------------------------------------------------------ plán po týdnech
+
+/** Plán po týdnech se mění jen po týdnech — měsíce jsou jejich součet. */
+async function assertMonthly(planId: string) {
+  const [p] = await db.select({ g: plans.granularity }).from(plans).where(eq(plans.id, planId));
+  if (p?.g === "week") throw new PermissionError("Plán je po týdnech — měňte hodnoty v týdnech, měsíce se z nich sečtou.");
+}
+
+/**
+ * Zápis jednoho týdne. Oprávnění: týden zasahuje do jednoho nebo dvou měsíců
+ * a uživatel musí smět zapisovat do všech — jinak by přes přelomový týden
+ * změnil měsíc, ke kterému grant nemá.
+ */
+async function writeWeek(
+  c: Awaited<ReturnType<typeof tacticCoords>>,
+  week: string,
+  driver: PlanUnit,
+  value: number,
+): Promise<{ label: string; undo: UndoOp } | null> {
+  const { tacticId, planId, channel, channelType, targetGroupId } = c;
+  const before = await weekRow(tacticId, week);
+  // cena za jednotku je vlastností řádku — vezme se z jiného týdne nebo z měsíců
+  let price = before?.unitPrice ?? 0;
+  if (!price) {
+    const [w] = await db.select({ p: tacticBudgetWeeks.unitPrice }).from(tacticBudgetWeeks)
+      .where(and(eq(tacticBudgetWeeks.tacticId, tacticId), sql`${tacticBudgetWeeks.unitPrice} > 0`)).limit(1);
+    const [m] = w ? [] : await db.select({ p: tacticBudgets.unitPrice }).from(tacticBudgets)
+      .where(and(eq(tacticBudgets.tacticId, tacticId), sql`${tacticBudgets.unitPrice} > 0`)).limit(1);
+    price = w?.p ?? m?.p ?? 0;
+  }
+  const universe = await universeFor(planId, targetGroupId);
+  const planned = Math.round(derive({ channelType, driver, driverValue: value, unitPrice: price, universe }).budget);
+  if (before && before.driverValue === value && before.driver === driver && before.planned === planned) return null;
+  if (!before && !value) return null;
+
+  await db.insert(tacticBudgetWeeks)
+    .values({ tacticId, week, planned, driver, driverValue: value, unitPrice: price })
+    .onConflictDoUpdate({
+      target: [tacticBudgetWeeks.tacticId, tacticBudgetWeeks.week],
+      set: { planned, driver, driverValue: value, unitPrice: price },
+    });
+  const unit = driver === "budget" ? " Kč" : driver === "grp" ? " GRP" : " imp.";
+  return {
+    label: `${channel} / týden ${weekRange(week)}: ${num(before?.driverValue ?? 0) || "—"} → ${num(value) || "—"}${unit}`,
+    undo: {
+      t: "budgetWeek", tacticId, week, existed: !!before,
+      planned: before?.planned ?? 0, driver: (before?.driver ?? driver) as PlanUnit,
+      driverValue: before?.driverValue ?? 0, unitPrice: before?.unitPrice ?? 0,
+    },
+  };
+}
+
+const weeksInput = z.object({
+  items: z.array(z.object({
+    tacticId: z.string().min(1),
+    week: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    driver: z.enum(planUnitEnum.enumValues),
+    value: z.number().min(0).max(100_000_000_000),
+  })).min(1).max(5000),
+});
+
+/**
+ * Zápis týdnů — jedna buňka i vložený blok z Excelu. Všechno, nebo nic:
+ * oprávnění a příslušnost týdne k plánu se ověří u každé buňky předem.
+ * Po zápisu se z týdnů přepočtou měsíce. Jeden krok pro vrácení zpět.
+ */
+export async function setPlannedWeeks(raw: z.input<typeof weeksInput>): Promise<Result & { changed?: number }> {
+  try {
+    const { items } = weeksInput.parse(raw);
+    const me = await currentPrincipal();
+    const coords = new Map<string, Awaited<ReturnType<typeof tacticCoords>>>();
+    for (const it of items) {
+      if (!coords.has(it.tacticId)) coords.set(it.tacticId, await tacticCoords(it.tacticId));
+    }
+    const planIds = [...new Set([...coords.values()].map((c) => c.planId))];
+    if (planIds.length > 1) throw new PermissionError("Zápis přes víc plánů najednou není dovolený.");
+    const [plan] = await db.select().from(plans).where(eq(plans.id, planIds[0]));
+    if (plan.granularity !== "week") return { ok: false, error: "Plán je po měsících — přepněte ho v Nastavení plánu na týdny." };
+    const valid = new Map(weeksOfPeriod(plan.periodStart, plan.periodEnd).map((w) => [w.key, w]));
+    for (const it of items) {
+      const w = valid.get(it.week);
+      if (!w) return { ok: false, error: "Týden není v období plánu." };
+      for (const p of w.parts) assertCan(me, "write", at(coords.get(it.tacticId)!, "plan", p.month));
+    }
+
+    const undo: UndoOp[] = [];
+    const labels: string[] = [];
+    const touched = new Set<string>();
+    for (const it of items) {
+      const done = await writeWeek(coords.get(it.tacticId)!, it.week, it.driver, it.value);
+      if (done) { undo.push(done.undo); labels.push(done.label); touched.add(it.tacticId); }
+    }
+    for (const id of touched) await syncMonthsFromWeeks(id);
+    if (!undo.length) return { ok: true, changed: 0 };
+    const n = undo.length;
+    await pushUndo(me!.id, n === 1 ? labels[0] : `Týdny plánu (${n} ${n <= 4 ? "hodnoty" : "hodnot"})`, undo);
+    await log(me!.id, "plan", labels.length > 12 ? [...labels.slice(0, 12), `… a dalších ${labels.length - 12}`] : labels);
+    revalidatePath("/");
+    return { ok: true, changed: n };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Přepnutí plánu mezi měsíci a týdny. Na měsíce: týdenní rozpis se zahodí,
+ * měsíce zůstanou, jak jsou. Na týdny: každý měsíc se rozloží rovnoměrně do
+ * svých dnů (součet plánu se nezmění). Vrátit zpět jde jen přepnutím — proto
+ * se v rozhraní potvrzuje.
+ */
+export async function setPlanGranularity(raw: { planId: string; granularity: "month" | "week" }): Promise<Result> {
+  try {
+    const data = z.object({ planId: z.string().min(1), granularity: z.enum(["month", "week"]) }).parse(raw);
+    const me = await currentPrincipal();
+    assertCan(me, "write", { area: "plan", mediaType: null, planId: data.planId, campaignId: null, month: null });
+    const [plan] = await db.select().from(plans).where(eq(plans.id, data.planId));
+    if (!plan) return { ok: false, error: "Plán neexistuje." };
+    if (plan.granularity === data.granularity) return { ok: true };
+
+    const ids = await planTacticIds(data.planId);
+    await db.update(plans).set({ granularity: data.granularity }).where(eq(plans.id, data.planId));
+    if (data.granularity === "week") {
+      for (const id of ids) await monthsToWeeks(id);
+    } else if (ids.length) {
+      await db.delete(tacticBudgetWeeks).where(inArray(tacticBudgetWeeks.tacticId, ids));
+    }
+    await log(me!.id, "plan", [
+      `Plán ${plan.name}: plánování po ${data.granularity === "week" ? "týdnech (měsíce rozloženy do týdnů podle dnů)" : "měsících (týdenní rozpis zrušen)"}`,
+    ]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 /** Jednotková cena (CPP/CPT) pro taktiku a měsíc — přepočítá rozpočet. */
 export async function setUnitPrice(raw: { tacticId: string; month: string; unitPrice: number }): Promise<Result> {
   try {
@@ -269,6 +408,7 @@ export async function setUnitPrice(raw: { tacticId: string; month: string; unitP
     const c = await tacticCoords(tacticId);
     const { planId, channel, channelType, targetGroupId } = c;
     assertCan(me, "write", at(c, "plan", month));
+    await assertMonthly(planId);
 
     const [before] = await db
       .select()
@@ -1349,6 +1489,7 @@ async function assertCanUndo(me: NonNullable<Awaited<ReturnType<typeof currentPr
   for (const op of ops) {
     switch (op.t) {
       case "budget": await tactic(op.tacticId, "plan", op.month); break;
+      case "budgetWeek": for (const m of weekMonths(op.week)) await tactic(op.tacticId, "plan", m); break;
       case "actual": await tactic(op.tacticId, "actuals", op.month); break;
       case "note": await tactic(op.tacticId, "actuals", op.month); break;
       case "metricTarget": await metric(op.metricId, "plan", op.month); break;
@@ -1433,6 +1574,10 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
         return { ok: false, error: "Ze zvoleného plánu nejde strukturu převzít." };
       }
     }
+    // kopie převezme i to, jestli se plánuje po týdnech — čísla se nekopírují, takže nic nepřepočítáváme
+    const [srcPlan] = data.copyFromPlanId
+      ? await db.select({ g: plans.granularity }).from(plans).where(eq(plans.id, data.copyFromPlanId))
+      : [];
 
     const [{ max }] = await db
       .select({ max: sql<number>`coalesce(max(${plans.position}), -1)` })
@@ -1447,6 +1592,7 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
         periodStart: data.periodStart,
         periodEnd: data.periodEnd,
         targetGroupId: data.targetGroupId,
+        granularity: srcPlan?.g ?? "month",
         position: Number(max) + 1,
       })
       .returning();
@@ -1678,6 +1824,7 @@ export async function updatePlan(raw: z.input<typeof planPatch>): Promise<Result
         }
       }
       revalidatePath("/vysledky");
+      if (before.granularity === "week") await pruneWeeks(data.planId, start, end);
     }
     await log(me!.id, "plan", items);
     revalidatePath("/prehled");
@@ -1947,7 +2094,7 @@ export async function setRowUnit(raw: {
     const driver = raw.driver ?? (before?.driver as PlanUnit) ?? "budget";
     const unitPrice = raw.unitPrice ?? before?.unitPrice ?? 0;
 
-    const undo = rows.map((r) => ({
+    const undo: UndoOp[] = rows.map((r) => ({
       t: "budget" as const, tacticId: r.tacticId, month: r.month,
       planned: r.planned, driver: r.driver as PlanUnit,
       driverValue: r.driverValue, unitPrice: r.unitPrice,
@@ -1975,6 +2122,26 @@ export async function setRowUnit(raw: {
           target: [tacticBudgets.tacticId, tacticBudgets.month],
           set: { planned, driver, driverValue: value, unitPrice },
         });
+    }
+
+    // plán po týdnech: jednotku a cenu dostanou i týdny a měsíce se z nich přepočtou
+    if (plan[0].granularity === "week") {
+      const weeks = await db.select().from(tacticBudgetWeeks).where(eq(tacticBudgetWeeks.tacticId, raw.tacticId));
+      for (const w of weeks) {
+        undo.push({
+          t: "budgetWeek", tacticId: w.tacticId, week: w.week, existed: true,
+          planned: w.planned, driver: w.driver as PlanUnit, driverValue: w.driverValue, unitPrice: w.unitPrice,
+        });
+        let value = w.driverValue;
+        if (raw.driver && raw.driver !== w.driver) {
+          const cur = derive({ channelType, driver: w.driver as PlanUnit, driverValue: w.driverValue, unitPrice: w.unitPrice, universe });
+          value = raw.driver === "budget" ? cur.budget : raw.driver === "grp" ? cur.grp : cur.impressions;
+        }
+        const planned = Math.round(derive({ channelType, driver, driverValue: value, unitPrice, universe }).budget);
+        await db.update(tacticBudgetWeeks).set({ planned, driver, driverValue: value, unitPrice })
+          .where(eq(tacticBudgetWeeks.id, w.id));
+      }
+      await syncMonthsFromWeeks(raw.tacticId);
     }
 
     const items: string[] = [];

@@ -1,7 +1,8 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { syncMonthsFromWeeks } from "@/lib/weeks";
 import {
-  undoEntries, tactics, tacticBudgets, messageLines, metrics, metricTargets, tacticThemes,
+  undoEntries, tactics, tacticBudgets, tacticBudgetWeeks, messageLines, metrics, metricTargets, tacticThemes,
   actualSpends, metricActuals, accountNotes, campaigns,
   type PlanUnit,
 } from "@/db/schema";
@@ -14,6 +15,9 @@ import {
 export type UndoOp =
   | { t: "budget"; tacticId: string; month: string; planned: number;
       driver?: PlanUnit; driverValue?: number; unitPrice?: number }
+  /** týden plánu po týdnech; `existed: false` = řádek před změnou nebyl, vrácení ho smaže */
+  | { t: "budgetWeek"; tacticId: string; week: string; planned: number;
+      driver: PlanUnit; driverValue: number; unitPrice: number; existed: boolean }
   | { t: "actual"; tacticId: string; month: string; amount: number }
   | { t: "metricTarget"; metricId: string; month: string; target: number }
   | { t: "metricActual"; metricId: string; month: string; value: number }
@@ -52,8 +56,22 @@ export async function listUndo(userId: string) {
 }
 
 export async function applyOps(ops: UndoOp[]) {
+  // měsíce se z týdnů přepočítají až po obnovení všech týdnů — jednou na taktiku
+  const resync = new Set<string>();
   for (const op of ops) {
     switch (op.t) {
+      case "budgetWeek": {
+        if (!op.existed) {
+          await db.delete(tacticBudgetWeeks)
+            .where(and(eq(tacticBudgetWeeks.tacticId, op.tacticId), eq(tacticBudgetWeeks.week, op.week)));
+        } else {
+          const row = { planned: op.planned, driver: op.driver, driverValue: op.driverValue, unitPrice: op.unitPrice };
+          await db.insert(tacticBudgetWeeks).values({ tacticId: op.tacticId, week: op.week, ...row })
+            .onConflictDoUpdate({ target: [tacticBudgetWeeks.tacticId, tacticBudgetWeeks.week], set: row });
+        }
+        resync.add(op.tacticId);
+        break;
+      }
       case "budget": {
         const row = {
           planned: op.planned,
@@ -128,6 +146,7 @@ export async function applyOps(ops: UndoOp[]) {
         break;
     }
   }
+  for (const id of resync) await syncMonthsFromWeeks(id);
 }
 
 /** Operace posledního kroku bez provedení — aby šlo nejdřív ověřit oprávnění. */

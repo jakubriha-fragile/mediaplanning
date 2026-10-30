@@ -1,7 +1,7 @@
 import type { ChannelType, PlanUnit } from "@/db/schema";
 import { derive, combineReach, reachFromGrp } from "@/lib/crossmedia";
 import { costKind, type CostKind } from "@/lib/costKind";
-import { monthsBetween, weeksIn } from "@/lib/period";
+import { monthsBetween, weeksIn, weeksOfPeriod } from "@/lib/period";
 import { canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
 import { getPlan, loadPlan, crossContext, getThemes, sharesByTactic, type CrossContext } from "@/lib/queries";
 
@@ -42,6 +42,12 @@ export type Dashboard = {
   freqLimit: number;
   /** zásah TV je z naměřených dat TV nákupu, ne předpoklad */
   tvCalibrated: boolean;
+  /**
+   * Plán po týdnech: body po týdnech (pole `month` nese klíč týdne). Frekvence je
+   * tu skutečně týdenní — kontakty týdne ÷ zásah týdne, ne měsíc rozpočítaný do
+   * týdnů. null = plán po měsících.
+   */
+  weekPoints: MonthPoint[] | null;
   points: MonthPoint[];
   total: {
     cost: number;
@@ -169,6 +175,54 @@ export async function getDashboard(
     };
   });
 
+  // ---------------------------------------------- plán po týdnech: body po týdnech
+  let weekPoints: MonthPoint[] | null = null;
+  if (plan.granularity === "week") {
+    const weeks = weeksOfPeriod(plan.periodStart, plan.periodEnd);
+    const wb = new Map(loaded.weeks.map((b) => [`${b.tacticId}|${b.week}`, b]));
+    const wcells: Cell[] = [];
+    for (const r of rows) {
+      const shares = shareMap.get(r.tacticId)?.length ? shareMap.get(r.tacticId)! : [{ themeId: UNASSIGNED, share: 1 }];
+      const kind = costKind(r.channel);
+      for (const w of weeks) {
+        const b = wb.get(`${r.tacticId}|${w.key}`);
+        if (!b) continue;
+        const price = ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice);
+        const d = derive({
+          channelType: r.channelType, driver: b.driver as PlanUnit, driverValue: b.driverValue,
+          unitPrice: price.unitPrice, universe: ctx.universeOf(r.targetGroupId),
+          curve: ctx.curveOf(r.channelType, r.targetGroupId),
+        });
+        const cost = b.planned || d.budget;
+        if (!cost && !d.grp) continue;
+        wcells.push({ row: r, month: w.key, kind, cost, grp: d.grp, delivered: d.grp > 0, estimated: price.estimated && d.grp > 0, shares });
+      }
+    }
+    const wf = wcells
+      .filter((c) => !filter.channelType || c.row.channelType === filter.channelType)
+      .map((c) => {
+        if (!filter.themeId) return c;
+        const sh = c.shares.find((x) => x.themeId === filter.themeId)?.share ?? 0;
+        return { ...c, cost: c.cost * sh, grp: c.grp * sh };
+      })
+      .filter((c) => c.cost > 0 || c.grp > 0);
+    const keys = weeks.map((w) => w.key);
+    weekPoints = keys.map((k, i) => {
+      const mine = wf.filter((c) => c.month === k);
+      const g = sumGrp(mine);
+      const net = netFromGrp(g, ctx);
+      const cum = netFromGrp(sumGrp(wf.filter((c) => keys.indexOf(c.month) <= i)), ctx);
+      return {
+        month: k,
+        cost: mine.reduce((a, c) => a + c.cost, 0),
+        tvReach: net.parts.find((p) => p.channelType === "TV")?.reach ?? 0,
+        net: net.net,
+        cumNet: cum.net,
+        frequency: net.net > 0 ? total(g) / 100 / net.net : 0,
+      };
+    });
+  }
+
   const period = netFromGrp(sumGrp(cells), ctx);
   const cost = cells.reduce((a, c) => a + c.cost, 0);
   const fee = cells.filter((c) => c.kind === "fee").reduce((a, c) => a + c.cost, 0);
@@ -240,6 +294,7 @@ export async function getDashboard(
     freqLimit: limit,
     tvCalibrated: ctx.calibrated("TV", null),
     points,
+    weekPoints,
     total: {
       cost,
       delivered,
@@ -248,7 +303,11 @@ export async function getDashboard(
       fee,
       net: period.net,
       people,
-      avgWeeklyFrequency: live.length ? live.reduce((a, p) => a + p.frequency, 0) / live.length : 0,
+      // po týdnech průměr skutečných týdnů, jinak měsíců rozpočítaných do týdnů
+      avgWeeklyFrequency: (() => {
+        const src = (weekPoints ?? points).filter((p) => p.net > 0);
+        return src.length ? src.reduce((a, p) => a + p.frequency, 0) / src.length : 0;
+      })(),
       costPerPerson: people > 0 ? cost / people : 0,
       avgIncrement: withTv.length ? withTv.reduce((a, p) => a + Math.max(0, p.net - p.tvReach), 0) / withTv.length : 0,
     },

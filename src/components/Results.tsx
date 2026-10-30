@@ -25,8 +25,10 @@ const GLYPH: Record<string, string> = { ok: "✓", warn: "!", bad: "▲", idle: 
  * ukazatelů a komentář agentury jen čte.
  */
 export function Results({
-  rows, months, monthLabels, currentMonth, clientView, undoLabel,
+  rows, months, monthLabels, currentMonth, clientView, undoLabel, weekly = false,
 }: {
+  /** plán po týdnech — plán se tu po měsících měnit nedá, jen v Plánování po týdnech */
+  weekly?: boolean;
   rows: FillRow[];
   months: string[];
   monthLabels: Record<string, string>;
@@ -224,7 +226,7 @@ export function Results({
                             <div className="share">{r.channelType}</div>
                           </td>
                           <td className="r num">
-                            {c && c.canPlan && c.driver === "budget" && clientView
+                            {c && c.canPlan && c.driver === "budget" && clientView && !weekly
                               ? <MoneyInput value={c.planned} label={`Plán ${r.name}`} saved={saved === `${r.id}|plan`}
                                   onCommit={(v) => {
                                     const before = c.planned;

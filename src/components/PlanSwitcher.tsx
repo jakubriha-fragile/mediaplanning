@@ -3,7 +3,7 @@
 import { useRouter, usePathname } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
-  copyPlanToNextYear, createPlan, updatePlan, deletePlan, planPeriodImpact, planSummary,
+  copyPlanToNextYear, createPlan, updatePlan, deletePlan, planPeriodImpact, planSummary, setPlanGranularity,
 } from "@/lib/actions";
 import { periodLabel, monthsBetween, monthLabel, kc } from "@/lib/period";
 
@@ -16,6 +16,8 @@ export type PlanOption = {
   periodEnd: string;
   status: string;
   targetGroupId: string | null;
+  /** plánuje se po měsících, nebo po týdnech */
+  granularity?: "month" | "week";
 };
 
 const STATUS: Record<string, string> = {
@@ -346,6 +348,7 @@ function EditPlanDialog({
   const [start, setStart] = useState(plan.periodStart);
   const [end, setEnd] = useState(plan.periodEnd);
   const [tg, setTg] = useState<string | null>(plan.targetGroupId);
+  const [gran, setGran] = useState<"month" | "week">(plan.granularity ?? "month");
   const [error, setError] = useState<string | null>(null);
   const [pending, run] = useTransition();
 
@@ -368,6 +371,14 @@ function EditPlanDialog({
         `Z plánu vypadnou měsíce: ${months}.\n\n` +
         (parts.length ? `Smaže se v nich ${parts.join(", ")}. Tohle nejde vrátit zpět.` : "Nejsou v nich žádná čísla.") +
         `\n\nPokračovat?`)) return;
+    }
+    if (gran !== (plan.granularity ?? "month")) {
+      if (!confirm(gran === "week"
+        ? "Přepnout plán na týdny?\n\nKaždý měsíc se rozloží rovnoměrně do svých dnů a týdnů. Součet plánu se nezmění; " +
+          "týden přes přelom měsíců dostane díl z obou. Pak upravíte jednotlivé týdny (vlny)."
+        : "Přepnout plán zpět na měsíce?\n\nTýdenní rozpis se zahodí, měsíce zůstanou tak, jak je teď sečetly týdny. Nejde vrátit zpět.")) return;
+      const g = await setPlanGranularity({ planId: plan.id, granularity: gran });
+      if (!g.ok) { setError(g.error); return; }
     }
     const res = await updatePlan({
       planId: plan.id,
@@ -415,6 +426,19 @@ function EditPlanDialog({
             (dropped.length ? ` — vypadne ${pl(dropped.length, "měsíc", "měsíce", "měsíců")} i s čísly` : "")}
       </div>
       <TargetGroupSelect value={tg} onChange={setTg} options={targetGroups} />
+
+      <div className="field">
+        <label>Plánovat po</label>
+        <div className="seg" role="radiogroup" aria-label="Plánovat po">
+          {([["month", "Měsících"], ["week", "Týdnech"]] as const).map(([v, l]) => (
+            <button key={v} type="button" role="radio" aria-checked={gran === v} className={gran === v ? "on" : ""}
+              onClick={() => setGran(v)}>{l}</button>
+          ))}
+        </div>
+        <div className="share" style={{ marginTop: 4 }}>
+          Po týdnech se zadávají vlny týden po týdnu, měsíce se z nich sečtou. Skutečnost a vyhodnocení zůstávají po měsících.
+        </div>
+      </div>
 
       {error && <div className="banner" style={{ margin: "0 0 10px" }}><span>{error}</span></div>}
 

@@ -6,7 +6,7 @@ import {
 } from "@/lib/queries";
 import { myUndoStack } from "@/lib/actions";
 import { can, seesWholePlan } from "@/lib/permissions";
-import { planTitle, monthsBetween, monthLabel, monthShort, quarterGroups, periodLabel, kc, pct } from "@/lib/period";
+import { planTitle, monthsBetween, monthLabel, monthShort, quarterGroups, periodLabel, kc, pct, weeksOfPeriod, weekRange, weekHome } from "@/lib/period";
 import { Chrome } from "@/components/Chrome";
 import { PlanSwitcher } from "@/components/PlanSwitcher";
 import { ReachPanel } from "@/components/ReachPanel";
@@ -211,6 +211,9 @@ export default async function PlanPage({
         canEditPlan={canEditPlan}
         undoLabel={undo[0]?.label ?? null}
         themes={themeList.map((t) => ({ id: t.id, name: t.name }))}
+        weeks={plan.granularity === "week"
+          ? weeksOfPeriod(plan.periodStart, plan.periodEnd).map((w) => ({ key: w.key, label: w.label, title: weekRange(w.key), home: weekHome(w) }))
+          : null}
       />
     </Chrome>
   );

@@ -1,12 +1,12 @@
 import { eq, asc } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  campaigns, messageLines, tactics, tacticBudgets, actualSpends,
+  campaigns, messageLines, tactics, tacticBudgets, tacticBudgetWeeks, actualSpends,
   accountNotes, metrics, metricTargets, metricActuals, users,
   clients, plans, targetGroups, reachCurves, duplications, channelTypeEnum, themes, tacticThemes, rateCards,
   type ChannelType, type PlanUnit,
 } from "@/db/schema";
-import { monthsBetween } from "@/lib/period";
+import { monthsBetween, weeksOfPeriod } from "@/lib/period";
 import { costKind } from "@/lib/costKind";
 import { displayName } from "@/lib/displayName";
 import { resolveMetrics, type ResolvedMetric } from "@/lib/metrics";
@@ -37,6 +37,7 @@ export async function getPlans(clientId?: string) {
       clientName: clients.name,
       periodStart: plans.periodStart, periodEnd: plans.periodEnd,
       status: plans.status, targetGroupId: plans.targetGroupId,
+      granularity: plans.granularity,
       position: plans.position,
     })
     .from(plans)
@@ -52,6 +53,7 @@ export async function getPlan(planId: string) {
       periodStart: plans.periodStart, periodEnd: plans.periodEnd,
       status: plans.status, targetGroupId: plans.targetGroupId, currency: plans.currency,
       freqLimit: plans.freqLimit,
+      granularity: plans.granularity,
     })
     .from(plans)
     .innerJoin(clients, eq(plans.clientId, clients.id))
@@ -244,11 +246,12 @@ export async function loadPlan(planId: string) {
     .where(eq(campaigns.planId, planId))
     .orderBy(asc(campaigns.position), asc(campaigns.name), asc(tactics.position));
 
-  const [budgets, spends, notes, mets] = await Promise.all([
+  const [budgets, spends, notes, mets, weekRows] = await Promise.all([
     db.select().from(tacticBudgets),
     db.select().from(actualSpends),
     db.select().from(accountNotes),
     db.select().from(metrics).orderBy(asc(metrics.slot)),
+    db.select().from(tacticBudgetWeeks),
   ]);
   const [targets, mActuals] = await Promise.all([
     db.select().from(metricTargets),
@@ -261,6 +264,7 @@ export async function loadPlan(planId: string) {
     rows,
     themeShares: shares,
     budgets: budgets.filter((b) => ids.has(b.tacticId)),
+    weeks: weekRows.filter((w) => ids.has(w.tacticId)),
     spends: spends.filter((s) => ids.has(s.tacticId)),
     notes: notes.filter((n) => ids.has(n.tacticId)),
     mets: mets.filter((m) => ids.has(m.tacticId)),
@@ -285,6 +289,7 @@ export async function getPlanRows(me: Principal, planId: string) {
   const { budgets, spends } = loaded;
   const themeMap = sharesByTactic(loaded.themeShares);
   const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId }));
+  const weeks = plan.granularity === "week" ? weeksOfPeriod(plan.periodStart, plan.periodEnd) : [];
 
   return rows.map((r) => {
     const universe = ctx.universeOf(r.targetGroupId);
@@ -308,8 +313,30 @@ export async function getPlanRows(me: Principal, planId: string) {
       }),
     );
 
+    // plán po týdnech: buňky týdnů pro tabulku; měsíce (cells) jsou jejich součet
+    const weekCells = plan.granularity === "week"
+      ? Object.fromEntries(weeks.map((w) => {
+          const b = loaded.weeks.find((x) => x.tacticId === r.tacticId && x.week === w.key);
+          const driver = (b?.driver ?? cells[months[0]]?.driver ?? "budget") as PlanUnit;
+          const driverValue = b?.driverValue ?? 0;
+          const unitPrice = b?.unitPrice ?? 0;
+          const price = ctx.priceFor(r, driver, unitPrice);
+          const d = derive({ channelType: r.channelType, driver, driverValue, unitPrice: price.unitPrice, universe, curve });
+          return [w.key, { ...d, budget: b?.planned || d.budget, driver, driverValue, unitPrice, estimated: price.estimated } as PlanCell];
+        }))
+      : null;
+    // týden smí měnit, kdo smí všechny měsíce, do kterých týden zasahuje
+    const weekEditable = plan.granularity === "week"
+      ? Object.fromEntries(weeks.map((w) => [w.key, w.parts.every((p) => can(me, "write", {
+          area: "plan", mediaType: r.mediaType, planId, campaignId: r.campaignId, month: p.month,
+          channelType: r.channelType, tacticId: r.tacticId,
+        }))]))
+      : null;
+
     return {
       id: r.tacticId,
+      weekCells,
+      weekEditable,
       campaign: r.campaign,
       campaignId: r.campaignId,
       messageLineId: r.messageLineId,
