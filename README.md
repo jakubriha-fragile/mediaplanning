@@ -248,6 +248,14 @@ modelový zásah 1+ za období, pruh rozdělení rozpočtu, tabulka médií (dor
 impresích, cena za jednotku jen pro agenturu, zásah) s **flowchartem po měsících** a rozpadem
 na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* schová navigaci.
 
+### Plánuje se jen rozpočet v Kč (listopad 2026)
+
+Tabulka teď přijímá jen Kč — sloupce Jednotka a Cena, přepínač CPM/CPC i přepínač
+zobrazení jsou vypnuté (`BUDGET_ONLY` v `PlanTable.tsx`), než se vymyslí lepší logika.
+Výpočty zůstávají: řádek se zadanou cenou (TV s CPP z importu) z Kč dál dopočítá GRP
+a zásah; položky bez ceny dostanou doručení z **ceníku klienta** (Kalkulačka → Ceník, značka „≈").
+Popis níž platí po zapnutí plného režimu.
+
 ### Co tabulka ukazuje a CPM / CPC
 
 Přepínač **Zobrazit: Zadání · Kč · Imprese · Kliky · GRP** nad tabulkou. *Zadání* ukazuje každý

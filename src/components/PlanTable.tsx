@@ -73,6 +73,14 @@ const CAMP_COLORS = [
 ];
 const PHASES = ["Awareness", "Consideration", "Conversion"] as const;
 const CHANNEL_TYPES: ChannelType[] = ["TV", "Rádio", "OOH", "Print", "Kino", "Digital", "Vlastní", "PR"];
+/**
+ * Zjednodušený režim: plánuje se jen rozpočet v Kč (rozhodnutí zadavatele,
+ * listopad 2026 — jednotky, CPM/CPC a přepínač zobrazení byly v týdenním plánu
+ * nepřehledné). Výpočty zůstávají: řádek se zadanou cenou (TV s CPP) dál
+ * dopočítá GRP i zásah. Přepnutím na false se vrátí Jednotka, Cena a Zobrazit.
+ */
+const BUDGET_ONLY = true;
+
 type View = "input" | PlanUnit;
 const VIEWS: Array<{ key: View; label: string; title: string }> = [
   { key: "input", label: "Zadání", title: "Každý řádek v jednotce, ve které se plánuje — tady se zadává" },
@@ -132,7 +140,7 @@ export function PlanTable({
   };
   // jednotka a cena jsou vidět vždy — zadat CPM a rozpočet a nechat dopočítat
   // imprese je běžná práce plánovače, ne „podrobnost"
-  const showUnit = !clientView;
+  const showUnit = !clientView && !BUDGET_ONLY;
   const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 2 : 0);
   const [data, setData] = useState(rows);
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
@@ -223,7 +231,8 @@ export function PlanTable({
    * jinak jedna metrika pro všechny — Kč, imprese, kliky, GRP. Dřív buňka ukazovala
    * všechno naráz (částku, pod ní imprese, pruh) a nedalo se to číst.
    */
-  const [view, setView] = useState<View>("input");
+  const [viewChoice, setView] = useState<View>("input");
+  const view: View = BUDGET_ONLY ? "budget" : viewChoice;
   useEffect(() => {
     try { const v = localStorage.getItem("plan.zobrazeni") as View | null; if (v && VIEWS.some((x) => x.key === v)) setView(v); } catch { /* bez úložiště */ }
   }, []);
@@ -329,7 +338,7 @@ export function PlanTable({
         line.split("\t").forEach((raw, j) => {
           const t = raw.trim();
           if (!t || !row || !monthCols[j]) return;
-          jobs.push({ tacticId: row.id, month: monthCols[j].months[0], driver: rowUnit(row), value: parseNum(t) });
+          jobs.push({ tacticId: row.id, month: monthCols[j].months[0], driver: BUDGET_ONLY ? "budget" : rowUnit(row), value: parseNum(t) });
         });
       });
       run(() => {}, () => {}, async () => {
@@ -352,7 +361,7 @@ export function PlanTable({
         const ec = editCols[j];
         const ok = row && ec && (weeks ? row.weekEditable?.[ec.c.key] : row.editable[ec.c.key]);
         if (!ok) { skipped++; return; }
-        items.push({ tacticId: row.id, key: ec.c.key, driver: rowUnit(row), value: parseNum(t) });
+        items.push({ tacticId: row.id, key: ec.c.key, driver: BUDGET_ONLY ? "budget" : rowUnit(row), value: parseNum(t) });
       });
     });
     if (!items.length) { setInfo(skipped ? "Nic se nevložilo — cílové buňky jsou mimo tabulku nebo k nim nemáte oprávnění." : null); return; }
@@ -433,13 +442,13 @@ export function PlanTable({
           }}>✕ Zrušit filtry</button>
         ) : null}
         <span className="spacer" />
-        <span className="share">Zobrazit</span>
-        <div className="seg" role="radiogroup" aria-label="Co tabulka ukazuje">
+        {!BUDGET_ONLY && <span className="share">Zobrazit</span>}
+        {!BUDGET_ONLY && <div className="seg" role="radiogroup" aria-label="Co tabulka ukazuje">
           {VIEWS.filter((v) => v.key !== "clicks" || data.some((r) => r.pricing === "cpc")).map((v) => (
             <button key={v.key} type="button" role="radio" aria-checked={view === v.key} title={v.title}
               className={view === v.key ? "on" : ""} onClick={() => pickView(v.key)}>{v.label}</button>
           ))}
-        </div>
+        </div>}
         <button className="btn" aria-pressed={details} onClick={toggleDetails}
           title="Fáze, cílení a u agentury jednotka a cena položky">
           {details ? "Skrýt podrobnosti" : "Podrobnosti"}
@@ -821,7 +830,7 @@ export function PlanTable({
                         </td>}
 
                         {cols.map((c) => {
-                          const unit = rowUnit(r);
+                          const unit: PlanUnit = BUDGET_ONLY ? "budget" : rowUnit(r);
                           // měsíc v kvartálu sbalený u měsíčního plánu: jen součet, needituje se
                           if (c.kind === "q" && !weeks) {
                             const sum = c.months.reduce((s, m) => s + metricOf(r.cells[m], r.budgets[m], r), 0);
@@ -844,9 +853,10 @@ export function PlanTable({
                             : c.kind === "q" ? (weeks ?? []).filter((w) => w.home === m).every((w) => !!r.weekEditable?.[w.key])
                             : r.editable[m];
                           // v jiném zobrazení než v jednotce řádku se jen čte — psát Kč do řádku na GRP by změnilo model
-                          const inUnit = view === "input" || view === unit;
+                          const inUnit = BUDGET_ONLY || view === "input" || view === unit;
                           const commit = (v: number) => {
-                            if (Math.abs((cell?.driverValue ?? 0) - v) < 1e-9) return;
+                            const current = BUDGET_ONLY ? budget ?? 0 : cell?.driverValue ?? 0;
+                            if (Math.abs(current - v) < 1e-9) return;
                             run(() => {}, () => {}, () =>
                               isWeek ? setPlannedWeeks({ items: [{ tacticId: r.id, week: c.key, driver: unit, value: v }] })
                               : c.kind === "q" ? spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v })
