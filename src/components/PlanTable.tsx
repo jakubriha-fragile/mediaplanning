@@ -5,6 +5,7 @@ import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
   setTacticThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks, setTacticCatalog, autofillCatalog,
+  spreadMonthToWeeks,
 } from "@/lib/actions";
 import type { CatalogMedium } from "@/lib/catalog";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
@@ -280,6 +281,28 @@ export function PlanTable({
     if (lines.length && !lines[lines.length - 1].trim()) lines.pop();
     // hodnoty jdou jen do měsíců — sbalený kvartál se přeskočí
     const editCols = cols.map((c, i) => ({ c, i })).filter((x) => (x.c.kind === "m" || x.c.kind === "w") && x.i >= c0);
+    // týdenní plán se sbalenými měsíci: vložení jde po měsících a každý se rozloží do týdnů
+    if (weeks && cols[c0]?.kind === "q") {
+      const monthCols = cols.slice(c0).filter((c) => c.kind === "q");
+      const jobs: Array<{ tacticId: string; month: string; driver: PlanUnit; value: number }> = [];
+      lines.forEach((line, i) => {
+        const row = flat[r0 + i];
+        line.split("\t").forEach((raw, j) => {
+          const t = raw.trim();
+          if (!t || !row || !monthCols[j]) return;
+          jobs.push({ tacticId: row.id, month: monthCols[j].months[0], driver: rowUnit(row), value: parseNum(t) });
+        });
+      });
+      run(() => {}, () => {}, async () => {
+        for (const jb of jobs) {
+          const res = await spreadMonthToWeeks(jb);
+          if (!res.ok) return res;
+        }
+        setInfo(`Vloženo ${jobs.length} měsíčních hodnot, rozloženo do týdnů.`);
+        return { ok: true };
+      });
+      return;
+    }
     const items: Array<{ tacticId: string; key: string; driver: PlanUnit; value: number }> = [];
     let skipped = 0;
     lines.forEach((line, i) => {
@@ -769,6 +792,35 @@ export function PlanTable({
 
                         {cols.map((c) => {
                           const unit = rowUnit(r);
+                          // týdenní plán, sbalený měsíc: zapsat jde měsíční částka, rozloží se do týdnů
+                          if (c.kind === "q" && weeks) {
+                            const m = c.months[0];
+                            const cell = r.cells[m];
+                            const editable = weeks.filter((w) => w.home === m).every((w) => !!r.weekEditable?.[w.key]);
+                            return (
+                              <td key={c.key} className="budgetcell qcol">
+                                <BudgetCell
+                                  value={cell?.driverValue ?? 0}
+                                  unit={unit}
+                                  budget={r.budgets[m]}
+                                  grp={cell?.grp ?? 0}
+                                  impressions={cell?.impressions ?? 0}
+                                  reach={cell?.reach ?? 0}
+                                  actual={r.actuals[m]} max={Math.max(axisMax, ...data.map((x) => x.budgets[m] ?? 0))} type={r.mediaType}
+                                  disabled={!editable}
+                                  showDerived={!clientView}
+                                  estimated={!!cell?.estimated}
+                                  grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
+                                  onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
+                                  onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
+                                  onCommit={(v) => {
+                                    if (Math.abs((cell?.driverValue ?? 0) - v) < 1e-9) return;
+                                    run(() => {}, () => {},
+                                        () => spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v }));
+                                  }} />
+                              </td>
+                            );
+                          }
                           if (c.kind === "q") {
                             const sum = c.months.reduce((s, m) => s + (r.cells[m]?.driverValue ?? 0), 0);
                             return (
@@ -784,7 +836,16 @@ export function PlanTable({
                           if (c.kind === "w") {
                             const wc = r.weekCells?.[c.key];
                             return (
-                              <td key={c.key} className="budgetcell">
+                              <td key={c.key} className="budgetcell weekcell">
+                                {/* zadaná hodnota jako měsíční částka → rovnoměrně do týdnů měsíce */}
+                                {!!wc?.driverValue && r.weekEditable?.[c.key] && (
+                                  <button className="spreadbtn" tabIndex={-1}
+                                    title={`Vzít ${unitFmt(wc.driverValue, unit)} jako rozpočet celého měsíce (${monthLabels[c.months[0]] ?? c.months[0]}) a rozdělit rovnoměrně do jeho týdnů`}
+                                    onClick={() => run(() => {}, () => {},
+                                      () => spreadMonthToWeeks({ tacticId: r.id, month: c.months[0], driver: unit, value: wc.driverValue }))}>
+                                    ÷ měsíc
+                                  </button>
+                                )}
                                 <BudgetCell
                                   value={wc?.driverValue ?? 0}
                                   unit={unit}

@@ -369,6 +369,56 @@ export async function setPlannedWeeks(raw: z.input<typeof weeksInput>): Promise<
 }
 
 /**
+ * Měsíční částka rovnoměrně do týdnů měsíce (tlačítko „÷ měsíc" v buňce týdne).
+ * Týdny přes přelom zůstanou, jak jsou — jinak by se změnil i sousední měsíc.
+ * Zbytek do zadané částky dostanou týdny celé uvnitř měsíce podle počtu dnů,
+ * takže měsíční součet je přesně zadaná hodnota. Jeden krok pro vrácení zpět.
+ */
+export async function spreadMonthToWeeks(raw: { tacticId: string; month: string; driver: PlanUnit; value: number }): Promise<Result> {
+  try {
+    const data = z.object({
+      tacticId: z.string().min(1), month: monthSchema,
+      driver: z.enum(planUnitEnum.enumValues), value: z.number().min(0).max(100_000_000_000),
+    }).parse(raw);
+    const me = await currentPrincipal();
+    const c = await tacticCoords(data.tacticId);
+    assertCan(me, "write", at(c, "plan", data.month));
+    const [plan] = await db.select().from(plans).where(eq(plans.id, c.planId));
+    if (plan.granularity !== "week") return { ok: false, error: "Plán je po měsících." };
+
+    const weeks = weeksOfPeriod(plan.periodStart, plan.periodEnd).filter((w) => w.parts.some((p) => p.month === data.month));
+    const inside = weeks.filter((w) => w.parts.length === 1);
+    if (!inside.length) return { ok: false, error: "Měsíc nemá žádný celý týden." };
+    const rows = await db.select().from(tacticBudgetWeeks).where(eq(tacticBudgetWeeks.tacticId, data.tacticId));
+    const days = (w: (typeof weeks)[number]) => w.parts.reduce((a, p) => a + p.days, 0);
+    const edge = weeks.filter((w) => w.parts.length > 1).reduce((sum, w) => {
+      const r = rows.find((x) => x.week === w.key);
+      const part = w.parts.find((p) => p.month === data.month)!;
+      return sum + (r ? (r.driverValue * part.days) / days(w) : 0);
+    }, 0);
+    const rest = data.value - edge;
+    if (rest < 0) return { ok: false, error: "Týdny přes přelom měsíce už mají víc, než zadáváte — upravte je ručně." };
+    const total = inside.reduce((a, w) => a + days(w), 0);
+
+    const undo: UndoOp[] = [];
+    for (const w of inside) {
+      const done = await writeWeek(c, w.key, data.driver, (rest * days(w)) / total);
+      if (done) undo.push(done.undo);
+    }
+    await syncMonthsFromWeeks(data.tacticId);
+    if (undo.length) {
+      const label = `${c.channel} / ${monthLabel(data.month)}: ${num(data.value)} rovnoměrně do týdnů`;
+      await pushUndo(me!.id, label, undo);
+      await log(me!.id, "plan", [label]);
+    }
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
  * Přepnutí plánu mezi měsíci a týdny. Na měsíce: týdenní rozpis se zahodí,
  * měsíce zůstanou, jak jsou. Na týdny: každý měsíc se rozloží rovnoměrně do
  * svých dnů (součet plánu se nezmění). Vrátit zpět jde jen přepnutím — proto

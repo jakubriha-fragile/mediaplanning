@@ -271,6 +271,12 @@ samy** — týden přes přelom (např. 29. 3.–4. 4.) se dělí podle dnů. Sk
 Finální mix i oprávnění zůstávají po měsících. Přehled ukazuje zásah a **skutečnou týdenní
 frekvenci** po týdnech, takže je vidět i nárazová vlna.
 
+**Měsíční částka do týdnů:** sbalený měsíc (v liště *Měsíce*) jde přepsat — zapsaná hodnota
+se rozloží rovnoměrně do týdnů měsíce; funguje i vložení z Excelu po měsících. V rozbaleném
+měsíci dělá totéž tlačítko **÷ měsíc** v buňce týdne (pod myší): číslo v buňce vezme jako
+rozpočet celého měsíce. Týdny přes přelom se přitom nemění (jinak by se změnil sousední měsíc),
+zbytek dostanou týdny celé uvnitř měsíce — měsíční součet je přesně zadaná částka.
+
 Při přepnutí na týdny se každý měsíc rozloží rovnoměrně do svých dnů — měsíční i celkové
 součty zůstanou stejné, vlny pak upravíte. Přepnutí zpět na měsíce týdenní rozpis zahodí.
 Excel BENU má TRP po měsících (týdny jen jako dny na přelomu), takže skutečné vlny
