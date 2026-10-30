@@ -270,6 +270,22 @@ za klik dopočítají kliky (nebo z kliků rozpočet — jednotka *Kliky*). Z kl
 zásah, takže CPC položky do modelu zásahu nevstupují (Přehled je nehlásí jako chybějící data).
 Přepnutí cenového modelu vynuluje cenu za jednotku, rozpočty zůstanou.
 
+### Odhad výsledků položky
+
+Tlačítko **Odhad výsledků** nad tabulkou plánu přidá vpravo sloupce podle mediaplánu
+Fragile (case study): k položce se zadají předpoklady — velikost cílové skupiny, CPM,
+CPC, CTR, konverzní poměr, frekvence, způsob měření — a z rozpočtu se dopočítá:
+
+- imprese = rozpočet ÷ CPM × 1000
+- kliky = rozpočet ÷ CPC, není-li CPC, pak imprese × CTR (dopočtené hodnoty jsou kurzívou)
+- konverze = kliky × konverzní poměr, CPA = rozpočet ÷ konverze
+- zásah = imprese ÷ frekvence, nejvýš velikost cílové skupiny
+
+Na rozdíl od Excelu se konverze počítají z kliků, ne z návštěv. Zásah je jednoduchý
+odhad za položku, přes položky se nesčítá — zásah celého plánu je v Přehledu
+(cross-mediální model). Fee a PNO zatím nejsou. Ve sloupci podrobností přibyla Kreativa.
+Všechno jsou to pracovní odhady k validaci media specialistou.
+
 ### Médium a platforma
 
 Řádek plánu tvoří **Sdělení → Médium → Platforma**; vlastní název položky se nezadává

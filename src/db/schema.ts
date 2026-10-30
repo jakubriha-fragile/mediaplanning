@@ -284,6 +284,20 @@ export const tactics = pgTable(
     platformId: text("platform_id").references(() => platforms.id, { onDelete: "set null" }),
     /** NULL = použije se cílová skupina plánu. */
     targetGroupId: text("target_group_id").references(() => targetGroups.id, { onDelete: "set null" }),
+    /** Kreativa / formáty (např. „6s video + statický banner"). */
+    creative: text("creative"),
+    /**
+     * Odhad výsledků — předpoklady plánovače (src/lib/estimates.ts). Zadávají se
+     * u položky jednou, výsledky se počítají z rozpočtu za období. NULL = nezadáno.
+     */
+    estAudience: integer("est_audience"),
+    estMeasurement: text("est_measurement"),
+    estCpm: doublePrecision("est_cpm"),
+    estCpc: doublePrecision("est_cpc"),
+    /** CTR a konverzní poměr jako podíl 0–1 */
+    estCtr: doublePrecision("est_ctr"),
+    estCr: doublePrecision("est_cr"),
+    estFrequency: doublePrecision("est_frequency"),
     position: integer("position").notNull().default(0),
     note: text("note"),
   },

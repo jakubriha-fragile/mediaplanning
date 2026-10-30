@@ -1715,7 +1715,10 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
             const [nt] = await db.insert(tactics).values({
               messageLineId: nl.id, channel: t.channel, mediaType: t.mediaType,
               channelType: t.channelType, targetGroupId: t.targetGroupId,
-              mediumId: t.mediumId, platformId: t.platformId, label: t.label,
+              mediumId: t.mediumId, platformId: t.platformId, label: t.label, pricing: t.pricing,
+              // předpoklady odhadu jsou součást struktury plánu, ne čísla — kopírují se
+              creative: t.creative, estAudience: t.estAudience, estMeasurement: t.estMeasurement,
+              estCpm: t.estCpm, estCpc: t.estCpc, estCtr: t.estCtr, estCr: t.estCr, estFrequency: t.estFrequency,
               position: t.position, note: t.note,
             }).returning();
 
@@ -2652,6 +2655,50 @@ export async function setRowPricing(raw: { tacticId: string; pricing: "cpm" | "c
     const label = `${c.channel}: nákup na ${data.pricing.toUpperCase()} (cena za jednotku vynulována)`;
     await pushUndo(me!.id, label, undo);
     await log(me!.id, "plan", [label]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ------------------------------------------------- odhad výsledků položky
+
+const EST_FIELDS = {
+  creative: "creative", audience: "estAudience", measurement: "estMeasurement",
+  cpm: "estCpm", cpc: "estCpc", ctr: "estCtr", cr: "estCr", frequency: "estFrequency",
+} as const;
+const EST_LABEL: Record<keyof typeof EST_FIELDS, string> = {
+  creative: "Kreativa", audience: "Velikost CS", measurement: "Měření", cpm: "CPM", cpc: "CPC",
+  ctr: "CTR", cr: "Konverzní poměr", frequency: "Frekvence",
+};
+
+/**
+ * Předpoklad odhadu výsledků (nebo kreativa) u položky. Patří k plánu — smí ho
+ * měnit, kdo smí měnit plán položky. Prázdná hodnota = nezadáno (NULL).
+ */
+export async function setTacticEstimate(raw: { tacticId: string; field: keyof typeof EST_FIELDS; value: string | number | null }): Promise<Result> {
+  try {
+    const data = z.object({
+      tacticId: z.string().min(1),
+      field: z.enum(Object.keys(EST_FIELDS) as [keyof typeof EST_FIELDS, ...Array<keyof typeof EST_FIELDS>]),
+      value: z.union([z.string().max(300), z.number().min(0).max(1e12), z.null()]),
+    }).parse(raw);
+    const me = await currentPrincipal();
+    const c = await tacticCoords(data.tacticId);
+    assertCan(me, "write", at(c, "plan", null));
+    const text = data.field === "creative" || data.field === "measurement";
+    let value: string | number | null = data.value;
+    if (text) value = typeof value === "string" && value.trim() ? value.trim() : null;
+    else {
+      value = typeof value === "number" && value > 0 ? value : null;
+      if (value !== null && (data.field === "ctr" || data.field === "cr") && value > 1) {
+        return { ok: false, error: `${EST_LABEL[data.field]} se zadává v procentech do 100 %.` };
+      }
+      if (value !== null && data.field === "audience") value = Math.round(value);
+    }
+    await db.update(tactics).set({ [EST_FIELDS[data.field]]: value }).where(eq(tactics.id, data.tacticId));
+    await log(me!.id, "plan", [`${EST_LABEL[data.field]} ${c.channel}: ${value ?? "—"}`]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {

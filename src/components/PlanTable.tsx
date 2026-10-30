@@ -5,9 +5,11 @@ import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
   setTacticThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks, setTacticCatalog, autofillCatalog, setRowPricing,
+  setTacticEstimate,
   spreadMonthToWeeks,
 } from "@/lib/actions";
 import type { CatalogMedium } from "@/lib/catalog";
+import { estimate, sumEstimates, type Estimate } from "@/lib/estimates";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
 import { Combo, type ComboOption } from "@/components/Combo";
 import { isGrpPriced, priceLabel, priceHint, UNIT_LABEL } from "@/lib/crossmedia";
@@ -31,6 +33,13 @@ export type PlanRow = {
   channelType: ChannelType;
   /** cenový model: CPM, nebo CPC; null = podle nosiče */
   pricing: "cpm" | "cpc" | null;
+  /** kreativa / formáty */
+  creative: string | null;
+  /** předpoklady odhadu výsledků (src/lib/estimates.ts) */
+  est: {
+    audience: number | null; measurement: string | null; cpm: number | null; cpc: number | null;
+    ctr: number | null; cr: number | null; frequency: number | null;
+  };
   mediumId: string | null;
   platformId: string | null;
   targetGroupId: string | null;
@@ -106,6 +115,27 @@ type Col =
 const BASE_COLS = 7;
 const RIGHT_COLS = 4;  // celkem, podíl, doručení, smazat
 
+/**
+ * Odhad výsledků — sloupce vpravo podle mediaplánu Fragile. Zadávané předpoklady
+ * a dopočtené výsledky za období; zapíná se přepínačem „Odhad výsledků".
+ */
+type EstKey = "audience" | "cpm" | "cpc" | "ctr" | "cr" | "frequency" | "impressions" | "clicks" | "conversions" | "cpa" | "reach" | "reachPct" | "measurement";
+const EST_COLS: Array<{ k: EstKey; label: string; title: string; input?: "num" | "pct" | "text" }> = [
+  { k: "audience", label: "Velikost CS", title: "Odhad velikosti cílové skupiny položky (osob)", input: "num" },
+  { k: "cpm", label: "CPM", title: "Kč za 1 000 impresí", input: "num" },
+  { k: "cpc", label: "CPC", title: "Kč za klik", input: "num" },
+  { k: "ctr", label: "CTR %", title: "Míra prokliku; když není zadaná, dopočítá se z kliků a impresí", input: "pct" },
+  { k: "cr", label: "Konv. %", title: "Odhadovaný konverzní poměr z kliků", input: "pct" },
+  { k: "frequency", label: "Frekvence", title: "Průměrná frekvence — zásah = imprese ÷ frekvence", input: "num" },
+  { k: "impressions", label: "Imprese", title: "Rozpočet ÷ CPM × 1000, nebo kliky ÷ CTR" },
+  { k: "clicks", label: "Kliky", title: "Rozpočet ÷ CPC, nebo imprese × CTR" },
+  { k: "conversions", label: "Konverze", title: "Kliky × konverzní poměr" },
+  { k: "cpa", label: "CPA (Kč)", title: "Rozpočet ÷ konverze" },
+  { k: "reach", label: "Zásah", title: "Imprese ÷ frekvence, nejvýš velikost cílové skupiny — odhad za položku, ne cross-mediální model" },
+  { k: "reachPct", label: "Zásah %", title: "Zásah ÷ velikost cílové skupiny" },
+  { k: "measurement", label: "Měření", title: "Jak se výsledek měří (brandlift, GA4…)", input: "text" },
+];
+
 export function PlanTable({
   rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel, clientView = false,
   themes = [], weeks = null, catalog = [],
@@ -129,6 +159,15 @@ export function PlanTable({
   themes?: ThemeOption[];
 }) {
   const [details, setDetails] = useState(false);
+  const [showEst, setShowEst] = useState(false);
+  useEffect(() => {
+    try { setShowEst(localStorage.getItem("plan.odhad") === "1"); } catch { /* bez úložiště */ }
+  }, []);
+  const toggleEst = () => setShowEst((v) => {
+    try { localStorage.setItem("plan.odhad", v ? "0" : "1"); } catch { /* bez úložiště */ }
+    return !v;
+  });
+  const rightCols = RIGHT_COLS + (showEst && !clientView ? EST_COLS.length : 0);
   useEffect(() => {
     try { setDetails(localStorage.getItem("plan.podrobnosti") === "1"); } catch { /* bez úložiště */ }
   }, []);
@@ -143,7 +182,7 @@ export function PlanTable({
   const showUnit = !clientView && !BUDGET_ONLY;
   // cena (CPM/CPC/CPP) je vidět i v režimu jen Kč — z ní se dopočítají prokliky a imprese
   const showPrice = !clientView;
-  const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 1 : 0) + (showPrice ? 1 : 0);
+  const leftCols = BASE_COLS + (details ? 3 : 0) + (showUnit ? 1 : 0) + (showPrice ? 1 : 0);
   const [data, setData] = useState(rows);
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
@@ -256,6 +295,9 @@ export function PlanTable({
   const colOf = (r: PlanRow, c: Col) => c.kind === "w"
     ? cellSum(r.weekCells?.[c.key], r.weekCells?.[c.key]?.budget ?? 0)
     : c.months.reduce((s, m) => s + cellSum(r.cells[m], r.budgets[m] ?? 0), 0);
+  /** rozpočet řádku za období v Kč — z něj se počítá odhad výsledků */
+  const budgetOf = (r: PlanRow) => months.reduce((s, m) => s + (r.budgets[m] ?? 0), 0);
+  const estOf = (r: PlanRow): Estimate => estimate({ budget: budgetOf(r), ...r.est });
   /** Doručení řádku za období — jedna jednotka podle toho, jak se položka nakupuje. */
   const deliveryOf = (r: PlanRow): { text: string; hint: string } => {
     const sum = (k: "clicks" | "impressions" | "grp") => months.reduce((s, m) => s + (r.cells[m]?.[k] ?? 0), 0);
@@ -466,6 +508,12 @@ export function PlanTable({
               className={view === v.key ? "on" : ""} onClick={() => pickView(v.key)}>{v.label}</button>
           ))}
         </div>}
+        {!clientView && (
+          <button className="btn" aria-pressed={showEst} onClick={toggleEst}
+            title="Předpoklady (CPM, CPC, CTR, konverzní poměr, frekvence) a dopočtené imprese, kliky, konverze, CPA a zásah">
+            {showEst ? "Skrýt odhad výsledků" : "Odhad výsledků"}
+          </button>
+        )}
         <button className="btn" aria-pressed={details} onClick={toggleDetails}
           title="Fáze, cílení a u agentury jednotka a cena položky">
           {details ? "Skrýt podrobnosti" : "Podrobnosti"}
@@ -517,6 +565,7 @@ export function PlanTable({
               <th>Sdělení</th>
               {details && <th>Fáze</th>}
               {details && <th>Cílení</th>}
+              {details && <th>Kreativa / formáty</th>}
               <th>Typ</th>
               <th title="Kde se nakupuje (Google Ads, Meta Ads, Nova…). Určuje nosič.">Médium</th>
               <th title="Typ kampaně nebo prostor v médiu (Search, Performance Max, YouTube…)">Platforma</th>
@@ -533,6 +582,9 @@ export function PlanTable({
               <th className="r">Celkem ({sumKey === "budget" ? "Kč" : UNIT_LABEL[sumKey].toLowerCase()})</th>
               <th className="r">Podíl</th>
               <th className="r" title="Co plán za období doručí: u CPC prokliky, u CPM imprese, u TV a rádia TRP. Počítá se z Kč a ceny.">Doručení</th>
+              {showEst && !clientView && EST_COLS.map((e, i) => (
+                <th key={e.k} className={`r estcol ${e.input ? "estin" : ""} ${i === 0 ? "estfirst" : ""}`} title={e.title}>{e.label}</th>
+              ))}
               <th style={{ width: 30 }} />
             </tr>
           </thead>
@@ -620,13 +672,14 @@ export function PlanTable({
                     <td className="r num">{fmtSum(gt)}</td>
                     <td className="r share num">{grand ? pct(gt / grand) : ""}</td>
                     <td />
+                    {showEst && !clientView && <EstSumCells sum={sumEstimates(g.rows.map((r) => ({ budget: budgetOf(r), est: estOf(r) })))} />}
                     <td />
                   </tr>
 
                   {!g.rows.length && (
                     <tr className="emptygrp">
                       <td />
-                      <td colSpan={leftCols - 1 + cols.length + RIGHT_COLS}>
+                      <td colSpan={leftCols - 1 + cols.length + rightCols}>
                         Blok zatím nemá žádnou taktiku — přidejte ji tlačítkem „+ Taktika" výše.
                       </td>
                     </tr>
@@ -731,6 +784,16 @@ export function PlanTable({
                               run(() => patchLine(r.messageLineId, { audience: v }),
                                   () => patchLine(r.messageLineId, { audience: prev }),
                                   () => updateMessageLine({ messageLineId: r.messageLineId, audience: v }));
+                            }} />
+                        </td>}
+                        {details && <td style={{ minWidth: 150, maxWidth: 220 }}>
+                          <input className="txt" defaultValue={r.creative ?? ""} disabled={!canEditPlan} title={r.creative ?? ""}
+                            key={`cr-${r.id}-${r.creative ?? ""}`} placeholder="např. 6s video + banner"
+                            onBlur={(e) => {
+                              const v = e.target.value.trim(), prev = r.creative ?? "";
+                              if (v === prev) return;
+                              run(() => patchRow(r.id, { creative: v || null }), () => patchRow(r.id, { creative: prev || null }),
+                                  () => setTacticEstimate({ tacticId: r.id, field: "creative", value: v || null }));
                             }} />
                         </td>}
 
@@ -915,6 +978,20 @@ export function PlanTable({
                         <td className="r num" style={{ fontWeight: 500 }}>{fmtSum(rowTotal(r))}</td>
                         <td className="r share num">{grand ? pct(rowTotal(r) / grand) : "—"}</td>
                         <td className="r num delivery" title={deliveryOf(r).hint}>{deliveryOf(r).text}</td>
+                        {showEst && !clientView && (() => {
+                          const est = estOf(r);
+                          return EST_COLS.map((e, i) => (
+                            <td key={e.k} className={`r num estcol ${e.input ? "estin" : ""} ${i === 0 ? "estfirst" : ""}`}>
+                              {e.input ? (
+                                <EstInput kind={e.input} label={`${e.label} ${r.name}`} disabled={!canEditPlan}
+                                  value={r.est[e.k as keyof PlanRow["est"]]}
+                                  shown={e.k === "ctr" && r.est.ctr === null && est.ctr !== null ? est.ctr : undefined}
+                                  onCommit={(v) => run(() => patchRow(r.id, { est: { ...r.est, [e.k]: v } }), () => patchRow(r.id, { est: r.est }),
+                                    () => setTacticEstimate({ tacticId: r.id, field: e.k as never, value: v }))} />
+                              ) : <EstValue k={e.k} est={est} />}
+                            </td>
+                          ));
+                        })()}
                         <td className="r">
                           {canEditPlan && (
                             <button className="rowdel" title="Smazat taktiku"
@@ -932,7 +1009,7 @@ export function PlanTable({
               );
             })}
             {!visible.length && (
-              <tr><td colSpan={leftCols + cols.length + RIGHT_COLS} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
+              <tr><td colSpan={leftCols + cols.length + rightCols} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
                 Žádná taktika neodpovídá filtru.
               </td></tr>
             )}
@@ -946,6 +1023,7 @@ export function PlanTable({
               <td className="r num">{fmtSum(selTotal)}</td>
               <td className="r num">{grand ? pct(selTotal / grand) : "—"}</td>
               <td />
+              {showEst && !clientView && <EstSumCells sum={sumEstimates(visible.map((r) => ({ budget: budgetOf(r), est: estOf(r) })))} />}
               <td />
             </tr>
           </tfoot>
@@ -1215,5 +1293,72 @@ function MultiSelect({
         </>
       )}
     </div>
+  );
+}
+
+/** Číslo do sloupce odhadu: procenta u CTR a konverzního poměru, jinak číslo; „—" = nejde spočítat. */
+function fmtEst(k: EstKey, v: number | null): string {
+  if (v === null || !Number.isFinite(v)) return "—";
+  if (k === "ctr" || k === "cr" || k === "reachPct") return (v * 100).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) + " %";
+  if (k === "cpa") return kc(v);
+  if (k === "impressions" && v >= 1_000_000) return (v / 1_000_000).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) + " mil.";
+  return kc(v);
+}
+
+function EstValue({ k, est }: { k: EstKey; est: Estimate }) {
+  const v = est[k as keyof Estimate] as number | null;
+  const derived = (k === "impressions" && est.derived.impressions) || (k === "clicks" && est.derived.clicks);
+  return <span className={derived ? "estderived" : undefined} title={derived ? "Dopočteno přes CTR" : undefined}>{fmtEst(k, v)}</span>;
+}
+
+function EstSumCells({ sum }: { sum: ReturnType<typeof sumEstimates> }) {
+  const val: Partial<Record<EstKey, number | null>> = {
+    impressions: sum.impressions, clicks: sum.clicks, conversions: sum.conversions, cpa: sum.cpa, ctr: sum.ctr,
+  };
+  return (
+    <>
+      {EST_COLS.map((e, i) => (
+        <td key={e.k} className={`r num share estcol ${i === 0 ? "estfirst" : ""}`}
+          title={e.k === "reach" ? "Zásah se přes položky nesčítá — lidé se překrývají" : undefined}>
+          {e.k in val && !(e.k === "ctr" && sum.ctr === null) ? fmtEst(e.k, val[e.k] ?? null) : ""}
+        </td>
+      ))}
+    </>
+  );
+}
+
+/** Pole předpokladu: číslo, procento (ukládá se jako podíl), nebo text. Prázdné = nezadáno. */
+function EstInput({ kind, value, shown, label, disabled, onCommit }: {
+  kind: "num" | "pct" | "text";
+  value: number | string | null;
+  /** dopočtená hodnota, když není zadaná (šedá nápověda v poli) */
+  shown?: number;
+  label: string;
+  disabled: boolean;
+  onCommit: (v: number | string | null) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const toText = (v: number | string | null) =>
+    v === null || v === "" ? "" : kind === "text" ? String(v)
+    : kind === "pct" ? String(Math.round((v as number) * 100 * 1000) / 1000).replace(".", ",")
+    : (v as number) >= 1000 ? kc(v as number) : String(v).replace(".", ",");
+  return (
+    <input className={`cell estinput ${kind === "text" ? "esttext" : ""}`} aria-label={label} disabled={disabled}
+      inputMode={kind === "text" ? "text" : "decimal"}
+      value={draft ?? toText(value)}
+      placeholder={shown !== undefined ? `≈ ${String(Math.round(shown * 100 * 100) / 100).replace(".", ",")}` : ""}
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft === null) return;
+        const t = draft.trim();
+        setDraft(null);
+        let v: number | string | null;
+        if (kind === "text") v = t || null;
+        else if (!t) v = null;
+        else { const n = parseNum(t); v = kind === "pct" ? n / 100 : n; }
+        if (v !== value) onCommit(v);
+      }}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); } }} />
   );
 }

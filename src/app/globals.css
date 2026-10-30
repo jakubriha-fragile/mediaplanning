@@ -900,3 +900,13 @@ td.budgetcell { position: relative; }
   border: 1px solid var(--brand); background: var(--surface); color: var(--brand-ink); white-space: nowrap;
 }
 td.budgetcell:hover .spreadbtn, td.budgetcell:focus-within .spreadbtn { display: block; }
+
+/* odhad výsledků — skupina sloupců vpravo, oddělená čarou; zadávané pole čárkovaně */
+table.plan th.estcol, table.plan td.estcol { white-space: nowrap; min-width: 84px; }
+table.plan th.estcol { background: color-mix(in srgb, var(--brand-soft) 55%, var(--surface-2)); }
+table.plan .estfirst { border-left: 2px solid var(--brand) !important; }
+input.estinput { width: 80px; text-align: right; border: 1px dashed var(--line-strong) !important; }
+input.estinput:focus { border-style: solid !important; }
+input.estinput.esttext { width: 130px; text-align: left; }
+input.estinput::placeholder { color: var(--muted); font-style: italic; }
+.estderived { color: var(--muted); font-style: italic; }

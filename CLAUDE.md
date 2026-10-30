@@ -46,6 +46,7 @@ src/app/kalkulacka/      Sainsburyho kalkulačka + editace koeficientů duplikac
 src/lib/dashboard.ts     data pro Přehled (/prehled): zásah a frekvence v čase, matice oblasti × média,
                          filtry (?oblast, ?medium), modelový scénář „méně TV v přetížení"
 src/lib/costKind.ts      média / agenturní práce / smíšené — podle názvu položky
+src/lib/estimates.ts     odhad výsledků položky (imprese, kliky, konverze, CPA, zásah) z předpokladů
 src/lib/mix.ts           data pro Finální mix (/mix): média, měsíce, oblasti, modelový zásah
 src/lib/metrics.ts       poměrové ukazatele (CPM, CPC, CPA, CTR, ROAS) se počítají z čerpání a základních čísel
 src/lib/displayName.ts   krátký název položky (tactic.label, jinak bez poznámek v závorkách)

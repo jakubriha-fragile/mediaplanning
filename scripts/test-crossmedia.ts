@@ -13,6 +13,7 @@ import { periodLabel, weeksOfPeriod, monthsBetween } from "../src/lib/period";
 import { costKind } from "../src/lib/costKind";
 import { shortName, displayName } from "../src/lib/displayName";
 import { resolveMetrics, derivedOf, baseOf } from "../src/lib/metrics";
+import { estimate } from "../src/lib/estimates";
 
 let failed = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -198,6 +199,24 @@ console.log("\nCPC: rozpočet ↔ kliky");
   ok("CPM 200 a 100 000 Kč = 500 000 impresí", c.impressions === 500_000 && c.clicks === 0);
   const tv = derive({ channelType: "TV", pricing: "cpc", driver: "grp", driverValue: 100, unitPrice: 9000, universe: 2_000_000 });
   ok("TV ignoruje CPC — vždy CPP", tv.budget === 900_000 && tv.grp === 100);
+}
+
+console.log("\nOdhad výsledků (mediaplán Fragile)");
+{
+  // řádky z case study: Direct buy (CPM 150, CPC 75), Search (jen CPC), META (CPC + CTR)
+  const direct = estimate({ budget: 140_000, cpm: 150, cpc: 75, ctr: 0.002, cr: 0.002, frequency: 4, audience: 150_000 });
+  ok("imprese = rozpočet ÷ CPM × 1000", Math.round(direct.impressions!) === 933_333);
+  ok("kliky z CPC mají přednost před CTR", Math.round(direct.clicks!) === 1867 && !direct.derived.clicks);
+  ok("konverze = kliky × konverzní poměr", Math.abs(direct.conversions! - 3.7333) < 0.01);
+  ok("zásah = imprese ÷ frekvence, nejvýš velikost CS", direct.reach === 150_000 && direct.reachPct === 1);
+  const search = estimate({ budget: 280_000, cpc: 15, cr: 0.02 });
+  ok("Search: kliky z CPC, bez impresí", Math.round(search.clicks!) === 18_667 && search.impressions === null);
+  ok("CPA = rozpočet ÷ konverze", Math.round(search.cpa!) === 750);
+  const viaCtr = estimate({ budget: 100_000, cpm: 100, ctr: 0.01 });
+  ok("kliky z impresí × CTR, když chybí CPC", viaCtr.clicks === 10_000 && viaCtr.derived.clicks);
+  const back = estimate({ budget: 230_000, cpc: 15, ctr: 0.01 });
+  ok("imprese z kliků ÷ CTR, když chybí CPM", Math.round(back.impressions!) === 1_533_333 && back.derived.impressions);
+  ok("bez předpokladů nic nevymýšlí", estimate({ budget: 50_000 }).clicks === null);
 }
 
 console.log("\nTýdny plánu");
