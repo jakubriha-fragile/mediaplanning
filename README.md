@@ -252,6 +252,8 @@ na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* 
 
 Tabulka teď přijímá jen Kč — sloupce Jednotka a Cena, přepínač CPM/CPC i přepínač
 zobrazení jsou vypnuté (`BUDGET_ONLY` v `PlanTable.tsx`), než se vymyslí lepší logika.
+Sloupec **Cena** (CPM / CPC, u TV a rádia CPP) zůstal a sloupec **Doručení** u každého řádku
+ukazuje, co plán za období doručí: u CPC prokliky, u CPM imprese, u TV a rádia TRP.
 Výpočty zůstávají: řádek se zadanou cenou (TV s CPP z importu) z Kč dál dopočítá GRP
 a zásah; položky bez ceny dostanou doručení z **ceníku klienta** (Kalkulačka → Ceník, značka „≈").
 Popis níž platí po zapnutí plného režimu.

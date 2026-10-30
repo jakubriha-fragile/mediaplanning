@@ -104,7 +104,7 @@ type Col =
 // Pod „Podrobnostmi" fáze a cílení, u agentury navíc jednotka a cena — mění se
 // zřídka a plánovač je nepotřebuje mít před očima pořád.
 const BASE_COLS = 7;
-const RIGHT_COLS = 3;  // celkem, podíl, smazat
+const RIGHT_COLS = 4;  // celkem, podíl, doručení, smazat
 
 export function PlanTable({
   rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel, clientView = false,
@@ -141,7 +141,9 @@ export function PlanTable({
   // jednotka a cena jsou vidět vždy — zadat CPM a rozpočet a nechat dopočítat
   // imprese je běžná práce plánovače, ne „podrobnost"
   const showUnit = !clientView && !BUDGET_ONLY;
-  const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 2 : 0);
+  // cena (CPM/CPC/CPP) je vidět i v režimu jen Kč — z ní se dopočítají prokliky a imprese
+  const showPrice = !clientView;
+  const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 1 : 0) + (showPrice ? 1 : 0);
   const [data, setData] = useState(rows);
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
@@ -254,6 +256,21 @@ export function PlanTable({
   const colOf = (r: PlanRow, c: Col) => c.kind === "w"
     ? cellSum(r.weekCells?.[c.key], r.weekCells?.[c.key]?.budget ?? 0)
     : c.months.reduce((s, m) => s + cellSum(r.cells[m], r.budgets[m] ?? 0), 0);
+  /** Doručení řádku za období — jedna jednotka podle toho, jak se položka nakupuje. */
+  const deliveryOf = (r: PlanRow): { text: string; hint: string } => {
+    const sum = (k: "clicks" | "impressions" | "grp") => months.reduce((s, m) => s + (r.cells[m]?.[k] ?? 0), 0);
+    if (!isGrpPriced(r.channelType) && r.pricing === "cpc") {
+      const v = sum("clicks");
+      return v ? { text: `${kc(v)} prokliků`, hint: "Z rozpočtu a CPC" } : { text: "—", hint: "Doplňte CPC v ceně" };
+    }
+    if (isGrpPriced(r.channelType)) {
+      const v = sum("grp");
+      // u TV a rádia se plánuje v TRP — GRP v cílové skupině kampaně (tak je bere i import z Excelu)
+      return v ? { text: `${(Math.round(v * 10) / 10).toLocaleString("cs-CZ")} TRP`, hint: "TRP = GRP v cílové skupině kampaně; z rozpočtu a ceny za bod (CPP)" } : { text: "—", hint: "Doplňte cenu za bod (CPP) v ceně" };
+    }
+    const v = sum("impressions");
+    return v ? { text: `${unitFmt(v, "impressions")} imp.`, hint: "Z rozpočtu a CPM (nebo z ceníku)" } : { text: "—", hint: "Doplňte CPM v ceně nebo v ceníku" };
+  };
   const fmtSum = (v: number) => (sumKey === "budget" ? kc(v) : unitFmt(v, sumKey) || "0");
   const grand = data.reduce((s, r) => s + rowTotal(r), 0);
   const selTotal = visible.reduce((s, r) => s + rowTotal(r), 0);
@@ -506,7 +523,7 @@ export function PlanTable({
               <th title="Na kterou tematickou oblast položka míří — u smíšených podíl v %">Oblast</th>
               <th>Nosič</th>
               {showUnit && <th>Jednotka</th>}
-              {showUnit && <th className="r" title="CPP u TV a rádia (Kč za 1 GRP), jinak CPM (Kč za 1 000 impresí). S rozpočtem se z ní dopočítají imprese nebo GRP.">Cena (Kč)</th>}
+              {showPrice && <th className="r" title="CPP u TV a rádia (Kč za 1 GRP), jinak CPM (Kč za 1 000 impresí). S rozpočtem se z ní dopočítají imprese nebo GRP.">Cena (Kč)</th>}
               {cols.map((c) => (
                 <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
                     title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : c.kind === "w" ? `Týden ${c.title}` : undefined}>
@@ -515,6 +532,7 @@ export function PlanTable({
               ))}
               <th className="r">Celkem ({sumKey === "budget" ? "Kč" : UNIT_LABEL[sumKey].toLowerCase()})</th>
               <th className="r">Podíl</th>
+              <th className="r" title="Co plán za období doručí: u CPC prokliky, u CPM imprese, u TV a rádia TRP. Počítá se z Kč a ceny.">Doručení</th>
               <th style={{ width: 30 }} />
             </tr>
           </thead>
@@ -601,6 +619,7 @@ export function PlanTable({
                     })}
                     <td className="r num">{fmtSum(gt)}</td>
                     <td className="r share num">{grand ? pct(gt / grand) : ""}</td>
+                    <td />
                     <td />
                   </tr>
 
@@ -803,7 +822,7 @@ export function PlanTable({
                           </select>
                         </td>}
 
-                        {showUnit && <td className="r" style={{ whiteSpace: "nowrap" }}>
+                        {showPrice && <td className="r" style={{ whiteSpace: "nowrap" }}>
                           {/* CPM, nebo CPC — u TV a rádia je cena vždy CPP */}
                           {!isGrpPriced(r.channelType) && (
                             <select className="txt pricemodel" value={r.pricing ?? "cpm"} disabled={!rowEditable(r)}
@@ -895,6 +914,7 @@ export function PlanTable({
 
                         <td className="r num" style={{ fontWeight: 500 }}>{fmtSum(rowTotal(r))}</td>
                         <td className="r share num">{grand ? pct(rowTotal(r) / grand) : "—"}</td>
+                        <td className="r num delivery" title={deliveryOf(r).hint}>{deliveryOf(r).text}</td>
                         <td className="r">
                           {canEditPlan && (
                             <button className="rowdel" title="Smazat taktiku"
@@ -925,6 +945,7 @@ export function PlanTable({
               ))}
               <td className="r num">{fmtSum(selTotal)}</td>
               <td className="r num">{grand ? pct(selTotal / grand) : "—"}</td>
+              <td />
               <td />
             </tr>
           </tfoot>
