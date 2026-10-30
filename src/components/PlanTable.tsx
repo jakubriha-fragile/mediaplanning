@@ -82,7 +82,7 @@ type Col =
 // Vždy viditelné: úchyt, sdělení, typ (Paid/Owned/Earned), kanál, oblast, nosič.
 // Pod „Podrobnostmi" fáze a cílení, u agentury navíc jednotka a cena — mění se
 // zřídka a plánovač je nepotřebuje mít před očima pořád.
-const BASE_COLS = 8;
+const BASE_COLS = 7;
 const RIGHT_COLS = 3;  // celkem, podíl, smazat
 
 export function PlanTable({
@@ -117,8 +117,10 @@ export function PlanTable({
       return !d;
     });
   };
-  const showUnit = details && !clientView;
-  const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 3 : 0);
+  // jednotka a cena jsou vidět vždy — zadat CPM a rozpočet a nechat dopočítat
+  // imprese je běžná práce plánovače, ne „podrobnost"
+  const showUnit = !clientView;
+  const leftCols = BASE_COLS + (details ? 2 : 0) + (showUnit ? 2 : 0);
   const [data, setData] = useState(rows);
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
@@ -330,13 +332,6 @@ export function PlanTable({
     });
   };
 
-  const channelOptions: ComboOption[] = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of rows) counts.set(r.channel, (counts.get(r.channel) ?? 0) + 1);
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "cs"))
-      .map(([label, n]) => ({ value: label, label, hint: `${n}×` }));
-  }, [rows]);
 
   const lineOptions: ComboOption[] = useMemo(() => {
     const seen = new Map<string, ComboOption>();
@@ -453,14 +448,12 @@ export function PlanTable({
               {details && <th>Fáze</th>}
               {details && <th>Cílení</th>}
               <th>Typ</th>
-              <th title="Název položky — jak ji znáte z plánu">Položka</th>
-              {showUnit && <th title="Jak položku uvidí klient a souhrny. Prázdné = zkrátí se automaticky (bez poznámek v závorkách).">Krátký název</th>}
               <th title="Kde se nakupuje (Google Ads, Meta Ads, Nova…). Určuje nosič.">Médium</th>
               <th title="Typ kampaně nebo prostor v médiu (Search, Performance Max, YouTube…)">Platforma</th>
               <th title="Na kterou tematickou oblast položka míří — u smíšených podíl v %">Oblast</th>
               <th>Nosič</th>
               {showUnit && <th>Jednotka</th>}
-              {showUnit && <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc kontaktů)">Cena (Kč)</th>}
+              {showUnit && <th className="r" title="CPP u TV a rádia (Kč za 1 GRP), jinak CPM (Kč za 1 000 impresí). S rozpočtem se z ní dopočítají imprese nebo GRP.">Cena (Kč)</th>}
               {cols.map((c) => (
                 <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
                     title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : c.kind === "w" ? `Týden ${c.title}` : undefined}>
@@ -682,33 +675,9 @@ export function PlanTable({
                           </select>
                         </td>
 
-                        <td style={{ minWidth: 170 }}>
-                          <Combo
-                            value={r.channel}
-                            options={channelOptions}
-                            disabled={!canEditPlan}
-                            placeholder="kanál"
-                            onCommit={(v) => {
-                              if (v === r.channel) return;
-                              run(() => patchRow(r.id, { channel: v }), () => patchRow(r.id, { channel: r.channel }),
-                                  () => updateTactic({ tacticId: r.id, channel: v }));
-                            }} />
-                        </td>
-                        {showUnit && <td style={{ minWidth: 150 }}>
-                          <input className="txt" key={`${r.id}-${r.label ?? ""}`} defaultValue={r.label ?? ""} placeholder={r.name}
-                            disabled={!canEditPlan} title="Prázdné = automaticky"
-                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                            onBlur={(e) => {
-                              const v = e.target.value.trim();
-                              if (v === (r.label ?? "")) return;
-                              run(() => patchRow(r.id, { label: v || null }), () => patchRow(r.id, { label: r.label }),
-                                  () => updateTactic({ tacticId: r.id, label: v }));
-                            }} />
-                        </td>}
-
                         <td style={{ minWidth: 150 }}>
                           <select className="txt" value={r.mediumId ?? ""} disabled={!canEditPlan}
-                            title={mediumOf(r) ? `${mediumOf(r)!.name} · nosič ${mediumOf(r)!.channelType}` : "Vyberte médium — určí i nosič"}
+                            title={`${r.channel}${mediumOf(r) ? ` · nosič ${mediumOf(r)!.channelType}` : " — vyberte médium, určí i nosič"}`}
                             onChange={(e) => {
                               const m = catalog.find((x) => x.id === e.target.value) ?? null;
                               const prev = { mediumId: r.mediumId, platformId: r.platformId, channelType: r.channelType };
@@ -810,6 +779,7 @@ export function PlanTable({
                                   disabled={!editable}
                                   showDerived={!clientView}
                                   estimated={!!cell?.estimated}
+                                grpPriced={isGrpPriced(r.channelType)}
                                   grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
                                   onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
                                   onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
@@ -857,6 +827,7 @@ export function PlanTable({
                                   disabled={!r.weekEditable?.[c.key]}
                                   showDerived={!clientView}
                                   estimated={!!wc?.estimated}
+                                  grpPriced={isGrpPriced(r.channelType)}
                                   grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
                                   onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
                                   onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
@@ -883,6 +854,7 @@ export function PlanTable({
                                 disabled={!r.editable[m]}
                                 showDerived={!clientView}
                                 estimated={!!cell?.estimated}
+                                grpPriced={isGrpPriced(r.channelType)}
                                 grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
                                 onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
                                 onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
@@ -971,8 +943,10 @@ function unitFmt(v: number, unit: PlanUnit): string {
 
 function BudgetCell({
   value, unit, budget, grp, impressions, reach, actual, max, type, disabled, showDerived, estimated, onCommit,
-  grid, onNav, onPasteGrid,
+  grid, onNav, onPasteGrid, grpPriced = false,
 }: {
+  /** nosič se nakupuje na GRP (TV, rádio) — pod číslem ukázat GRP, jinak imprese */
+  grpPriced?: boolean;
   /** souřadnice v mřížce „řádek:sloupec" — podle nich se skáče šipkami */
   grid: string;
   /** přesun na sousední buňku; false = dál už nic není */
@@ -1003,7 +977,10 @@ function BudgetCell({
   const approx = estimated ? "≈ " : "";
   const second = !value || !showDerived ? ""
     : unit === "budget"
-      ? grp > 0 ? `${approx}${Math.round(grp)} GRP` : impressions > 0 ? `${approx}${unitFmt(impressions, "impressions")} imp.` : ""
+      // u TV a rádia se mluví v GRP, jinde v impresích (z CPM)
+      ? grpPriced && grp > 0 ? `${approx}${Math.round(grp)} GRP`
+        : impressions > 0 ? `${approx}${unitFmt(impressions, "impressions")} imp.`
+        : grp > 0 ? `${approx}${Math.round(grp)} GRP` : ""
       : kc(budget) + " Kč";
   const tip = [
     budget ? `${kc(budget)} Kč` : null,
@@ -1065,7 +1042,7 @@ function BudgetCell({
   );
 }
 
-/** Jednotková cena — CPP u TV a rádia, jinak CPT. */
+/** Jednotková cena — CPP u TV a rádia, jinak CPM. */
 function PriceCell({
   value, label, hint, disabled, onCommit,
 }: { value: number; label: string; hint: string; disabled: boolean; onCommit: (v: number) => void }) {

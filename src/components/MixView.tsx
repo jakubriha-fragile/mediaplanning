@@ -108,7 +108,7 @@ export function MixView({
                 <th className="r">Rozpočet</th>
                 <th className="r">Podíl</th>
                 <th className="r">Doručení</th>
-                {!clientView && <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPT (Kč za tisíc impresí)">Cena / jedn.</th>}
+                {!clientView && <th className="r" title="CPP u TV a rádia (Kč za GRP), jinak CPM (Kč za tisíc impresí)">Cena / jedn.</th>}
                 <th className="r">Zásah 1+</th>
                 {months.map((m) => <th key={m} className="c mixm">{monthLabels[m]}</th>)}
               </tr>

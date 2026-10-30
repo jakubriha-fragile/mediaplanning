@@ -250,6 +250,12 @@ na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* 
 
 ### Médium a platforma
 
+Řádek plánu tvoří **Sdělení → Médium → Platforma**; vlastní název položky se nezadává
+(nový řádek se pojmenuje podle média a platformy, např. „Google Ads · Search"; importované
+názvy zůstávají a jsou v nápovědě u média). **Jednotka a Cena** jsou vidět vždy: zadejte
+CPM (u TV a rádia CPP) a rozpočet — imprese (GRP) se dopočítají, ukážou pod číslem
+a propíšou do zásahu. Jednotka *Impressions* funguje obráceně (imprese → rozpočet).
+
 Každá položka má **Médium** (kde se nakupuje: Google Ads, Sklik, Meta Ads, TikTok Ads, AdForm,
 DV360, Nova, Prima, Radiohouse…) a **Platformu** (typ kampaně v médiu: Search, Performance Max,
 Demand Gen, YouTube…). Platforma nabízí jen to, co k vybranému médiu patří; médium samo nastaví

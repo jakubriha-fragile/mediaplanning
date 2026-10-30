@@ -8,7 +8,7 @@ import type { ChannelType } from "@/db/schema";
 export type RateRow = {
   channelType: ChannelType;
   label: string;
-  unit: "CPP" | "CPT";
+  unit: "CPP" | "CPM";
   price: number | null;
   source: string;
   /** průměrná cena z položek plánu, které ji mají */
@@ -65,7 +65,7 @@ export function RateCard({ planId, rows, canEdit }: { planId: string; rows: Rate
               return (
                 <tr key={key}>
                   <td>{r.label}</td>
-                  <td className="share">{r.unit === "CPP" ? "CPP · Kč za 1 GRP" : "CPT · Kč za 1 000 impresí"}</td>
+                  <td className="share">{r.unit === "CPP" ? "CPP · Kč za 1 GRP" : "CPM · Kč za 1 000 impresí"}</td>
                   <td className="r">
                     <input className="txt num" style={{ textAlign: "right", width: 110, border: "1px solid var(--line-strong)" }}
                       value={shown} disabled={!canEdit} inputMode="decimal" placeholder="—"

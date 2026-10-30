@@ -26,7 +26,7 @@ const GRP_PRICED: ChannelType[] = ["TV", "Rádio"];
 export const isGrpPriced = (t: ChannelType) => GRP_PRICED.includes(t);
 
 /** Jak se u daného nosiče jmenuje jednotková cena. */
-export const priceLabel = (t: ChannelType) => (isGrpPriced(t) ? "CPP" : "CPT");
+export const priceLabel = (t: ChannelType) => (isGrpPriced(t) ? "CPP" : "CPM");
 export const priceHint = (t: ChannelType) =>
   isGrpPriced(t) ? "Kč za jeden GRP" : "Kč za tisíc kontaktů";
 

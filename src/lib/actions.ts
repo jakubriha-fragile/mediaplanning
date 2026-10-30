@@ -482,7 +482,7 @@ export async function setUnitPrice(raw: { tacticId: string; month: string; unitP
         set: { planned, unitPrice },
       });
 
-    const label = `${isGrpPriced(channelType) ? "CPP" : "CPT"} ${channel} / ${monthLabel(month)}: ` +
+    const label = `${isGrpPriced(channelType) ? "CPP" : "CPM"} ${channel} / ${monthLabel(month)}: ` +
       `${num(before?.unitPrice ?? 0) || "—"} → ${num(unitPrice) || "—"} Kč`;
     await pushUndo(me!.id, label, [{
       t: "budget", tacticId, month,
@@ -2244,7 +2244,7 @@ export async function setRowUnit(raw: {
       items.push(`Řídicí jednotka ${channel}: ${before?.driver ?? "budget"} → ${raw.driver}`);
     }
     if (raw.unitPrice !== undefined && raw.unitPrice !== before?.unitPrice) {
-      items.push(`${isGrpPriced(channelType) ? "CPP" : "CPT"} ${channel}: ` +
+      items.push(`${isGrpPriced(channelType) ? "CPP" : "CPM"} ${channel}: ` +
         `${num(before?.unitPrice ?? 0) || "—"} → ${num(unitPrice) || "—"} Kč`);
     }
     if (!items.length) return { ok: true };
@@ -2344,7 +2344,7 @@ export async function saveRate(raw: z.input<typeof rateInput>): Promise<Result> 
       await db.insert(rateCards).values({ clientId: plan.clientId, channelType: data.channelType, price: data.price, source: data.source })
         .onConflictDoUpdate({ target: [rateCards.clientId, rateCards.channelType], set: { price: data.price, source: data.source } });
     }
-    const unit = isGrpPriced(data.channelType) ? "CPP" : "CPT";
+    const unit = isGrpPriced(data.channelType) ? "CPP" : "CPM";
     await log(me!.id, "plan", [
       `Ceník ${data.channelType} (${unit}): ${before ? num(before.price) : "—"} → ${data.price === null ? "—" : num(data.price)}`,
     ]);
@@ -2478,7 +2478,21 @@ export async function setTacticCatalog(raw: { tacticId: string; mediumId: string
       const res = await setTacticMedia({ tacticId: data.tacticId, channelType: medium.channelType });
       if (!res.ok) return res;
     }
-    await db.update(tactics).set({ mediumId: data.mediumId, platformId: data.platformId }).where(eq(tactics.id, data.tacticId));
+    // název položky se v plánu nezadává — u nových řádků („Nový kanál") a u názvů
+    // vzniklých z dřívějšího výběru se odvodí z média a platformy
+    const [cur] = await db.select({ mediumId: tactics.mediumId, platformId: tactics.platformId }).from(tactics).where(eq(tactics.id, data.tacticId));
+    const nameOf = async (mid: string | null, pid: string | null) => {
+      if (!mid) return null;
+      const [m] = await db.select({ n: media.name }).from(media).where(eq(media.id, mid));
+      const [p] = pid ? await db.select({ n: platforms.name }).from(platforms).where(eq(platforms.id, pid)) : [];
+      return m ? (p ? `${m.n} · ${p.n}` : m.n) : null;
+    };
+    const oldAuto = await nameOf(cur?.mediumId ?? null, cur?.platformId ?? null);
+    const newAuto = await nameOf(data.mediumId, data.platformId);
+    const rename = newAuto && (before.channel === "Nový kanál" || before.channel === oldAuto);
+    await db.update(tactics).set({
+      mediumId: data.mediumId, platformId: data.platformId, ...(rename ? { channel: newAuto } : {}),
+    }).where(eq(tactics.id, data.tacticId));
     await log(me!.id, "plan", [`Médium ${before.channel}: ${medium?.name ?? "—"}`]);
     revalidatePath("/");
     return { ok: true };

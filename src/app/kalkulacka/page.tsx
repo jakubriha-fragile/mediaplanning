@@ -81,7 +81,7 @@ export default async function CalculatorPage({
       return {
         channelType: t,
         label: LABEL[t] ?? t,
-        unit: isGrpPriced(t) ? "CPP" : "CPT",
+        unit: isGrpPriced(t) ? "CPP" : "CPM",
         price: own?.price ?? null,
         source: own?.source ?? "",
         suggested: implied[t] ?? null,
