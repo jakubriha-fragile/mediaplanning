@@ -248,6 +248,18 @@ modelový zásah 1+ za období, pruh rozdělení rozpočtu, tabulka médií (dor
 impresích, cena za jednotku jen pro agenturu, zásah) s **flowchartem po měsících** a rozpadem
 na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* schová navigaci.
 
+### Co tabulka ukazuje a CPM / CPC
+
+Přepínač **Zobrazit: Zadání · Kč · Imprese · Kliky · GRP** nad tabulkou. *Zadání* ukazuje každý
+řádek v jednotce, ve které se plánuje (tady se píše); ostatní zobrazení ukazují jednu metriku
+pro všechny řádky a součty v ní. Buňka v jiné jednotce, než se řádek plánuje, je jen ke čtení
+(přepsat Kč u řádku na GRP by změnilo model). Všechny dopočty jsou v nápovědě buňky.
+
+U online a ostatních médií se v buňce Cena volí **CPM / CPC**. Na CPC se z rozpočtu a ceny
+za klik dopočítají kliky (nebo z kliků rozpočet — jednotka *Kliky*). Z kliků se nedá určit
+zásah, takže CPC položky do modelu zásahu nevstupují (Přehled je nehlásí jako chybějící data).
+Přepnutí cenového modelu vynuluje cenu za jednotku, rozpočty zůstanou.
+
 ### Médium a platforma
 
 Řádek plánu tvoří **Sdělení → Médium → Platforma**; vlastní název položky se nezadává

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
-  setTacticThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks, setTacticCatalog, autofillCatalog,
+  setTacticThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks, setTacticCatalog, autofillCatalog, setRowPricing,
   spreadMonthToWeeks,
 } from "@/lib/actions";
 import type { CatalogMedium } from "@/lib/catalog";
@@ -29,6 +29,8 @@ export type PlanRow = {
   name: string;
   mediaType: "Paid" | "Owned" | "Earned";
   channelType: ChannelType;
+  /** cenový model: CPM, nebo CPC; null = podle nosiče */
+  pricing: "cpm" | "cpc" | null;
   mediumId: string | null;
   platformId: string | null;
   targetGroupId: string | null;
@@ -38,7 +40,7 @@ export type PlanRow = {
   /** dopočítané jednotky za každý měsíc — rozpočet, GRP, impressions, zásah */
   cells: Record<string, {
     budget: number; grp: number; impressions: number; reach: number;
-    frequency: number; driver: PlanUnit; driverValue: number; unitPrice: number;
+    frequency: number; driver: PlanUnit; driverValue: number; unitPrice: number; clicks?: number;
     /** doručení odhadnuté z ceníku klienta */
     estimated?: boolean;
   }>;
@@ -71,7 +73,18 @@ const CAMP_COLORS = [
 ];
 const PHASES = ["Awareness", "Consideration", "Conversion"] as const;
 const CHANNEL_TYPES: ChannelType[] = ["TV", "Rádio", "OOH", "Print", "Kino", "Digital", "Vlastní", "PR"];
-const UNITS: PlanUnit[] = ["budget", "grp", "impressions"];
+type View = "input" | PlanUnit;
+const VIEWS: Array<{ key: View; label: string; title: string }> = [
+  { key: "input", label: "Zadání", title: "Každý řádek v jednotce, ve které se plánuje — tady se zadává" },
+  { key: "budget", label: "Kč", title: "Rozpočet v Kč u všech řádků" },
+  { key: "impressions", label: "Imprese", title: "Imprese (z CPM, u TV z GRP a velikosti cílovky)" },
+  { key: "clicks", label: "Kliky", title: "Kliky u položek na CPC" },
+  { key: "grp", label: "GRP", title: "GRP v cílové skupině (u TV TRP)" },
+];
+
+/** Jednotky podle cenového modelu: u CPC rozpočet nebo kliky, jinak rozpočet, GRP, imprese. */
+const unitsFor = (ct: ChannelType, pricing: "cpm" | "cpc" | null): PlanUnit[] =>
+  !isGrpPriced(ct) && pricing === "cpc" ? ["budget", "clicks"] : ["budget", "grp", "impressions"];
 
 /** Sloupec tabulky je buď měsíc, nebo sbalený kvartál. */
 type Col =
@@ -205,10 +218,34 @@ export function PlanTable({
   const anyFilter =
     msgSel.size || medSel.size || platSel.size || audSel.size || q.trim() || !types.Paid || !types.Owned || !types.Earned;
 
-  const rowTotal = (r: PlanRow) => months.reduce((s, m) => s + r.budgets[m], 0);
+  /**
+   * Co tabulka ukazuje: „Zadání" = každý řádek ve své jednotce (jak se plánuje),
+   * jinak jedna metrika pro všechny — Kč, imprese, kliky, GRP. Dřív buňka ukazovala
+   * všechno naráz (částku, pod ní imprese, pruh) a nedalo se to číst.
+   */
+  const [view, setView] = useState<View>("input");
+  useEffect(() => {
+    try { const v = localStorage.getItem("plan.zobrazeni") as View | null; if (v && VIEWS.some((x) => x.key === v)) setView(v); } catch { /* bez úložiště */ }
+  }, []);
+  const pickView = (v: View) => { setView(v); try { localStorage.setItem("plan.zobrazeni", v); } catch { /* bez úložiště */ } };
+  const viewUnit = (r: PlanRow): PlanUnit => (view === "input" ? rowUnit(r) : view);
+  /** hodnota buňky v aktuálním zobrazení */
+  const metricOf = (cell: PlanRow["cells"][string] | undefined, budget: number, r: PlanRow): number =>
+    view === "input" ? cell?.driverValue ?? 0
+    : view === "budget" ? budget ?? 0
+    : view === "clicks" ? cell?.clicks ?? 0
+    : view === "grp" ? cell?.grp ?? 0
+    : view === "impressions" ? cell?.impressions ?? 0
+    : (void r, 0);
+  // součty: v Zadání a Kč v korunách (jednotky řádků nejde sčítat), jinak v metrice
+  const sumKey: PlanUnit = view === "input" ? "budget" : view;
+  const cellSum = (cell: PlanRow["cells"][string] | undefined, budget: number) =>
+    sumKey === "budget" ? budget ?? 0 : sumKey === "clicks" ? cell?.clicks ?? 0 : sumKey === "grp" ? cell?.grp ?? 0 : cell?.impressions ?? 0;
+  const rowTotal = (r: PlanRow) => months.reduce((s, m) => s + cellSum(r.cells[m], r.budgets[m]), 0);
   const colOf = (r: PlanRow, c: Col) => c.kind === "w"
-    ? r.weekCells?.[c.key]?.budget ?? 0
-    : c.months.reduce((s, m) => s + (r.budgets[m] ?? 0), 0);
+    ? cellSum(r.weekCells?.[c.key], r.weekCells?.[c.key]?.budget ?? 0)
+    : c.months.reduce((s, m) => s + cellSum(r.cells[m], r.budgets[m] ?? 0), 0);
+  const fmtSum = (v: number) => (sumKey === "budget" ? kc(v) : unitFmt(v, sumKey) || "0");
   const grand = data.reduce((s, r) => s + rowTotal(r), 0);
   const selTotal = visible.reduce((s, r) => s + rowTotal(r), 0);
   const colTotal = (c: Col) => visible.reduce((s, r) => s + colOf(r, c), 0);
@@ -396,6 +433,13 @@ export function PlanTable({
           }}>✕ Zrušit filtry</button>
         ) : null}
         <span className="spacer" />
+        <span className="share">Zobrazit</span>
+        <div className="seg" role="radiogroup" aria-label="Co tabulka ukazuje">
+          {VIEWS.filter((v) => v.key !== "clicks" || data.some((r) => r.pricing === "cpc")).map((v) => (
+            <button key={v.key} type="button" role="radio" aria-checked={view === v.key} title={v.title}
+              className={view === v.key ? "on" : ""} onClick={() => pickView(v.key)}>{v.label}</button>
+          ))}
+        </div>
         <button className="btn" aria-pressed={details} onClick={toggleDetails}
           title="Fáze, cílení a u agentury jednotka a cena položky">
           {details ? "Skrýt podrobnosti" : "Podrobnosti"}
@@ -406,7 +450,7 @@ export function PlanTable({
           {pending ? (
             <span className="saving"><span className="spinner" />ukládám…</span>
           ) : (
-            <>{anyFilter ? `${visible.length} z ${data.length} taktik · ` : `${data.length} taktik · `}{kc(selTotal)} Kč</>
+            <>{anyFilter ? `${visible.length} z ${data.length} taktik · ` : `${data.length} taktik · `}{fmtSum(selTotal)} {sumKey === "budget" ? "Kč" : UNIT_LABEL[sumKey].toLowerCase()}</>
           )}
         </span>
       </div>
@@ -460,7 +504,7 @@ export function PlanTable({
                   {c.label}
                 </th>
               ))}
-              <th className="r">Celkem (Kč)</th>
+              <th className="r">Celkem ({sumKey === "budget" ? "Kč" : UNIT_LABEL[sumKey].toLowerCase()})</th>
               <th className="r">Podíl</th>
               <th style={{ width: 30 }} />
             </tr>
@@ -544,9 +588,9 @@ export function PlanTable({
                     </td>
                     {cols.map((c) => {
                       const v = g.rows.reduce((s, r) => s + colOf(r, c), 0);
-                      return <td className={`r share num ${c.kind === "q" ? "qcol" : ""}`} key={c.key} title={v ? `${kc(v)} Kč` : undefined}>{v ? kc(v) : "–"}</td>;
+                      return <td className={`r share num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{v ? fmtSum(v) : "–"}</td>;
                     })}
-                    <td className="r num">{kc(gt)}</td>
+                    <td className="r num">{fmtSum(gt)}</td>
                     <td className="r share num">{grand ? pct(gt / grand) : ""}</td>
                     <td />
                   </tr>
@@ -746,129 +790,100 @@ export function PlanTable({
                               const v = e.target.value as PlanUnit;
                               run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, driver: v }));
                             }}>
-                            {UNITS.map((u) => <option key={u} value={u}>{UNIT_LABEL[u]}</option>)}
+                            {unitsFor(r.channelType, r.pricing).map((u) => <option key={u} value={u}>{UNIT_LABEL[u]}</option>)}
                           </select>
                         </td>}
 
-                        {showUnit && <td className="r">
+                        {showUnit && <td className="r" style={{ whiteSpace: "nowrap" }}>
+                          {/* CPM, nebo CPC — u TV a rádia je cena vždy CPP */}
+                          {!isGrpPriced(r.channelType) && (
+                            <select className="txt pricemodel" value={r.pricing ?? "cpm"} disabled={!rowEditable(r)}
+                              aria-label="Cenový model" title="Nakupuje se za tisíc impresí (CPM), nebo za klik (CPC)?"
+                              onChange={(e) => {
+                                const v = e.target.value as "cpm" | "cpc";
+                                if (rowPrice(r) > 0 && !confirm(`Přepnout na ${v.toUpperCase()}? Cena za jednotku se vynuluje (Kč za tisíc impresí není Kč za klik), rozpočty zůstanou.`)) {
+                                  e.target.value = r.pricing ?? "cpm";
+                                  return;
+                                }
+                                run(() => patchRow(r.id, { pricing: v }), () => patchRow(r.id, { pricing: r.pricing }),
+                                    () => setRowPricing({ tacticId: r.id, pricing: v }));
+                              }}>
+                              <option value="cpm">CPM</option>
+                              <option value="cpc">CPC</option>
+                            </select>
+                          )}
                           <PriceCell
                             value={rowPrice(r)}
-                            label={priceLabel(r.channelType)}
-                            hint={priceHint(r.channelType)}
+                            label={priceLabel(r.channelType, r.pricing)}
+                            hint={priceHint(r.channelType, r.pricing)}
                             disabled={!rowEditable(r)}
                             onCommit={(v) => run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, unitPrice: v }))} />
                         </td>}
 
                         {cols.map((c) => {
                           const unit = rowUnit(r);
-                          // týdenní plán, sbalený měsíc: zapsat jde měsíční částka, rozloží se do týdnů
-                          if (c.kind === "q" && weeks) {
-                            const m = c.months[0];
-                            const cell = r.cells[m];
-                            const editable = weeks.filter((w) => w.home === m).every((w) => !!r.weekEditable?.[w.key]);
-                            return (
-                              <td key={c.key} className="budgetcell qcol">
-                                <BudgetCell
-                                  value={cell?.driverValue ?? 0}
-                                  unit={unit}
-                                  budget={r.budgets[m]}
-                                  grp={cell?.grp ?? 0}
-                                  impressions={cell?.impressions ?? 0}
-                                  reach={cell?.reach ?? 0}
-                                  actual={r.actuals[m]} max={Math.max(axisMax, ...data.map((x) => x.budgets[m] ?? 0))} type={r.mediaType}
-                                  disabled={!editable}
-                                  showDerived={!clientView}
-                                  estimated={!!cell?.estimated}
-                                grpPriced={isGrpPriced(r.channelType)}
-                                  grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
-                                  onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
-                                  onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
-                                  onCommit={(v) => {
-                                    if (Math.abs((cell?.driverValue ?? 0) - v) < 1e-9) return;
-                                    run(() => {}, () => {},
-                                        () => spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v }));
-                                  }} />
-                              </td>
-                            );
-                          }
-                          if (c.kind === "q") {
-                            const sum = c.months.reduce((s, m) => s + (r.cells[m]?.driverValue ?? 0), 0);
+                          // měsíc v kvartálu sbalený u měsíčního plánu: jen součet, needituje se
+                          if (c.kind === "q" && !weeks) {
+                            const sum = c.months.reduce((s, m) => s + metricOf(r.cells[m], r.budgets[m], r), 0);
                             return (
                               <td key={c.key} className="budgetcell qcol">
                                 <div className="cellbox locked filled" title="Sbalený kvartál — rozbalte v liště, chcete-li editovat">
                                   <span className="cell num" style={{ display: "block", textAlign: "right", padding: "0 7px" }}>
-                                    {sum ? unitFmt(sum, unit) : "–"}
+                                    {sum ? unitFmt(sum, viewUnit(r)) : "–"}
                                   </span>
                                 </div>
                               </td>
                             );
                           }
-                          if (c.kind === "w") {
-                            const wc = r.weekCells?.[c.key];
-                            return (
-                              <td key={c.key} className="budgetcell weekcell">
-                                {/* zadaná hodnota jako měsíční částka → rovnoměrně do týdnů měsíce */}
-                                {!!wc?.driverValue && r.weekEditable?.[c.key] && (
-                                  <button className="spreadbtn" tabIndex={-1}
-                                    title={`Vzít ${unitFmt(wc.driverValue, unit)} jako rozpočet celého měsíce (${monthLabels[c.months[0]] ?? c.months[0]}) a rozdělit rovnoměrně do jeho týdnů`}
-                                    onClick={() => run(() => {}, () => {},
-                                      () => spreadMonthToWeeks({ tacticId: r.id, month: c.months[0], driver: unit, value: wc.driverValue }))}>
-                                    ÷ měsíc
-                                  </button>
-                                )}
-                                <BudgetCell
-                                  value={wc?.driverValue ?? 0}
-                                  unit={unit}
-                                  budget={wc?.budget ?? 0}
-                                  grp={wc?.grp ?? 0}
-                                  impressions={wc?.impressions ?? 0}
-                                  reach={wc?.reach ?? 0}
-                                  actual={0} max={axisMax} type={r.mediaType}
-                                  disabled={!r.weekEditable?.[c.key]}
-                                  showDerived={!clientView}
-                                  estimated={!!wc?.estimated}
-                                  grpPriced={isGrpPriced(r.channelType)}
-                                  grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
-                                  onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
-                                  onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
-                                  onCommit={(v) => {
-                                    if ((wc?.driverValue ?? 0) === v) return;
-                                    run(() => {}, () => {},
-                                        () => setPlannedWeeks({ items: [{ tacticId: r.id, week: c.key, driver: unit, value: v }] }));
-                                  }} />
-                              </td>
-                            );
-                          }
-                          const m = c.key;
-                          const cell = r.cells[m];
+                          // co buňka nese: měsíc, sbalený měsíc týdenního plánu, nebo týden
+                          const isWeek = c.kind === "w";
+                          const m = c.kind === "w" ? c.months[0] : c.kind === "q" ? c.months[0] : c.key;
+                          const cell = isWeek ? r.weekCells?.[c.key] : r.cells[m];
+                          const budget = isWeek ? cell?.budget ?? 0 : r.budgets[m];
+                          const editable = isWeek ? !!r.weekEditable?.[c.key]
+                            : c.kind === "q" ? (weeks ?? []).filter((w) => w.home === m).every((w) => !!r.weekEditable?.[w.key])
+                            : r.editable[m];
+                          // v jiném zobrazení než v jednotce řádku se jen čte — psát Kč do řádku na GRP by změnilo model
+                          const inUnit = view === "input" || view === unit;
+                          const commit = (v: number) => {
+                            if (Math.abs((cell?.driverValue ?? 0) - v) < 1e-9) return;
+                            run(() => {}, () => {}, () =>
+                              isWeek ? setPlannedWeeks({ items: [{ tacticId: r.id, week: c.key, driver: unit, value: v }] })
+                              : c.kind === "q" ? spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v })
+                              : setPlannedBudget({ tacticId: r.id, month: m, driver: unit, value: v }));
+                          };
                           return (
-                            <td key={m} className="budgetcell">
+                            <td key={c.key} className={`budgetcell ${c.kind === "q" ? "qcol" : ""}`}>
                               <BudgetCell
-                                value={cell?.driverValue ?? 0}
-                                unit={unit}
-                                budget={r.budgets[m]}
+                                value={metricOf(cell, budget, r)}
+                                unit={viewUnit(r)}
+                                budget={budget}
                                 grp={cell?.grp ?? 0}
                                 impressions={cell?.impressions ?? 0}
+                                clicks={cell?.clicks ?? 0}
                                 reach={cell?.reach ?? 0}
-                                actual={r.actuals[m]} max={axisMax} type={r.mediaType}
-                                disabled={!r.editable[m]}
-                                showDerived={!clientView}
+                                actual={isWeek ? 0 : r.actuals[m]}
+                                max={c.kind === "q" ? Math.max(axisMax, ...data.map((x) => x.budgets[m] ?? 0)) : axisMax}
+                                type={r.mediaType}
+                                disabled={!editable || !inUnit}
+                                lockedHint={editable && !inUnit ? `Řádek se plánuje v jednotce ${UNIT_LABEL[unit]} — upravíte ho v zobrazení Zadání` : undefined}
+                                showDerived={false}
                                 estimated={!!cell?.estimated}
                                 grpPriced={isGrpPriced(r.channelType)}
                                 grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
                                 onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
                                 onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
-                                onCommit={(v) => {
-                                  const prev = cell?.driverValue ?? 0;
-                                  if (prev === v) return;
-                                  run(() => {}, () => {},
-                                      () => setPlannedBudget({ tacticId: r.id, month: m, driver: unit, value: v }));
-                                }} />
+                                onCommit={commit}
+                                // týden: zadané číslo jako rozpočet celého měsíce → rovnoměrně do jeho týdnů
+                                onSpread={isWeek && editable && inUnit
+                                  ? (v) => run(() => {}, () => {}, () => spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v }))
+                                  : undefined}
+                                spreadTitle={`Vzít číslo v buňce jako rozpočet celého měsíce (${monthLabels[m] ?? m}) a rozdělit rovnoměrně do jeho týdnů`} />
                             </td>
                           );
                         })}
 
-                        <td className="r num" style={{ fontWeight: 500 }}>{kc(rowTotal(r))}</td>
+                        <td className="r num" style={{ fontWeight: 500 }}>{fmtSum(rowTotal(r))}</td>
                         <td className="r share num">{grand ? pct(rowTotal(r) / grand) : "—"}</td>
                         <td className="r">
                           {canEditPlan && (
@@ -894,11 +909,11 @@ export function PlanTable({
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={leftCols}>CELKEM {anyFilter ? "(výběr)" : periodName} <span className="share" style={{ fontWeight: 300 }}>v Kč</span></td>
+              <td colSpan={leftCols}>CELKEM {anyFilter ? "(výběr)" : periodName} <span className="share" style={{ fontWeight: 300 }}>{sumKey === "budget" ? "v Kč" : `· ${UNIT_LABEL[sumKey].toLowerCase()}`}</span></td>
               {cols.map((c) => (
-                <td className={`r num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{kc(colTotal(c))}</td>
+                <td className={`r num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{fmtSum(colTotal(c))}</td>
               ))}
-              <td className="r num">{kc(selTotal)}</td>
+              <td className="r num">{fmtSum(selTotal)}</td>
               <td className="r num">{grand ? pct(selTotal / grand) : "—"}</td>
               <td />
             </tr>
@@ -934,7 +949,7 @@ function GroupBlock({ children }: { children: React.ReactNode }) {
 /** Formát hodnoty podle řídicí jednotky. */
 function unitFmt(v: number, unit: PlanUnit): string {
   if (!v) return "";
-  if (unit === "budget") return kc(v);
+  if (unit === "budget" || unit === "clicks") return kc(v);
   if (unit === "grp") return (Math.round(v * 10) / 10).toLocaleString("cs-CZ");
   return v >= 1_000_000
     ? (v / 1_000_000).toFixed(1).replace(".", ",") + " M"
@@ -943,8 +958,15 @@ function unitFmt(v: number, unit: PlanUnit): string {
 
 function BudgetCell({
   value, unit, budget, grp, impressions, reach, actual, max, type, disabled, showDerived, estimated, onCommit,
-  grid, onNav, onPasteGrid, grpPriced = false,
+  grid, onNav, onPasteGrid, grpPriced = false, clicks = 0, lockedHint, onSpread, spreadTitle,
 }: {
+  /** proč nejde psát, i když oprávnění je (jiné zobrazení než jednotka řádku) */
+  lockedHint?: string;
+  /** „÷ měsíc": vezme právě napsané číslo (i neuložené) a rozloží ho do týdnů měsíce */
+  onSpread?: (value: number) => void;
+  spreadTitle?: string;
+  /** kliky u položek na CPC */
+  clicks?: number;
   /** nosič se nakupuje na GRP (TV, rádio) — pod číslem ukázat GRP, jinak imprese */
   grpPriced?: boolean;
   /** souřadnice v mřížce „řádek:sloupec" — podle nich se skáče šipkami */
@@ -977,8 +999,9 @@ function BudgetCell({
   const approx = estimated ? "≈ " : "";
   const second = !value || !showDerived ? ""
     : unit === "budget"
-      // u TV a rádia se mluví v GRP, jinde v impresích (z CPM)
-      ? grpPriced && grp > 0 ? `${approx}${Math.round(grp)} GRP`
+      // u TV a rádia se mluví v GRP, jinde v impresích (z CPM), u CPC v klicích
+      ? clicks > 0 ? `${kc(clicks)} kliků`
+        : grpPriced && grp > 0 ? `${approx}${Math.round(grp)} GRP`
         : impressions > 0 ? `${approx}${unitFmt(impressions, "impressions")} imp.`
         : grp > 0 ? `${approx}${Math.round(grp)} GRP` : ""
       : kc(budget) + " Kč";
@@ -986,13 +1009,27 @@ function BudgetCell({
     budget ? `${kc(budget)} Kč` : null,
     grp ? `${(Math.round(grp * 10) / 10).toLocaleString("cs-CZ")} GRP` : null,
     impressions ? `${kc(impressions)} impressions` : null,
+    clicks ? `${kc(clicks)} kliků` : null,
     reach ? `zásah ${(reach * 100).toFixed(1).replace(".", ",")} %` : null,
     actual ? `čerpáno ${kc(actual)} Kč` : null,
     estimated ? "doručení odhadnuté z ceníku" : null,
   ].filter(Boolean).join(" · ");
 
   return (
-    <div className={`cellbox ${disabled ? "locked" : "editable"} ${value ? "filled" : ""}`} title={tip || undefined}>
+    <>
+    {/* tlačítko mimo rámeček buňky — ten ořezává obsah */}
+      {onSpread && (value > 0 || (draft ?? "").trim() !== "") && (
+        <button type="button" className="spreadbtn" tabIndex={-1} title={spreadTitle}
+          // mousedown by pole opustilo a uložilo hodnotu do týdne — tlačítko ji místo toho vezme jako měsíc
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const v = draft !== null ? parseNum(draft) : value;
+            setDraft(null);
+            if (v > 0) onSpread(v);
+          }}>÷ měsíc</button>
+      )}
+    <div className={`cellbox ${disabled ? "locked" : "editable"} ${value ? "filled" : ""}`} title={[tip, lockedHint].filter(Boolean).join(" · ") || undefined}>
+
       {budget > 0 && (
         <div className="cellfill" style={{
           width: `${w}%`,
@@ -1006,7 +1043,7 @@ function BudgetCell({
         className="cell"
         inputMode="numeric"
         disabled={disabled}
-        title={disabled ? "K tomuto rozpočtu nemáte oprávnění" : undefined}
+        title={disabled ? lockedHint ?? "K tomuto rozpočtu nemáte oprávnění" : undefined}
         value={shown}
         onFocus={(e) => { setDraft(value ? String(Math.round(value * 10) / 10) : ""); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ""))}
@@ -1039,6 +1076,7 @@ function BudgetCell({
       />
       {!editing && second && <span className="derived">{second}</span>}
     </div>
+    </>
   );
 }
 

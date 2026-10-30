@@ -98,7 +98,7 @@ export type CrossContext = {
    * klienta. Ceník platí jen pro média zadaná v Kč — ne pro agenturní práci
    * a ne pro smíšené položky, kde by odhad nafoukl doručení i z honorářů.
    */
-  priceFor: (row: { channelType: ChannelType; channel: string }, driver: PlanUnit, unitPrice: number) =>
+  priceFor: (row: { channelType: ChannelType; channel: string; pricing?: "cpm" | "cpc" | null }, driver: PlanUnit, unitPrice: number) =>
     { unitPrice: number; estimated: boolean };
 };
 
@@ -136,7 +136,8 @@ export async function crossContext(planTargetGroupId: string | null, clientId?: 
     },
     dup,
     priceFor: (row, driver, unitPrice) => {
-      if (unitPrice > 0 || driver !== "budget" || costKind(row.channel) !== "media") return { unitPrice, estimated: false };
+      // ceník je v CPM — na položky nakupované za klik se nehodí
+      if (unitPrice > 0 || driver !== "budget" || costKind(row.channel) !== "media" || row.pricing === "cpc") return { unitPrice, estimated: false };
       const rate = rateOf.get(row.channelType) ?? 0;
       return rate > 0 ? { unitPrice: rate, estimated: true } : { unitPrice, estimated: false };
     },
@@ -231,6 +232,7 @@ export async function loadPlan(planId: string) {
       label: tactics.label,
       mediaType: tactics.mediaType,
       channelType: tactics.channelType,
+      pricing: tactics.pricing,
       mediumId: tactics.mediumId,
       platformId: tactics.platformId,
       targetGroupId: tactics.targetGroupId,
@@ -306,7 +308,7 @@ export async function getPlanRows(me: Principal, planId: string) {
         const unitPrice = b?.unitPrice ?? 0;
         const price = ctx.priceFor(r, driver, unitPrice);
         const d = derive({
-          channelType: r.channelType, driver, driverValue, unitPrice: price.unitPrice, universe, curve,
+          channelType: r.channelType, pricing: r.pricing, driver, driverValue, unitPrice: price.unitPrice, universe, curve,
         });
         // Uložený rozpočet má přednost — porovnává se se skutečností. Nula ale
         // znamená „ještě nedopočítáno" (import, seed), proto tam pustíme dopočet;
@@ -323,7 +325,7 @@ export async function getPlanRows(me: Principal, planId: string) {
           const driverValue = b?.driverValue ?? 0;
           const unitPrice = b?.unitPrice ?? 0;
           const price = ctx.priceFor(r, driver, unitPrice);
-          const d = derive({ channelType: r.channelType, driver, driverValue, unitPrice: price.unitPrice, universe, curve });
+          const d = derive({ channelType: r.channelType, pricing: r.pricing, driver, driverValue, unitPrice: price.unitPrice, universe, curve });
           return [w.key, { ...d, budget: b?.planned || d.budget, driver, driverValue, unitPrice, estimated: price.estimated } as PlanCell];
         }))
       : null;
@@ -351,6 +353,7 @@ export async function getPlanRows(me: Principal, planId: string) {
       name: displayName(r),
       mediaType: r.mediaType,
       channelType: r.channelType,
+      pricing: r.pricing,
       mediumId: r.mediumId,
       platformId: r.platformId,
       targetGroupId: r.targetGroupId,
@@ -454,6 +457,7 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
       const u = ctx.universeOf(r.targetGroupId);
       const d = derive({
         channelType: r.channelType,
+        pricing: r.pricing,
         driver: b.driver as PlanUnit,
         driverValue: b.driverValue,
         unitPrice: ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice).unitPrice,

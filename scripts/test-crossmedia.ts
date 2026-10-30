@@ -187,6 +187,19 @@ console.log("\nTyp nákladu (agenturní práce vs. média)");
   ok("partnerství / event / OOH je smíšené", costKind("Partnerství / event / OOH (bude upřesněno)") === "mixed");
 }
 
+console.log("\nCPC: rozpočet ↔ kliky");
+{
+  const a = derive({ channelType: "Digital", pricing: "cpc", driver: "budget", driverValue: 1_000_000, unitPrice: 5, universe: 2_000_000 });
+  ok("1 000 000 Kč při CPC 5 Kč = 200 000 kliků", a.clicks === 200_000 && a.budget === 1_000_000);
+  ok("CPC nemá imprese ani zásah", a.impressions === 0 && a.reach === 0);
+  const b = derive({ channelType: "Digital", pricing: "cpc", driver: "clicks", driverValue: 1000, unitPrice: 8, universe: 2_000_000 });
+  ok("1 000 kliků při CPC 8 Kč = 8 000 Kč", b.budget === 8000 && b.clicks === 1000);
+  const c = derive({ channelType: "Digital", pricing: "cpm", driver: "budget", driverValue: 100_000, unitPrice: 200, universe: 2_000_000 });
+  ok("CPM 200 a 100 000 Kč = 500 000 impresí", c.impressions === 500_000 && c.clicks === 0);
+  const tv = derive({ channelType: "TV", pricing: "cpc", driver: "grp", driverValue: 100, unitPrice: 9000, universe: 2_000_000 });
+  ok("TV ignoruje CPC — vždy CPP", tv.budget === 900_000 && tv.grp === 100);
+}
+
 console.log("\nTýdny plánu");
 {
   const w = weeksOfPeriod("2027-02", "2028-01");

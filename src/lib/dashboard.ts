@@ -140,13 +140,13 @@ export async function getDashboard(
       if (!b) continue;
       const price = ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice);
       const d = derive({
-        channelType: r.channelType, driver: b.driver as PlanUnit, driverValue: b.driverValue,
+        channelType: r.channelType, pricing: r.pricing, driver: b.driver as PlanUnit, driverValue: b.driverValue,
         unitPrice: price.unitPrice, universe: ctx.universeOf(r.targetGroupId),
         curve: ctx.curveOf(r.channelType, r.targetGroupId),
       });
       const cost = b.planned || d.budget;
       if (!cost && !d.grp) continue;
-      all.push({ row: r, month: m, kind, cost, grp: d.grp, delivered: d.grp > 0, estimated: price.estimated && d.grp > 0, shares });
+      all.push({ row: r, month: m, kind, cost, grp: d.grp, delivered: d.grp > 0 || d.clicks > 0, estimated: price.estimated && d.grp > 0, shares });
     }
   }
 
@@ -189,13 +189,13 @@ export async function getDashboard(
         if (!b) continue;
         const price = ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice);
         const d = derive({
-          channelType: r.channelType, driver: b.driver as PlanUnit, driverValue: b.driverValue,
+          channelType: r.channelType, pricing: r.pricing, driver: b.driver as PlanUnit, driverValue: b.driverValue,
           unitPrice: price.unitPrice, universe: ctx.universeOf(r.targetGroupId),
           curve: ctx.curveOf(r.channelType, r.targetGroupId),
         });
         const cost = b.planned || d.budget;
         if (!cost && !d.grp) continue;
-        wcells.push({ row: r, month: w.key, kind, cost, grp: d.grp, delivered: d.grp > 0, estimated: price.estimated && d.grp > 0, shares });
+        wcells.push({ row: r, month: w.key, kind, cost, grp: d.grp, delivered: d.grp > 0 || d.clicks > 0, estimated: price.estimated && d.grp > 0, shares });
       }
     }
     const wf = wcells

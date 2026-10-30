@@ -17,7 +17,8 @@ const mil = (n: number) => (n / 1_000_000).toLocaleString("cs-CZ", { maximumFrac
 /** Doručení tak, jak o něm mluví plánovač: TV a rádio v TRP, online v impresích. */
 function delivery(c: MixChannel) {
   if (c.type === "TV" || c.type === "Rádio") return c.grp > 0 ? `${kc(c.grp)} TRP` : "—";
-  return c.impressions > 0 ? `${big(c.impressions)} imp.` : "—";
+  const parts = [c.impressions > 0 ? `${big(c.impressions)} imp.` : "", c.clicks > 0 ? `${big(c.clicks)} kliků` : ""].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "—";
 }
 
 /**

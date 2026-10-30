@@ -18,6 +18,7 @@ export type UndoOp =
   /** týden plánu po týdnech; `existed: false` = řádek před změnou nebyl, vrácení ho smaže */
   | { t: "budgetWeek"; tacticId: string; week: string; planned: number;
       driver: PlanUnit; driverValue: number; unitPrice: number; existed: boolean }
+  | { t: "pricing"; tacticId: string; pricing: "cpm" | "cpc" | null }
   | { t: "actual"; tacticId: string; month: string; amount: number }
   | { t: "metricTarget"; metricId: string; month: string; target: number }
   | { t: "metricActual"; metricId: string; month: string; value: number }
@@ -60,6 +61,9 @@ export async function applyOps(ops: UndoOp[]) {
   const resync = new Set<string>();
   for (const op of ops) {
     switch (op.t) {
+      case "pricing":
+        await db.update(tactics).set({ pricing: op.pricing }).where(eq(tactics.id, op.tacticId));
+        break;
       case "budgetWeek": {
         if (!op.existed) {
           await db.delete(tacticBudgetWeeks)

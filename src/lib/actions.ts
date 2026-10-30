@@ -56,6 +56,7 @@ async function tacticCoords(tacticId: string) {
       channel: tactics.channel,
       label: tactics.label,
       channelType: tactics.channelType,
+      pricing: tactics.pricing,
       targetGroupId: tactics.targetGroupId,
       campaignId: messageLines.campaignId,
       planId: campaigns.planId,
@@ -184,7 +185,7 @@ async function writeBudget(
 
   const price = unitPrice ?? before?.unitPrice ?? 0;
   const universe = await universeFor(planId, targetGroupId);
-  const d = derive({ channelType, driver, driverValue: value, unitPrice: price, universe });
+  const d = derive({ channelType, pricing: c.pricing, driver, driverValue: value, unitPrice: price, universe });
   const planned = Math.round(d.budget);
 
   const same =
@@ -295,7 +296,7 @@ async function writeWeek(
     price = w?.p ?? m?.p ?? 0;
   }
   const universe = await universeFor(planId, targetGroupId);
-  const planned = Math.round(derive({ channelType, driver, driverValue: value, unitPrice: price, universe }).budget);
+  const planned = Math.round(derive({ channelType, pricing: c.pricing, driver, driverValue: value, unitPrice: price, universe }).budget);
   if (before && before.driverValue === value && before.driver === driver && before.planned === planned) return null;
   if (!before && !value) return null;
 
@@ -471,7 +472,7 @@ export async function setUnitPrice(raw: { tacticId: string; month: string; unitP
     const value = before?.driverValue ?? 0;
     const universe = await universeFor(planId, targetGroupId);
     const planned = Math.round(
-      derive({ channelType, driver, driverValue: value, unitPrice, universe }).budget,
+      derive({ channelType, pricing: c.pricing, driver, driverValue: value, unitPrice, universe }).budget,
     );
 
     await db
@@ -1573,6 +1574,7 @@ async function assertCanUndo(me: NonNullable<Awaited<ReturnType<typeof currentPr
     switch (op.t) {
       case "budget": await tactic(op.tacticId, "plan", op.month); break;
       case "budgetWeek": for (const m of weekMonths(op.week)) await tactic(op.tacticId, "plan", m); break;
+      case "pricing": await tactic(op.tacticId, "plan", null); break;
       case "actual": await tactic(op.tacticId, "actuals", op.month); break;
       case "note": await tactic(op.tacticId, "actuals", op.month); break;
       case "metricTarget": await metric(op.metricId, "plan", op.month); break;
@@ -2090,7 +2092,7 @@ export async function setTacticMedia(raw: z.input<typeof tacticMedia>): Promise<
       for (const r of rows) {
         const planned = Math.round(
           derive({
-            channelType, driver: r.driver as PlanUnit, driverValue: r.driverValue,
+            channelType, pricing: before.pricing, driver: r.driver as PlanUnit, driverValue: r.driverValue,
             unitPrice: r.unitPrice, universe,
           }).budget,
         );
@@ -2103,7 +2105,7 @@ export async function setTacticMedia(raw: z.input<typeof tacticMedia>): Promise<
       if (weeks.length) {
         for (const w of weeks) {
           const planned = Math.round(derive({
-            channelType, driver: w.driver as PlanUnit, driverValue: w.driverValue, unitPrice: w.unitPrice, universe,
+            channelType, pricing: before.pricing, driver: w.driver as PlanUnit, driverValue: w.driverValue, unitPrice: w.unitPrice, universe,
           }).budget);
           if (planned !== w.planned) await db.update(tacticBudgetWeeks).set({ planned }).where(eq(tacticBudgetWeeks.id, w.id));
         }
@@ -2175,6 +2177,12 @@ export async function setRowUnit(raw: {
     const c = await tacticCoords(raw.tacticId);
     const { planId, channel, channelType, targetGroupId } = c;
 
+    // kliky jdou jen u CPC, imprese a GRP naopak u CPC nedávají smysl
+    if (raw.driver) {
+      const cpc = !isGrpPriced(channelType) && c.pricing === "cpc";
+      if (raw.driver === "clicks" && !cpc) return { ok: false, error: "Kliky jdou zadávat jen u položky na CPC." };
+      if (cpc && (raw.driver === "grp" || raw.driver === "impressions")) return { ok: false, error: "Položka na CPC se plánuje v rozpočtu nebo v klicích." };
+    }
     const plan = await db.select().from(plans).where(eq(plans.id, planId));
     const months = monthsBetween(plan[0].periodStart, plan[0].periodEnd);
     // na řádek smí sáhnout jen ten, kdo smí všechny jeho měsíce
@@ -2202,14 +2210,15 @@ export async function setRowUnit(raw: {
       let value = r?.driverValue ?? 0;
       if (r && raw.driver && raw.driver !== r.driver) {
         const cur = derive({
-          channelType, driver: r.driver as PlanUnit, driverValue: r.driverValue,
+          channelType, pricing: c.pricing, driver: r.driver as PlanUnit, driverValue: r.driverValue,
           unitPrice: r.unitPrice, universe,
         });
         value = raw.driver === "budget" ? cur.budget
           : raw.driver === "grp" ? cur.grp
+          : raw.driver === "clicks" ? cur.clicks
           : cur.impressions;
       }
-      const planned = Math.round(derive({ channelType, driver, driverValue: value, unitPrice, universe }).budget);
+      const planned = Math.round(derive({ channelType, pricing: c.pricing, driver, driverValue: value, unitPrice, universe }).budget);
       await db
         .insert(tacticBudgets)
         .values({ tacticId: raw.tacticId, month: m, planned, driver, driverValue: value, unitPrice })
@@ -2229,10 +2238,10 @@ export async function setRowUnit(raw: {
         });
         let value = w.driverValue;
         if (raw.driver && raw.driver !== w.driver) {
-          const cur = derive({ channelType, driver: w.driver as PlanUnit, driverValue: w.driverValue, unitPrice: w.unitPrice, universe });
-          value = raw.driver === "budget" ? cur.budget : raw.driver === "grp" ? cur.grp : cur.impressions;
+          const cur = derive({ channelType, pricing: c.pricing, driver: w.driver as PlanUnit, driverValue: w.driverValue, unitPrice: w.unitPrice, universe });
+          value = raw.driver === "budget" ? cur.budget : raw.driver === "grp" ? cur.grp : raw.driver === "clicks" ? cur.clicks : cur.impressions;
         }
-        const planned = Math.round(derive({ channelType, driver, driverValue: value, unitPrice, universe }).budget);
+        const planned = Math.round(derive({ channelType, pricing: c.pricing, driver, driverValue: value, unitPrice, universe }).budget);
         await db.update(tacticBudgetWeeks).set({ planned, driver, driverValue: value, unitPrice })
           .where(eq(tacticBudgetWeeks.id, w.id));
       }
@@ -2608,6 +2617,41 @@ export async function deletePlatform(id: string): Promise<Result> {
     const [p] = await db.delete(platforms).where(eq(platforms.id, id)).returning();
     if (p) await log(me!.id, "plan", [`Číselník: smazána platforma „${p.name}"`]);
     revalidatePath("/nastaveni");
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Cenový model položky: CPM, nebo CPC. Cena za jednotku po změně neplatí
+ * (Kč za tisíc impresí ≠ Kč za klik), proto se vynuluje a hodnoty se převedou
+ * na rozpočet — peníze v plánu zůstanou, jen se znovu zadá cena. Jeden krok Zpět.
+ */
+export async function setRowPricing(raw: { tacticId: string; pricing: "cpm" | "cpc" }): Promise<Result> {
+  try {
+    const data = z.object({ tacticId: z.string().min(1), pricing: z.enum(["cpm", "cpc"]) }).parse(raw);
+    const me = await currentPrincipal();
+    const c = await tacticCoords(data.tacticId);
+    const [plan] = await db.select().from(plans).where(eq(plans.id, c.planId));
+    for (const m of monthsBetween(plan.periodStart, plan.periodEnd)) assertCan(me, "write", at(c, "plan", m));
+    if (isGrpPriced(c.channelType)) return { ok: false, error: "TV a rádio se nakupují na GRP (CPP)." };
+    if ((c.pricing ?? "cpm") === data.pricing) return { ok: true };
+
+    const undo: UndoOp[] = [{ t: "pricing", tacticId: c.tacticId, pricing: c.pricing ?? null }];
+    for (const r of await db.select().from(tacticBudgets).where(eq(tacticBudgets.tacticId, c.tacticId))) {
+      undo.push({ t: "budget", tacticId: r.tacticId, month: r.month, planned: r.planned, driver: r.driver as PlanUnit, driverValue: r.driverValue, unitPrice: r.unitPrice });
+      await db.update(tacticBudgets).set({ driver: "budget", driverValue: r.planned, unitPrice: 0 }).where(eq(tacticBudgets.id, r.id));
+    }
+    for (const w of await db.select().from(tacticBudgetWeeks).where(eq(tacticBudgetWeeks.tacticId, c.tacticId))) {
+      undo.push({ t: "budgetWeek", tacticId: w.tacticId, week: w.week, existed: true, planned: w.planned, driver: w.driver as PlanUnit, driverValue: w.driverValue, unitPrice: w.unitPrice });
+      await db.update(tacticBudgetWeeks).set({ driver: "budget", driverValue: w.planned, unitPrice: 0 }).where(eq(tacticBudgetWeeks.id, w.id));
+    }
+    await db.update(tactics).set({ pricing: data.pricing }).where(eq(tactics.id, c.tacticId));
+    const label = `${c.channel}: nákup na ${data.pricing.toUpperCase()} (cena za jednotku vynulována)`;
+    await pushUndo(me!.id, label, undo);
+    await log(me!.id, "plan", [label]);
     revalidatePath("/");
     return { ok: true };
   } catch (e) {

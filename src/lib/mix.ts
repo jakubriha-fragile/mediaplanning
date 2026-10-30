@@ -32,6 +32,8 @@ export type MixChannel = {
   /** GRP v cílové skupině plánu (u TV a rádia = TRP z plánu) */
   grp: number;
   impressions: number;
+  /** kliky z položek na CPC */
+  clicks: number;
   /** modelový zásah 1+ za celé období; 0 = bez doručení */
   reach: number;
   /** průměrná cena: CPP (Kč/GRP) u TV a rádia, jinak CPT (Kč/1000 imp.) — jen z položek s doručením */
@@ -77,7 +79,7 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
       ch = {
         type: r.channelType, group: channelGroupOf(r.channelType), cost: 0,
         byMonth: Object.fromEntries(months.map((m) => [m, 0])),
-        grp: 0, impressions: 0, reach: 0, unitPrice: 0, items: [], priced: { cost: 0, units: 0 },
+        grp: 0, impressions: 0, clicks: 0, reach: 0, unitPrice: 0, items: [], priced: { cost: 0, units: 0 },
       };
       byType.set(r.channelType, ch);
     }
@@ -89,7 +91,7 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
       const driver = b.driver as PlanUnit;
       const price = ctx.priceFor(r, driver, b.unitPrice);
       const d = derive({
-        channelType: r.channelType, driver, driverValue: b.driverValue, unitPrice: price.unitPrice,
+        channelType: r.channelType, pricing: r.pricing, driver, driverValue: b.driverValue, unitPrice: price.unitPrice,
         universe: ctx.universeOf(r.targetGroupId), curve: ctx.curveOf(r.channelType, r.targetGroupId),
       });
       const cost = b.planned || d.budget;
@@ -100,6 +102,7 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
       ch.cost += cost;
       ch.grp += d.grp;
       ch.impressions += d.impressions;
+      ch.clicks += d.clicks;
       totalByMonth[m] += cost;
       if (d.grp > 0) {
         ch.priced.cost += cost;

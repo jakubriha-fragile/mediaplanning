@@ -25,15 +25,26 @@ const GRP_PRICED: ChannelType[] = ["TV", "Rádio"];
 
 export const isGrpPriced = (t: ChannelType) => GRP_PRICED.includes(t);
 
-/** Jak se u daného nosiče jmenuje jednotková cena. */
-export const priceLabel = (t: ChannelType) => (isGrpPriced(t) ? "CPP" : "CPM");
-export const priceHint = (t: ChannelType) =>
-  isGrpPriced(t) ? "Kč za jeden GRP" : "Kč za tisíc kontaktů";
+/**
+ * Cenový model položky: CPP u TV a rádia (dané nosičem), jinak CPM, nebo CPC
+ * (cena za klik — search, výkonnostní kampaně). U CPC se z rozpočtu dopočítají
+ * kliky; imprese ani zásah se z kliků určit nedají, takže CPC položky do modelu
+ * zásahu nevstupují.
+ */
+export type Pricing = "cpm" | "cpc";
+export const isCpc = (t: ChannelType, pricing?: Pricing | null) => !isGrpPriced(t) && pricing === "cpc";
+
+/** Jak se u daného nosiče a cenového modelu jmenuje jednotková cena. */
+export const priceLabel = (t: ChannelType, pricing?: Pricing | null) =>
+  isGrpPriced(t) ? "CPP" : pricing === "cpc" ? "CPC" : "CPM";
+export const priceHint = (t: ChannelType, pricing?: Pricing | null) =>
+  isGrpPriced(t) ? "Kč za jeden GRP" : pricing === "cpc" ? "Kč za jeden klik" : "Kč za tisíc impresí";
 
 export const UNIT_LABEL: Record<PlanUnit, string> = {
   budget: "Rozpočet",
   grp: "GRP",
   impressions: "Impressions",
+  clicks: "Kliky",
 };
 
 export type Curve = { rMax: number; k: number };
@@ -113,6 +124,8 @@ export function grpForReach(reach: number, curve: Curve): number {
 
 export type TacticInput = {
   channelType: ChannelType;
+  /** cenový model položky; null/undefined = podle nosiče (CPP, jinak CPM) */
+  pricing?: Pricing | null;
   driver: PlanUnit;
   driverValue: number;
   unitPrice: number;
@@ -129,12 +142,14 @@ export type Derived = {
   /** počet zasažených osob */
   reachPeople: number;
   frequency: number;
+  /** kliky — jen u položek na CPC */
+  clicks: number;
   /** co chybí k dopočtu — pro srozumitelné hlášky v rozhraní */
   missing: null | "price" | "universe";
 };
 
 const EMPTY: Derived = {
-  budget: 0, grp: 0, impressions: 0, reach: 0, reachPeople: 0, frequency: 0, missing: null,
+  budget: 0, grp: 0, impressions: 0, reach: 0, reachPeople: 0, frequency: 0, clicks: 0, missing: null,
 };
 
 /**
@@ -147,6 +162,13 @@ export function derive(t: TacticInput): Derived {
   const grpPriced = isGrpPriced(channelType);
 
   if (!v || v <= 0) return EMPTY;
+
+  // CPC: rozpočet ↔ kliky; imprese a zásah z kliků určit nejde
+  if (isCpc(channelType, t.pricing)) {
+    if (driver === "clicks") return { ...EMPTY, clicks: v, budget: v * p, missing: p > 0 ? null : "price" };
+    const budget = driver === "budget" ? v : 0;
+    return { ...EMPTY, budget, clicks: p > 0 ? budget / p : 0, missing: p > 0 ? null : "price" };
+  }
 
   let budget = 0;
   let grp = 0;
@@ -173,7 +195,7 @@ export function derive(t: TacticInput): Derived {
   }
 
   if (U <= 0) {
-    return { budget, grp: 0, impressions, reach: 0, reachPeople: 0, frequency: 0, missing: "universe" };
+    return { budget, grp: 0, impressions, reach: 0, reachPeople: 0, frequency: 0, clicks: 0, missing: "universe" };
   }
 
   const reach = reachFromGrp(grp, curve);
@@ -186,6 +208,7 @@ export function derive(t: TacticInput): Derived {
     reach,
     reachPeople: reach * U,
     frequency,
+    clicks: 0,
     missing: p <= 0 && driver === "budget" ? "price" : null,
   };
 }

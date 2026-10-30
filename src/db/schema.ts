@@ -23,7 +23,7 @@ export const channelTypeEnum = pgEnum("channel_type", [
 
 /** Čím je taktika v daném měsíci řízená. Ostatní tři hodnoty se dopočítají —
  *  to je celá pointa: plánovač zadá jedno číslo, ne čtyři, které musí sedět. */
-export const planUnitEnum = pgEnum("plan_unit", ["budget", "grp", "impressions"]);
+export const planUnitEnum = pgEnum("plan_unit", ["budget", "grp", "impressions", "clicks"]);
 
 export const planStatusEnum = pgEnum("plan_status", ["draft", "approved", "live", "closed"]);
 export const phaseEnum = pgEnum("phase", ["Awareness", "Consideration", "Conversion"]);
@@ -277,6 +277,8 @@ export const tactics = pgTable(
     label: text("label"),
     mediaType: mediaTypeEnum("media_type").notNull(),
     channelType: channelTypeEnum("channel_type").notNull().default("Digital"),
+    /** Cenový model: "cpm" | "cpc"; NULL = podle nosiče (TV a rádio CPP, jinak CPM). */
+    pricing: text("pricing").$type<"cpm" | "cpc">(),
     /** Médium a platforma z číselníku (NULL = zatím nevybráno). */
     mediumId: text("medium_id").references(() => media.id, { onDelete: "set null" }),
     platformId: text("platform_id").references(() => platforms.id, { onDelete: "set null" }),

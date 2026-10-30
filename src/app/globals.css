@@ -893,10 +893,10 @@ select.linesel {
 }
 table.plan tr:hover select.linesel, select.linesel:focus { border-color: var(--line-strong); color: var(--ink-2); appearance: auto; -webkit-appearance: auto; }
 /* „÷ měsíc" v týdenní buňce — jen pod myší */
-td.weekcell { position: relative; }
+td.budgetcell { position: relative; }
 .spreadbtn {
   position: absolute; z-index: 3; right: 4px; top: -9px; display: none;
   font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 999px; cursor: pointer;
   border: 1px solid var(--brand); background: var(--surface); color: var(--brand-ink); white-space: nowrap;
 }
-td.weekcell:hover .spreadbtn { display: block; }
+td.budgetcell:hover .spreadbtn, td.budgetcell:focus-within .spreadbtn { display: block; }
