@@ -884,6 +884,15 @@ table.plan tr:hover .rowadd, table.plan .rowadd:focus-visible { opacity: 1; }
 .catalog-plats .chip { display: inline-flex; align-items: center; gap: 2px; cursor: default; }
 .catalog-new { width: 130px !important; border: 1px dashed var(--line-strong) !important; }
 .catalog-add { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+/* výchozí předpoklady digitálních platforem */
+table.catalog-defaults { border-collapse: collapse; font-size: 12px; }
+table.catalog-defaults th { font-weight: 500; font-size: 10.5px; color: var(--muted); text-align: left; padding: 2px 8px 4px 0; }
+table.catalog-defaults th.r, table.catalog-defaults td.r { text-align: right; }
+table.catalog-defaults td { padding: 1px 8px 1px 0; }
+table.catalog-defaults td:first-child { min-width: 170px; }
+input.defaultinput { width: 72px; text-align: right; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
+input.defaultinput:placeholder-shown { border-style: dashed; }
+.estresult { white-space: nowrap; }
 .catalog-row .btn.danger { opacity: 0; }
 .catalog-row:hover .btn.danger, .catalog-row .btn.danger:focus-visible { opacity: 1; }
 /* kód sdělení pod názvem jde přepnout — vypadá jako text, šipka až pod myší */

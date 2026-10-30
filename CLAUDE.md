@@ -46,7 +46,7 @@ src/app/kalkulacka/      Sainsburyho kalkulačka + editace koeficientů duplikac
 src/lib/dashboard.ts     data pro Přehled (/prehled): zásah a frekvence v čase, matice oblasti × média,
                          filtry (?oblast, ?medium), modelový scénář „méně TV v přetížení"
 src/lib/costKind.ts      média / agenturní práce / smíšené — podle názvu položky
-src/lib/estimates.ts     odhad výsledků položky (imprese, kliky, konverze, CPA, zásah) z předpokladů
+src/lib/estimates.ts     odhad výsledků položky: kliky, konverze, CPA z doručení + CTR/konverze (položka, jinak platforma)
 src/lib/mix.ts           data pro Finální mix (/mix): média, měsíce, oblasti, modelový zásah
 src/lib/metrics.ts       poměrové ukazatele (CPM, CPC, CPA, CTR, ROAS) se počítají z čerpání a základních čísel
 src/lib/displayName.ts   krátký název položky (tactic.label, jinak bez poznámek v závorkách)
@@ -152,6 +152,11 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    u agenturní práce a smíšených položek, a do `tactic_budget` se nic nezapisuje.
    Plán ho značí „≈", Přehled ukazuje, kolik pokrytí je odhad. Plán, panel
    zásahu i Přehled musí jít přes `priceFor`, jinak se rozejdou.
+
+13a. **Výchozí CPM/CPC platformy** (`platform.est_cpm/est_cpc`) jsou totéž co ceník,
+   jen přesnější: `priceFor` je bere přednostně, při čtení, s „≈". U CPC jsou jediný
+   zdroj odhadu ceny. Odhad výsledků nemá vlastní cenu ani frekvenci — bere doručení
+   z plánu a zásah z modelu, aby existovalo jen jedno číslo pro totéž.
 
 14. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
    jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se

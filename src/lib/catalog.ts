@@ -39,7 +39,10 @@ export const DEFAULT_CATALOG: Array<{ name: string; channelType: ChannelType; pl
   { name: "PR", channelType: "PR", platforms: ["Tiskové zprávy", "Eventy"] },
 ];
 
-export type CatalogMedium = { id: string; name: string; channelType: ChannelType; platforms: Array<{ id: string; name: string }> };
+/** Výchozí předpoklady platformy; CTR a konverze jako podíl 0–1, null = nezadáno. */
+export type PlatformDefaults = { cpm: number | null; cpc: number | null; ctr: number | null; cr: number | null };
+export type CatalogPlatform = { id: string; name: string } & PlatformDefaults;
+export type CatalogMedium = { id: string; name: string; channelType: ChannelType; platforms: CatalogPlatform[] };
 
 /** Číselník pro výběry. Prázdnou tabulku (nová databáze) naplní výchozími hodnotami. */
 export async function getCatalog(): Promise<CatalogMedium[]> {
@@ -58,7 +61,9 @@ export async function getCatalog(): Promise<CatalogMedium[]> {
   const ps = await db.select().from(platforms).orderBy(asc(platforms.position), asc(platforms.name));
   return ms.map((m) => ({
     id: m.id, name: m.name, channelType: m.channelType,
-    platforms: ps.filter((p) => p.mediumId === m.id).map((p) => ({ id: p.id, name: p.name })),
+    platforms: ps.filter((p) => p.mediumId === m.id).map((p) => ({
+      id: p.id, name: p.name, cpm: p.estCpm, cpc: p.estCpc, ctr: p.estCtr, cr: p.estCr,
+    })),
   }));
 }
 

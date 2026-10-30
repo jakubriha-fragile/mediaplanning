@@ -272,19 +272,23 @@ Přepnutí cenového modelu vynuluje cenu za jednotku, rozpočty zůstanou.
 
 ### Odhad výsledků položky
 
-Tlačítko **Odhad výsledků** nad tabulkou plánu přidá vpravo sloupce podle mediaplánu
-Fragile (case study): k položce se zadají předpoklady — velikost cílové skupiny, CPM,
-CPC, CTR, konverzní poměr, frekvence, způsob měření — a z rozpočtu se dopočítá:
+Tlačítko **Odhad výsledků** nad tabulkou plánu přidá vpravo čtyři sloupce: **CTR %**,
+**Konv. %**, **Odhad výsledků** a **Měření**. Inspirací byl mediaplán Fragile (case study),
+ale bez zdvojených vstupů:
 
-- imprese = rozpočet ÷ CPM × 1000
-- kliky = rozpočet ÷ CPC, není-li CPC, pak imprese × CTR (dopočtené hodnoty jsou kurzívou)
-- konverze = kliky × konverzní poměr, CPA = rozpočet ÷ konverze
-- zásah = imprese ÷ frekvence, nejvýš velikost cílové skupiny
+- **Cena** (CPM/CPC) je jen ve sloupci Cena — z ní plán počítá doručení (imprese, kliky, TRP).
+- **Zásah 1+** počítá model z GRP položky za celé období, nezadává se frekvence ani velikost CS.
+- **CTR a konverzní poměr** se zadávají jen u digitálních médií. U TV, rádia a agenturní
+  práce se nezadává nic.
+- **Výchozí předpoklady platforem** (Nastavení → Média a platformy, u digitálu): CPM, CPC,
+  CTR a konverze. Platí v plánech všude, kde položka nemá vlastní hodnotu — cena se
+  pak značí „≈" jako odhad, CTR a konverze se v poli ukážou šedě. Přepsat jde u položky.
 
-Na rozdíl od Excelu se konverze počítají z kliků, ne z návštěv. Zásah je jednoduchý
-odhad za položku, přes položky se nesčítá — zásah celého plánu je v Přehledu
-(cross-mediální model). Fee a PNO zatím nejsou. Ve sloupci podrobností přibyla Kreativa.
-Všechno jsou to pracovní odhady k validaci media specialistou.
+Sloupec Odhad výsledků ukáže jedním řádkem kliky · konverze · CPA a zásah 1+, kurzívou
+co je dopočtené přes CTR. V součtu bloku a plánu se sčítají kliky a konverze, CPA je jen
+z položek s konverzemi; zásah se nesčítá (je v Přehledu). Konverze se počítají z kliků.
+Všechno jsou to pracovní odhady k validaci media specialistou, zásah je modelový odhad,
+ne měření.
 
 ### Médium a platforma
 

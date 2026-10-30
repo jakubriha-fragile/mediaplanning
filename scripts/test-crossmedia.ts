@@ -13,7 +13,7 @@ import { periodLabel, weeksOfPeriod, monthsBetween } from "../src/lib/period";
 import { costKind } from "../src/lib/costKind";
 import { shortName, displayName } from "../src/lib/displayName";
 import { resolveMetrics, derivedOf, baseOf } from "../src/lib/metrics";
-import { estimate } from "../src/lib/estimates";
+import { estimate, sumEstimates } from "../src/lib/estimates";
 
 let failed = 0;
 const ok = (name: string, cond: boolean, detail = "") => {
@@ -201,22 +201,23 @@ console.log("\nCPC: rozpočet ↔ kliky");
   ok("TV ignoruje CPC — vždy CPP", tv.budget === 900_000 && tv.grp === 100);
 }
 
-console.log("\nOdhad výsledků (mediaplán Fragile)");
+console.log("\nOdhad výsledků (podle mediaplánu Fragile)");
 {
-  // řádky z case study: Direct buy (CPM 150, CPC 75), Search (jen CPC), META (CPC + CTR)
-  const direct = estimate({ budget: 140_000, cpm: 150, cpc: 75, ctr: 0.002, cr: 0.002, frequency: 4, audience: 150_000 });
-  ok("imprese = rozpočet ÷ CPM × 1000", Math.round(direct.impressions!) === 933_333);
-  ok("kliky z CPC mají přednost před CTR", Math.round(direct.clicks!) === 1867 && !direct.derived.clicks);
-  ok("konverze = kliky × konverzní poměr", Math.abs(direct.conversions! - 3.7333) < 0.01);
-  ok("zásah = imprese ÷ frekvence, nejvýš velikost CS", direct.reach === 150_000 && direct.reachPct === 1);
-  const search = estimate({ budget: 280_000, cpc: 15, cr: 0.02 });
-  ok("Search: kliky z CPC, bez impresí", Math.round(search.clicks!) === 18_667 && search.impressions === null);
-  ok("CPA = rozpočet ÷ konverze", Math.round(search.cpa!) === 750);
-  const viaCtr = estimate({ budget: 100_000, cpm: 100, ctr: 0.01 });
-  ok("kliky z impresí × CTR, když chybí CPC", viaCtr.clicks === 10_000 && viaCtr.derived.clicks);
-  const back = estimate({ budget: 230_000, cpc: 15, ctr: 0.01 });
-  ok("imprese z kliků ÷ CTR, když chybí CPM", Math.round(back.impressions!) === 1_533_333 && back.derived.impressions);
-  ok("bez předpokladů nic nevymýšlí", estimate({ budget: 50_000 }).clicks === null);
+  // doručení přichází z plánu (cena ve sloupci Cena), odhad k němu přidá kliky a konverze
+  const cpm = estimate({ budget: 100_000, impressions: 1_000_000, ctr: 0.01, cr: 0.02 });
+  ok("CPM: kliky = imprese × CTR", cpm.clicks === 10_000 && cpm.derived.clicks);
+  ok("konverze = kliky × konverzní poměr", cpm.conversions === 200);
+  ok("CPA = rozpočet ÷ konverze", cpm.cpa === 500);
+  const cpc = estimate({ budget: 280_000, clicks: 18_667, ctr: 0.01, cr: 0.02 });
+  ok("CPC: imprese = kliky ÷ CTR", Math.round(cpc.impressions!) === 1_866_700 && cpc.derived.impressions && !cpc.derived.clicks);
+  const noCtr = estimate({ budget: 280_000, clicks: 18_667 });
+  ok("CPC bez CTR: kliky ano, imprese ne", noCtr.clicks === 18_667 && noCtr.impressions === null && noCtr.conversions === null);
+  ok("bez doručení nic nevymýšlí", estimate({ budget: 50_000, ctr: 0.01, cr: 0.02 }).clicks === null);
+  const sum = sumEstimates([
+    { budget: 100_000, est: cpm },
+    { budget: 900_000, est: estimate({ budget: 900_000 }) }, // TV — bez konverzí
+  ]);
+  ok("součet: CPA jen z položek s konverzemi", sum.cpa === 500 && sum.conversions === 200, JSON.stringify(sum));
 }
 
 console.log("\nTýdny plánu");

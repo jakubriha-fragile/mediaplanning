@@ -1717,8 +1717,7 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
               channelType: t.channelType, targetGroupId: t.targetGroupId,
               mediumId: t.mediumId, platformId: t.platformId, label: t.label, pricing: t.pricing,
               // předpoklady odhadu jsou součást struktury plánu, ne čísla — kopírují se
-              creative: t.creative, estAudience: t.estAudience, estMeasurement: t.estMeasurement,
-              estCpm: t.estCpm, estCpc: t.estCpc, estCtr: t.estCtr, estCr: t.estCr, estFrequency: t.estFrequency,
+              creative: t.creative, estMeasurement: t.estMeasurement, estCtr: t.estCtr, estCr: t.estCr,
               position: t.position, note: t.note,
             }).returning();
 
@@ -2664,13 +2663,9 @@ export async function setRowPricing(raw: { tacticId: string; pricing: "cpm" | "c
 
 // ------------------------------------------------- odhad výsledků položky
 
-const EST_FIELDS = {
-  creative: "creative", audience: "estAudience", measurement: "estMeasurement",
-  cpm: "estCpm", cpc: "estCpc", ctr: "estCtr", cr: "estCr", frequency: "estFrequency",
-} as const;
+const EST_FIELDS = { creative: "creative", measurement: "estMeasurement", ctr: "estCtr", cr: "estCr" } as const;
 const EST_LABEL: Record<keyof typeof EST_FIELDS, string> = {
-  creative: "Kreativa", audience: "Velikost CS", measurement: "Měření", cpm: "CPM", cpc: "CPC",
-  ctr: "CTR", cr: "Konverzní poměr", frequency: "Frekvence",
+  creative: "Kreativa", measurement: "Měření", ctr: "CTR", cr: "Konverzní poměr",
 };
 
 /**
@@ -2695,10 +2690,42 @@ export async function setTacticEstimate(raw: { tacticId: string; field: keyof ty
       if (value !== null && (data.field === "ctr" || data.field === "cr") && value > 1) {
         return { ok: false, error: `${EST_LABEL[data.field]} se zadává v procentech do 100 %.` };
       }
-      if (value !== null && data.field === "audience") value = Math.round(value);
     }
     await db.update(tactics).set({ [EST_FIELDS[data.field]]: value }).where(eq(tactics.id, data.tacticId));
     await log(me!.id, "plan", [`${EST_LABEL[data.field]} ${c.channel}: ${value ?? "—"}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const PLATFORM_EST = { cpm: "estCpm", cpc: "estCpc", ctr: "estCtr", cr: "estCr" } as const;
+const PLATFORM_EST_LABEL: Record<keyof typeof PLATFORM_EST, string> = { cpm: "CPM", cpc: "CPC", ctr: "CTR", cr: "konverzní poměr" };
+
+/**
+ * Výchozí předpoklad platformy (Nastavení → Média a platformy). Platí ve všech
+ * plánech u položek bez vlastní hodnoty — proto ho smí měnit jen ten, kdo
+ * spravuje model (jako ceník a křivky), ne kdokoli s právem k jednomu plánu.
+ */
+export async function setPlatformEstimate(raw: { platformId: string; field: keyof typeof PLATFORM_EST; value: number | null }): Promise<Result> {
+  try {
+    const data = z.object({
+      platformId: z.string().min(1),
+      field: z.enum(["cpm", "cpc", "ctr", "cr"]),
+      value: z.number().min(0).max(1e9).nullable(),
+    }).parse(raw);
+    const me = await currentPrincipal();
+    assertCanCalibrate(me);
+    const value = data.value && data.value > 0 ? data.value : null;
+    if (value !== null && (data.field === "ctr" || data.field === "cr") && value > 1) {
+      return { ok: false, error: `${PLATFORM_EST_LABEL[data.field]} se zadává v procentech do 100 %.` };
+    }
+    const [p] = await db.update(platforms).set({ [PLATFORM_EST[data.field]]: value })
+      .where(eq(platforms.id, data.platformId)).returning();
+    if (!p) return { ok: false, error: "Platforma neexistuje." };
+    await log(me!.id, "plan", [`Číselník: ${p.name} — výchozí ${PLATFORM_EST_LABEL[data.field]} ${value ?? "—"}`]);
+    revalidatePath("/nastaveni");
     revalidatePath("/");
     return { ok: true };
   } catch (e) {

@@ -3,7 +3,7 @@ import { db } from "@/db";
 import {
   campaigns, messageLines, tactics, tacticBudgets, tacticBudgetWeeks, actualSpends,
   accountNotes, metrics, metricTargets, metricActuals, users,
-  clients, plans, targetGroups, reachCurves, duplications, channelTypeEnum, themes, tacticThemes, rateCards,
+  clients, plans, targetGroups, reachCurves, duplications, channelTypeEnum, themes, tacticThemes, rateCards, platforms,
   type ChannelType, type PlanUnit,
 } from "@/db/schema";
 import { monthsBetween, weeksOfPeriod } from "@/lib/period";
@@ -12,7 +12,7 @@ import { displayName } from "@/lib/displayName";
 import { resolveMetrics, type ResolvedMetric } from "@/lib/metrics";
 import { can, canSeePlan, canSeeTactic, channelGroupOf, type Principal } from "@/lib/permissions";
 import {
-  derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey, UNCALIBRATED_SOURCE,
+  derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey, UNCALIBRATED_SOURCE, isGrpPriced, reachFromGrp,
   type Curve, type Derived,
 } from "@/lib/crossmedia";
 
@@ -94,21 +94,23 @@ export type CrossContext = {
   calibrated: (ct: ChannelType, tacticTgId: string | null) => boolean;
   dup: Record<string, number>;
   /**
-   * Jednotková cena pro výpočet: zadaná cena, a když chybí, cena z ceníku
-   * klienta. Ceník platí jen pro média zadaná v Kč — ne pro agenturní práci
+   * Jednotková cena pro výpočet: zadaná cena, a když chybí, výchozí CPM/CPC
+   * platformy (přesnější), pak ceník klienta. Ceník platí jen pro média zadaná v Kč — ne pro agenturní práci
    * a ne pro smíšené položky, kde by odhad nafoukl doručení i z honorářů.
    */
-  priceFor: (row: { channelType: ChannelType; channel: string; pricing?: "cpm" | "cpc" | null }, driver: PlanUnit, unitPrice: number) =>
+  priceFor: (row: { channelType: ChannelType; channel: string; pricing?: "cpm" | "cpc" | null; platformId?: string | null }, driver: PlanUnit, unitPrice: number) =>
     { unitPrice: number; estimated: boolean };
 };
 
 export async function crossContext(planTargetGroupId: string | null, clientId?: string): Promise<CrossContext> {
-  const [tgs, curves, dups, rates] = await Promise.all([
+  const [tgs, curves, dups, rates, plats] = await Promise.all([
     db.select().from(targetGroups),
     db.select().from(reachCurves),
     db.select().from(duplications),
     clientId ? db.select().from(rateCards).where(eq(rateCards.clientId, clientId)) : Promise.resolve([]),
+    db.select({ id: platforms.id, cpm: platforms.estCpm, cpc: platforms.estCpc }).from(platforms),
   ]);
+  const platById = new Map(plats.map((p) => [p.id, p]));
   const rateOf = new Map(rates.map((r) => [r.channelType, r.price]));
 
   const universeById = new Map(tgs.map((t) => [t.id, t.universe]));
@@ -136,8 +138,13 @@ export async function crossContext(planTargetGroupId: string | null, clientId?: 
     },
     dup,
     priceFor: (row, driver, unitPrice) => {
+      if (unitPrice > 0 || driver !== "budget" || costKind(row.channel) !== "media") return { unitPrice, estimated: false };
+      // výchozí cena platformy — u CPC jediný zdroj odhadu, TV a rádio mají CPP z ceníku
+      const plat = row.platformId && !isGrpPriced(row.channelType) ? platById.get(row.platformId) : undefined;
+      const platPrice = row.pricing === "cpc" ? plat?.cpc : plat?.cpm;
+      if (platPrice && platPrice > 0) return { unitPrice: platPrice, estimated: true };
       // ceník je v CPM — na položky nakupované za klik se nehodí
-      if (unitPrice > 0 || driver !== "budget" || costKind(row.channel) !== "media" || row.pricing === "cpc") return { unitPrice, estimated: false };
+      if (row.pricing === "cpc") return { unitPrice, estimated: false };
       const rate = rateOf.get(row.channelType) ?? 0;
       return rate > 0 ? { unitPrice: rate, estimated: true } : { unitPrice, estimated: false };
     },
@@ -234,13 +241,9 @@ export async function loadPlan(planId: string) {
       channelType: tactics.channelType,
       pricing: tactics.pricing,
       creative: tactics.creative,
-      estAudience: tactics.estAudience,
       estMeasurement: tactics.estMeasurement,
-      estCpm: tactics.estCpm,
-      estCpc: tactics.estCpc,
       estCtr: tactics.estCtr,
       estCr: tactics.estCr,
-      estFrequency: tactics.estFrequency,
       mediumId: tactics.mediumId,
       platformId: tactics.platformId,
       targetGroupId: tactics.targetGroupId,
@@ -363,10 +366,12 @@ export async function getPlanRows(me: Principal, planId: string) {
       channelType: r.channelType,
       pricing: r.pricing,
       creative: r.creative,
-      est: {
-        audience: r.estAudience, measurement: r.estMeasurement, cpm: r.estCpm, cpc: r.estCpc,
-        ctr: r.estCtr, cr: r.estCr, frequency: r.estFrequency,
-      },
+      est: { measurement: r.estMeasurement, ctr: r.estCtr, cr: r.estCr },
+      // zásah 1+ položky za celé období z modelu — z nasčítaných GRP, ne součet měsíců (invariant 10)
+      reachPct: (() => {
+        const grp = months.reduce((s, m) => s + (cells[m].grp ?? 0), 0);
+        return grp > 0 && costKind(r.channel) === "media" ? reachFromGrp(grp, curve) : null;
+      })(),
       mediumId: r.mediumId,
       platformId: r.platformId,
       targetGroupId: r.targetGroupId,

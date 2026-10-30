@@ -237,6 +237,12 @@ export const platforms = pgTable(
     mediumId: text("medium_id").notNull().references(() => media.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     position: integer("position").notNull().default(0),
+    // výchozí předpoklady platformy — v položce platí, dokud se nepřepíšou;
+    // CPM/CPC jako odhad ceny při čtení (stejně jako ceník), CTR a konverze pro odhad výsledků
+    estCpm: doublePrecision("est_cpm"),
+    estCpc: doublePrecision("est_cpc"),
+    estCtr: doublePrecision("est_ctr"),
+    estCr: doublePrecision("est_cr"),
   },
   (t) => ({ uq: uniqueIndex("platform_uq").on(t.mediumId, t.name) }),
 );
@@ -287,17 +293,13 @@ export const tactics = pgTable(
     /** Kreativa / formáty (např. „6s video + statický banner"). */
     creative: text("creative"),
     /**
-     * Odhad výsledků — předpoklady plánovače (src/lib/estimates.ts). Zadávají se
-     * u položky jednou, výsledky se počítají z rozpočtu za období. NULL = nezadáno.
+     * Odhad výsledků (src/lib/estimates.ts) — přepis výchozích předpokladů
+     * platformy. Cena (CPM/CPC) je ve sloupci Cena, zásah počítá model. NULL = podle platformy.
      */
-    estAudience: integer("est_audience"),
     estMeasurement: text("est_measurement"),
-    estCpm: doublePrecision("est_cpm"),
-    estCpc: doublePrecision("est_cpc"),
     /** CTR a konverzní poměr jako podíl 0–1 */
     estCtr: doublePrecision("est_ctr"),
     estCr: doublePrecision("est_cr"),
-    estFrequency: doublePrecision("est_frequency"),
     position: integer("position").notNull().default(0),
     note: text("note"),
   },

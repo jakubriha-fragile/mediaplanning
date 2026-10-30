@@ -10,6 +10,7 @@ import {
 } from "@/lib/actions";
 import type { CatalogMedium } from "@/lib/catalog";
 import { estimate, sumEstimates, type Estimate } from "@/lib/estimates";
+import { costKind } from "@/lib/costKind";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
 import { Combo, type ComboOption } from "@/components/Combo";
 import { isGrpPriced, priceLabel, priceHint, UNIT_LABEL } from "@/lib/crossmedia";
@@ -36,10 +37,9 @@ export type PlanRow = {
   /** kreativa / formáty */
   creative: string | null;
   /** předpoklady odhadu výsledků (src/lib/estimates.ts) */
-  est: {
-    audience: number | null; measurement: string | null; cpm: number | null; cpc: number | null;
-    ctr: number | null; cr: number | null; frequency: number | null;
-  };
+  est: { measurement: string | null; ctr: number | null; cr: number | null };
+  /** zásah 1+ položky za období z modelu (podíl 0–1); null = bez GRP nebo agenturní práce */
+  reachPct: number | null;
   mediumId: string | null;
   platformId: string | null;
   targetGroupId: string | null;
@@ -116,23 +116,15 @@ const BASE_COLS = 7;
 const RIGHT_COLS = 4;  // celkem, podíl, doručení, smazat
 
 /**
- * Odhad výsledků — sloupce vpravo podle mediaplánu Fragile. Zadávané předpoklady
- * a dopočtené výsledky za období; zapíná se přepínačem „Odhad výsledků".
+ * Odhad výsledků — sloupce vpravo. Cena je ve sloupci Cena, zásah z modelu;
+ * zadává se jen CTR a konverzní poměr, a to jen tam, kde se liší od výchozích
+ * hodnot platformy. U TV, rádia a agenturní práce se nezadává nic.
  */
-type EstKey = "audience" | "cpm" | "cpc" | "ctr" | "cr" | "frequency" | "impressions" | "clicks" | "conversions" | "cpa" | "reach" | "reachPct" | "measurement";
-const EST_COLS: Array<{ k: EstKey; label: string; title: string; input?: "num" | "pct" | "text" }> = [
-  { k: "audience", label: "Velikost CS", title: "Odhad velikosti cílové skupiny položky (osob)", input: "num" },
-  { k: "cpm", label: "CPM", title: "Kč za 1 000 impresí", input: "num" },
-  { k: "cpc", label: "CPC", title: "Kč za klik", input: "num" },
-  { k: "ctr", label: "CTR %", title: "Míra prokliku; když není zadaná, dopočítá se z kliků a impresí", input: "pct" },
-  { k: "cr", label: "Konv. %", title: "Odhadovaný konverzní poměr z kliků", input: "pct" },
-  { k: "frequency", label: "Frekvence", title: "Průměrná frekvence — zásah = imprese ÷ frekvence", input: "num" },
-  { k: "impressions", label: "Imprese", title: "Rozpočet ÷ CPM × 1000, nebo kliky ÷ CTR" },
-  { k: "clicks", label: "Kliky", title: "Rozpočet ÷ CPC, nebo imprese × CTR" },
-  { k: "conversions", label: "Konverze", title: "Kliky × konverzní poměr" },
-  { k: "cpa", label: "CPA (Kč)", title: "Rozpočet ÷ konverze" },
-  { k: "reach", label: "Zásah", title: "Imprese ÷ frekvence, nejvýš velikost cílové skupiny — odhad za položku, ne cross-mediální model" },
-  { k: "reachPct", label: "Zásah %", title: "Zásah ÷ velikost cílové skupiny" },
+type EstKey = "ctr" | "cr" | "result" | "measurement";
+const EST_COLS: Array<{ k: EstKey; label: string; title: string; input?: "pct" | "text" }> = [
+  { k: "ctr", label: "CTR %", title: "Míra prokliku. Prázdné = výchozí hodnota platformy (šedě), nastavuje se v Nastavení → Média a platformy", input: "pct" },
+  { k: "cr", label: "Konv. %", title: "Konverzní poměr z kliků. Prázdné = výchozí hodnota platformy (šedě)", input: "pct" },
+  { k: "result", label: "Odhad výsledků", title: "Kliky, konverze a CPA z doručení a předpokladů; zásah 1+ z modelu. Modelový odhad, ne měření." },
   { k: "measurement", label: "Měření", title: "Jak se výsledek měří (brandlift, GA4…)", input: "text" },
 ];
 
@@ -297,7 +289,18 @@ export function PlanTable({
     : c.months.reduce((s, m) => s + cellSum(r.cells[m], r.budgets[m] ?? 0), 0);
   /** rozpočet řádku za období v Kč — z něj se počítá odhad výsledků */
   const budgetOf = (r: PlanRow) => months.reduce((s, m) => s + (r.budgets[m] ?? 0), 0);
-  const estOf = (r: PlanRow): Estimate => estimate({ budget: budgetOf(r), ...r.est });
+  /** kliky a konverze dávají smysl jen u digitálních médií, ne u TV, rádia a agenturní práce */
+  const estApplies = (r: PlanRow) => !isGrpPriced(r.channelType) && costKind(r.channel) === "media";
+  const estOf = (r: PlanRow): Estimate => {
+    const sum = (k: "clicks" | "impressions") => months.reduce((s, m) => s + (r.cells[m]?.[k] ?? 0), 0);
+    const plat = platformOf(r);
+    if (!estApplies(r)) return estimate({ budget: budgetOf(r) });
+    return estimate({
+      budget: budgetOf(r),
+      ...(r.pricing === "cpc" ? { clicks: sum("clicks") } : { impressions: sum("impressions") }),
+      ctr: r.est.ctr ?? plat?.ctr, cr: r.est.cr ?? plat?.cr,
+    });
+  };
   /** Doručení řádku za období — jedna jednotka podle toho, jak se položka nakupuje. */
   const deliveryOf = (r: PlanRow): { text: string; hint: string } => {
     const sum = (k: "clicks" | "impressions" | "grp") => months.reduce((s, m) => s + (r.cells[m]?.[k] ?? 0), 0);
@@ -980,15 +983,18 @@ export function PlanTable({
                         <td className="r num delivery" title={deliveryOf(r).hint}>{deliveryOf(r).text}</td>
                         {showEst && !clientView && (() => {
                           const est = estOf(r);
+                          const plat = platformOf(r);
                           return EST_COLS.map((e, i) => (
                             <td key={e.k} className={`r num estcol ${e.input ? "estin" : ""} ${i === 0 ? "estfirst" : ""}`}>
-                              {e.input ? (
-                                <EstInput kind={e.input} label={`${e.label} ${r.name}`} disabled={!canEditPlan}
-                                  value={r.est[e.k as keyof PlanRow["est"]]}
-                                  shown={e.k === "ctr" && r.est.ctr === null && est.ctr !== null ? est.ctr : undefined}
+                              {e.k === "result" ? <EstResult est={est} reachPct={r.reachPct} applies={estApplies(r)} fee={costKind(r.channel) !== "media"} />
+                              : (e.k === "ctr" || e.k === "cr") && !estApplies(r) ? null
+                              : (
+                                <EstInput kind={e.input!} label={`${e.label} ${r.name}`} disabled={!canEditPlan}
+                                  value={r.est[e.k]}
+                                  shown={e.k === "ctr" ? plat?.ctr ?? undefined : e.k === "cr" ? plat?.cr ?? undefined : undefined}
                                   onCommit={(v) => run(() => patchRow(r.id, { est: { ...r.est, [e.k]: v } }), () => patchRow(r.id, { est: r.est }),
-                                    () => setTacticEstimate({ tacticId: r.id, field: e.k as never, value: v }))} />
-                              ) : <EstValue k={e.k} est={est} />}
+                                    () => setTacticEstimate({ tacticId: r.id, field: e.k as "ctr" | "cr" | "measurement", value: v }))} />
+                              )}
                             </td>
                           ));
                         })()}
@@ -1297,30 +1303,42 @@ function MultiSelect({
 }
 
 /** Číslo do sloupce odhadu: procenta u CTR a konverzního poměru, jinak číslo; „—" = nejde spočítat. */
-function fmtEst(k: EstKey, v: number | null): string {
-  if (v === null || !Number.isFinite(v)) return "—";
-  if (k === "ctr" || k === "cr" || k === "reachPct") return (v * 100).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) + " %";
-  if (k === "cpa") return kc(v);
-  if (k === "impressions" && v >= 1_000_000) return (v / 1_000_000).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) + " mil.";
-  return kc(v);
-}
+const fmtCount = (v: number) => v >= 1_000_000
+  ? (v / 1_000_000).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) + " mil."
+  : kc(v);
 
-function EstValue({ k, est }: { k: EstKey; est: Estimate }) {
-  const v = est[k as keyof Estimate] as number | null;
-  const derived = (k === "impressions" && est.derived.impressions) || (k === "clicks" && est.derived.clicks);
-  return <span className={derived ? "estderived" : undefined} title={derived ? "Dopočteno přes CTR" : undefined}>{fmtEst(k, v)}</span>;
+/** Výsledek položky jedním řádkem: kliky · konverze · CPA, u TV a rádia zásah 1+. */
+function EstResult({ est, reachPct, applies, fee }: { est: Estimate; reachPct: number | null; applies: boolean; fee: boolean }) {
+  if (fee) return <span className="share">agenturní práce</span>;
+  const parts: React.ReactNode[] = [];
+  if (applies && est.clicks !== null) {
+    parts.push(<span key="k" className={est.derived.clicks ? "estderived" : undefined}
+      title={est.derived.clicks ? "Kliky = imprese × CTR" : "Kliky z rozpočtu a CPC"}>{fmtCount(est.clicks)} kliků</span>);
+  }
+  if (est.conversions !== null) parts.push(<span key="c">{fmtCount(est.conversions)} konv.</span>);
+  if (est.cpa !== null) parts.push(<span key="a">CPA {kc(est.cpa)} Kč</span>);
+  if (reachPct !== null) {
+    parts.push(<span key="r" title="Zásah 1+ položky za období z modelu (křivka nosiče) — modelový odhad, ne měření">
+      zásah 1+ {(reachPct * 100).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} %</span>);
+  }
+  if (!parts.length) {
+    return <span className="share" title={applies ? "Doplňte cenu (CPM/CPC) a CTR — u položky, nebo jako výchozí u platformy" : undefined}>—</span>;
+  }
+  return <span className="estresult">{parts.flatMap((p, i) => (i ? [<span key={`s${i}`} className="share"> · </span>, p] : [p]))}</span>;
 }
 
 function EstSumCells({ sum }: { sum: ReturnType<typeof sumEstimates> }) {
-  const val: Partial<Record<EstKey, number | null>> = {
-    impressions: sum.impressions, clicks: sum.clicks, conversions: sum.conversions, cpa: sum.cpa, ctr: sum.ctr,
-  };
+  const parts = [
+    sum.clicks !== null ? `${fmtCount(sum.clicks)} kliků` : null,
+    sum.conversions !== null ? `${fmtCount(sum.conversions)} konv.` : null,
+    sum.cpa !== null ? `CPA ${kc(sum.cpa)} Kč` : null,
+  ].filter(Boolean);
   return (
     <>
       {EST_COLS.map((e, i) => (
         <td key={e.k} className={`r num share estcol ${i === 0 ? "estfirst" : ""}`}
-          title={e.k === "reach" ? "Zásah se přes položky nesčítá — lidé se překrývají" : undefined}>
-          {e.k in val && !(e.k === "ctr" && sum.ctr === null) ? fmtEst(e.k, val[e.k] ?? null) : ""}
+          title={e.k === "result" ? "Součet kliků a konverzí; zásah se přes položky nesčítá — je v Přehledu" : undefined}>
+          {e.k === "result" ? parts.join(" · ") : ""}
         </td>
       ))}
     </>
@@ -1329,9 +1347,9 @@ function EstSumCells({ sum }: { sum: ReturnType<typeof sumEstimates> }) {
 
 /** Pole předpokladu: číslo, procento (ukládá se jako podíl), nebo text. Prázdné = nezadáno. */
 function EstInput({ kind, value, shown, label, disabled, onCommit }: {
-  kind: "num" | "pct" | "text";
+  kind: "pct" | "text";
   value: number | string | null;
-  /** dopočtená hodnota, když není zadaná (šedá nápověda v poli) */
+  /** výchozí hodnota platformy, když není zadaná (šedá nápověda v poli) */
   shown?: number;
   label: string;
   disabled: boolean;
@@ -1340,8 +1358,7 @@ function EstInput({ kind, value, shown, label, disabled, onCommit }: {
   const [draft, setDraft] = useState<string | null>(null);
   const toText = (v: number | string | null) =>
     v === null || v === "" ? "" : kind === "text" ? String(v)
-    : kind === "pct" ? String(Math.round((v as number) * 100 * 1000) / 1000).replace(".", ",")
-    : (v as number) >= 1000 ? kc(v as number) : String(v).replace(".", ",");
+    : String(Math.round((v as number) * 100 * 1000) / 1000).replace(".", ",");
   return (
     <input className={`cell estinput ${kind === "text" ? "esttext" : ""}`} aria-label={label} disabled={disabled}
       inputMode={kind === "text" ? "text" : "decimal"}
@@ -1356,7 +1373,7 @@ function EstInput({ kind, value, shown, label, disabled, onCommit }: {
         let v: number | string | null;
         if (kind === "text") v = t || null;
         else if (!t) v = null;
-        else { const n = parseNum(t); v = kind === "pct" ? n / 100 : n; }
+        else v = parseNum(t) / 100;
         if (v !== value) onCommit(v);
       }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); } }} />
