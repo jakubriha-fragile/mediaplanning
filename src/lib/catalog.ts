@@ -40,7 +40,7 @@ export const DEFAULT_CATALOG: Array<{ name: string; channelType: ChannelType; pl
 ];
 
 /** Výchozí předpoklady platformy; CTR a konverze jako podíl 0–1, null = nezadáno. */
-export type PlatformDefaults = { cpm: number | null; cpc: number | null; ctr: number | null; cr: number | null };
+export type PlatformDefaults = { cpm: number | null; cpc: number | null; ctr: number | null; cr: number | null; freq: number | null };
 export type CatalogPlatform = { id: string; name: string } & PlatformDefaults;
 export type CatalogMedium = { id: string; name: string; channelType: ChannelType; platforms: CatalogPlatform[] };
 
@@ -62,7 +62,7 @@ export async function getCatalog(): Promise<CatalogMedium[]> {
   return ms.map((m) => ({
     id: m.id, name: m.name, channelType: m.channelType,
     platforms: ps.filter((p) => p.mediumId === m.id).map((p) => ({
-      id: p.id, name: p.name, cpm: p.estCpm, cpc: p.estCpc, ctr: p.estCtr, cr: p.estCr,
+      id: p.id, name: p.name, cpm: p.estCpm, cpc: p.estCpc, ctr: p.estCtr, cr: p.estCr, freq: p.estFreq,
     })),
   }));
 }

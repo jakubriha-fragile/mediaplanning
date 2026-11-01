@@ -12,7 +12,7 @@ import { displayName } from "@/lib/displayName";
 import { resolveMetrics, type ResolvedMetric } from "@/lib/metrics";
 import { can, canSeePlan, canSeeTactic, channelGroupOf, type Principal } from "@/lib/permissions";
 import {
-  derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey, UNCALIBRATED_SOURCE, isGrpPriced, reachFromGrp,
+  derive, combineReach, reachByType, type ReachInput, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey, UNCALIBRATED_SOURCE, isGrpPriced, reachFromGrp,
   type Curve, type Derived, type Pricing,
 } from "@/lib/crossmedia";
 
@@ -101,11 +101,13 @@ export type CrossContext = {
   priceFor: (row: PriceRow, driver: PlanUnit, unitPrice: number) => { unitPrice: number; estimated: boolean };
   /** CTR položky na CPC (vlastní, jinak výchozí platformy) — z ní imprese pro model zásahu */
   ctrFor: (row: PriceRow) => number | null;
+  /** zadaná průměrná frekvence digitální položky (vlastní, jinak platformy); null = zásah z křivky */
+  freqFor: (row: PriceRow) => number | null;
 };
 
 export type PriceRow = {
   channelType: ChannelType; channel: string; pricing?: Pricing | null; platformId?: string | null;
-  estCtr?: number | null; fixImpressions?: number | null; periodBudget?: number;
+  estCtr?: number | null; estFreq?: number | null; fixImpressions?: number | null; periodBudget?: number;
 };
 
 export async function crossContext(planTargetGroupId: string | null, clientId?: string): Promise<CrossContext> {
@@ -114,7 +116,7 @@ export async function crossContext(planTargetGroupId: string | null, clientId?: 
     db.select().from(reachCurves),
     db.select().from(duplications),
     clientId ? db.select().from(rateCards).where(eq(rateCards.clientId, clientId)) : Promise.resolve([]),
-    db.select({ id: platforms.id, cpm: platforms.estCpm, cpc: platforms.estCpc, ctr: platforms.estCtr }).from(platforms),
+    db.select({ id: platforms.id, cpm: platforms.estCpm, cpc: platforms.estCpc, ctr: platforms.estCtr, freq: platforms.estFreq }).from(platforms),
   ]);
   const platById = new Map(plats.map((p) => [p.id, p]));
   const rateOf = new Map(rates.map((r) => [r.channelType, r.price]));
@@ -144,6 +146,8 @@ export async function crossContext(planTargetGroupId: string | null, clientId?: 
     },
     dup,
     ctrFor: (row) => row.pricing === "cpc" ? row.estCtr ?? (row.platformId ? platById.get(row.platformId)?.ctr : null) ?? null : null,
+    freqFor: (row) => isGrpPriced(row.channelType) || costKind(row.channel) !== "media" ? null
+      : row.estFreq ?? (row.platformId ? platById.get(row.platformId)?.freq : null) ?? null,
     priceFor: (row, driver, unitPrice) => {
       // balík za pevnou cenu: efektivní CPM z garantovaných impresí — zadaná hodnota, ne odhad
       if (row.pricing === "fix") {
@@ -256,6 +260,7 @@ export async function loadPlan(planId: string) {
       estMeasurement: tactics.estMeasurement,
       estCtr: tactics.estCtr,
       estCr: tactics.estCr,
+      estFreq: tactics.estFreq,
       fixImpressions: tactics.fixImpressions,
       mediumId: tactics.mediumId,
       platformId: tactics.platformId,
@@ -386,11 +391,16 @@ export async function getPlanRows(me: Principal, planId: string) {
       fixImpressions: r.fixImpressions,
       lineTargetGroupId: r.lineTargetGroupId,
       creative: r.creative,
-      est: { measurement: r.estMeasurement, ctr: r.estCtr, cr: r.estCr },
-      // zásah 1+ položky za celé období z modelu — z nasčítaných GRP, ne součet měsíců (invariant 10)
-      reachPct: (() => {
+      est: { measurement: r.estMeasurement, ctr: r.estCtr, cr: r.estCr, freq: r.estFreq },
+      // zásah 1+ položky za celé období — z nasčítaných GRP, ne součet měsíců (invariant 10).
+      // Se zadanou frekvencí (digitál) zásah = GRP ÷ frekvence, strop = strop křivky nosiče.
+      ...(() => {
         const grp = months.reduce((s, m) => s + (cells[m].grp ?? 0), 0);
-        return grp > 0 && costKind(r.channel) === "media" ? reachFromGrp(grp, curve) : null;
+        if (!(grp > 0) || costKind(r.channel) !== "media") return { reachPct: null, reachBy: null };
+        const f = ctx.freqFor(r);
+        return f
+          ? { reachPct: Math.min(curve.rMax, grp / 100 / f), reachBy: "freq" as const }
+          : { reachPct: reachFromGrp(grp, curve), reachBy: "model" as const };
       })(),
       // křivka řádku — souhrnné řádky v plánu z ní skládají zásah sdělení a kampaně
       curve,
@@ -485,11 +495,14 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
     ? loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId }))
     : [];
   const universe = ctx.universeOf(null);
+  // GRP položky za období — položky se zadanou frekvencí nesou vlastní zásah (reachByType)
+  const rowGrp = new Map<string, number>();
 
   const perMonth: ReachSummary[] = months.map((m) => {
     // uvnitř měsíce se nejdřív sečtou GRP po nosičích, teprve pak se hledá zásah:
     // dvě digitální taktiky nejsou dvě nezávislá média
     const grpByType = new Map<ChannelType, { grp: number; budget: number }>();
+    const items: ReachInput[] = [];
     let impressions = 0;
     let budget = 0;
 
@@ -511,19 +524,19 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
       cur.grp += d.grp;
       cur.budget += b.planned || d.budget;
       grpByType.set(r.channelType, cur);
+      items.push({ channelType: r.channelType, grp: d.grp, curve: ctx.curveOf(r.channelType, null), freq: ctx.freqFor(r) });
+      rowGrp.set(r.tacticId, (rowGrp.get(r.tacticId) ?? 0) + d.grp);
       impressions += d.impressions;
       budget += b.planned || d.budget;
     }
 
-    const byType = [...grpByType.entries()].map(([channelType, v]) => {
-      const curve = ctx.curveOf(channelType, null);
-      return {
-        channelType,
-        grp: v.grp,
-        budget: v.budget,
-        reach: v.grp > 0 ? curve.rMax * (1 - Math.exp(-curve.k * (v.grp / 100))) : 0,
-      };
-    });
+    const reachOf = new Map(reachByType(items, ctx.dup).map((t) => [t.channelType, t.reach]));
+    const byType = [...grpByType.entries()].map(([channelType, v]) => ({
+      channelType,
+      grp: v.grp,
+      budget: v.budget,
+      reach: reachOf.get(channelType) ?? 0,
+    }));
 
     const c = combineReach(byType.map((b) => ({ channelType: b.channelType, reach: b.reach })), ctx.dup);
     return {
@@ -550,13 +563,12 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
       totalGrp.set(b.channelType, cur);
     }
   }
-  const totalByType = [...totalGrp.entries()].map(([channelType, v]) => {
-    const curve = ctx.curveOf(channelType, null);
-    return {
-      channelType, grp: v.grp, budget: v.budget,
-      reach: v.grp > 0 ? curve.rMax * (1 - Math.exp(-curve.k * (v.grp / 100))) : 0,
-    };
-  });
+  const totalReach = new Map(reachByType(rows.map((r) => ({
+    channelType: r.channelType, grp: rowGrp.get(r.tacticId) ?? 0, curve: ctx.curveOf(r.channelType, null), freq: ctx.freqFor(r),
+  })), ctx.dup).map((t) => [t.channelType, t.reach]));
+  const totalByType = [...totalGrp.entries()].map(([channelType, v]) => ({
+    channelType, grp: v.grp, budget: v.budget, reach: totalReach.get(channelType) ?? 0,
+  }));
   const tc = combineReach(totalByType.map((b) => ({ channelType: b.channelType, reach: b.reach })), ctx.dup);
 
   return {

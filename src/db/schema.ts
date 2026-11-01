@@ -243,6 +243,8 @@ export const platforms = pgTable(
     estCpc: doublePrecision("est_cpc"),
     estCtr: doublePrecision("est_ctr"),
     estCr: doublePrecision("est_cr"),
+    /** průměrná frekvence za kampaň — z ní zásah = imprese ÷ frekvence (digitál) */
+    estFreq: doublePrecision("est_freq"),
   },
   (t) => ({ uq: uniqueIndex("platform_uq").on(t.mediumId, t.name) }),
 );
@@ -310,6 +312,12 @@ export const tactics = pgTable(
     /** CTR a konverzní poměr jako podíl 0–1 */
     estCtr: doublePrecision("est_ctr"),
     estCr: doublePrecision("est_cr"),
+    /**
+     * Průměrná frekvence za období řádku, kterou plánovač čeká (frequency cap,
+     * zkušenost z platformy). U digitálu z ní zásah = imprese ÷ (frekvence × cílovka)
+     * místo křivky — křivka dává při slabém tlaku u všech řádků stejných ~1,4×.
+     */
+    estFreq: doublePrecision("est_freq"),
     position: integer("position").notNull().default(0),
     note: text("note"),
   },

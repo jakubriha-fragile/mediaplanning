@@ -1,5 +1,5 @@
 import type { ChannelType, PlanUnit } from "@/db/schema";
-import { derive, combineReach, reachFromGrp, isGrpPriced } from "@/lib/crossmedia";
+import { derive, combineReach, reachByType, isGrpPriced, type ReachInput } from "@/lib/crossmedia";
 import { costKind, type CostKind } from "@/lib/costKind";
 import { displayName } from "@/lib/displayName";
 import { monthsBetween } from "@/lib/period";
@@ -72,6 +72,8 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
   const themeCost = new Map<string, number>();
   const kinds = { media: 0, fee: 0, mixed: 0 };
 
+  // položky se zadanou frekvencí nesou vlastní zásah — stejně jako plán a panel zásahu
+  const reachItems: ReachInput[] = [];
   for (const r of rows) {
     const kind = costKind(r.channel);
     let ch = byType.get(r.channelType);
@@ -84,6 +86,7 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
       byType.set(r.channelType, ch);
     }
     const item: MixItem = { id: r.tacticId, channel: displayName(r), block: r.campaign, kind, cost: 0, byMonth: {} };
+    let rowGrp = 0;
 
     for (const m of months) {
       const b = loaded.budgets.find((x) => x.tacticId === r.tacticId && x.month === m);
@@ -101,6 +104,7 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
       ch.byMonth[m] += cost;
       ch.cost += cost;
       ch.grp += d.grp;
+      rowGrp += d.grp;
       ch.impressions += d.impressions;
       ch.clicks += d.clicks;
       totalByMonth[m] += cost;
@@ -109,6 +113,7 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
         ch.priced.units += isGrpPriced(r.channelType) ? d.grp : d.impressions / 1000;
       }
     }
+    reachItems.push({ channelType: r.channelType, grp: rowGrp, curve: ctx.curveOf(r.channelType, null), freq: ctx.freqFor(r) });
     if (!item.cost) continue;
     ch.items.push(item);
     kinds[kind] += item.cost;
@@ -117,11 +122,12 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
     for (const s of sh) themeCost.set(s.themeId, (themeCost.get(s.themeId) ?? 0) + item.cost * s.share);
   }
 
+  const reachOf = new Map(reachByType(reachItems, ctx.dup).map((t) => [t.channelType, t.reach]));
   const channels = [...byType.values()]
     .filter((c) => c.cost > 0)
     .map(({ priced, ...c }) => ({
       ...c,
-      reach: c.grp > 0 ? reachFromGrp(c.grp, ctx.curveOf(c.type, null)) : 0,
+      reach: c.grp > 0 ? reachOf.get(c.type) ?? 0 : 0,
       unitPrice: priced.units > 0 ? priced.cost / priced.units : 0,
       items: c.items.sort((a, b) => b.cost - a.cost),
     }))

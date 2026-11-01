@@ -376,6 +376,37 @@ export function effectiveReach(reach: number, frequency: number, minContacts = 3
   return reach * Math.min(1, Math.max(0, share));
 }
 
+/** Položka (nebo položka × měsíc) pro zásah nosiče. */
+export type ReachInput = { channelType: ChannelType; grp: number; curve: Curve; freq?: number | null };
+
+/**
+ * Zásah po nosičích. Položky bez zadané frekvence se po nosiči sečtou v GRP
+ * a zásah dá křivka. Položka se zadanou průměrnou frekvencí (digitál) nese
+ * vlastní zásah = GRP ÷ 100 ÷ frekvence, nejvýš strop křivky — křivka při
+ * slabém tlaku dává všem stejných ~1/(rMax·k) kontaktů, frekvenci plánovač zná
+ * lépe (frequency cap, data platformy). V rámci nosiče se části složí modelem
+ * duplikace téhož nosiče. Celkový zásah: combineReach přes vrácené nosiče.
+ */
+export function reachByType(
+  items: ReachInput[],
+  dup: Record<string, number> = DEFAULT_DUPLICATION,
+): Array<{ channelType: ChannelType; grp: number; reach: number }> {
+  const byType = new Map<ChannelType, { grp: number; curveGrp: number; curve: Curve; own: number[] }>();
+  for (const it of items) {
+    if (!(it.grp > 0)) continue;
+    const t = byType.get(it.channelType) ?? { grp: 0, curveGrp: 0, curve: it.curve, own: [] };
+    t.grp += it.grp;
+    if (it.freq && it.freq > 0) t.own.push(Math.min(it.curve.rMax, it.grp / 100 / it.freq));
+    else t.curveGrp += it.grp;
+    byType.set(it.channelType, t);
+  }
+  return [...byType.entries()].map(([channelType, t]) => {
+    const parts = [...t.own, ...(t.curveGrp > 0 ? [reachFromGrp(t.curveGrp, t.curve)] : [])];
+    const reach = parts.length === 1 ? parts[0] : combineReach(parts.map((reach) => ({ channelType, reach })), dup).net;
+    return { channelType, grp: t.grp, reach };
+  });
+}
+
 /** Průměrná frekvence mezi zasaženými. GRP 240 při zásahu 60 % = 4 kontakty. */
 export function frequencyOf(grp: number, reach: number): number {
   return reach > 0 ? grp / 100 / reach : 0;

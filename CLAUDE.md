@@ -165,11 +165,14 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    **CPC vstupuje do zásahu přes CTR** (`ctx.ctrFor`, imprese = kliky ÷ CTR) a **Fix**
    přes efektivní CPM z `tactic.fix_impressions` a rozpočtu za období (`priceFor`,
    `periodBudget` z `loadPlan`). Všechna volání `derive` předávají `ctr: ctx.ctrFor(r)`.
-   **Frekvence v Plánování** (`groupReach` v `PlanTable.tsx`) = týdenní kontakty ÷ TÝDENNÍ
-   zásah, vážený průměr přes měsíce s GRP (týden = dny/7); souhrnné řádky skládají zásah
-   z GRP po nosičích přes `combineReach` (křivka `row.curve`, `dup` z `getReachSummary`).
-   Nedělit frekvenci za období počtem týdnů — u slabého tlaku vychází 0,1× (stalo se).
-   Panel zásahu a Přehled to zatím počítají postaru (frekvence měsíce ÷ týdny).
+   **Zadaná frekvence** (`tactic.est_freq`, jinak `platform.est_freq`, `ctx.freqFor`; jen
+   digitál a ostatní mimo TV/rádio): zásah položky = GRP ÷ 100 ÷ frekvence, strop rMax
+   křivky. Skládá se v `reachByType` (crossmedia.ts) — plán (`groupReach`), panel zásahu
+   (`getReachSummary`) i Finální mix ho musí použít, jinak se rozejdou. **Přehled
+   (dashboard.ts) zatím počítá jen z křivky** — dluh. Důvod: křivka při slabém tlaku dává
+   všem řádkům stejnou frekvenci ≈ 1/(rMax·k) (u digitálu 1,4×), nedává smysl.
+   **Frekvence v tabulce Plánování je za období** (GRP ÷ zásah), u ročního plánu s TV
+   proto desítky až stovky ×. Panel zásahu a Přehled ukazují týdenní (postaru).
    Oblast sdělení = stejné `tactic_theme` u všech jeho řádků (`setLineThemes`);
    nový řádek ji přebírá od sourozence (`insertTactic`).
 

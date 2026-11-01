@@ -7,7 +7,7 @@
  */
 import {
   derive, combineReach, incrementalReach, reachFromGrp, grpForReach,
-  effectiveReach, duplicationOf, DEFAULT_CURVE, isGrpPriced, kFromMeasured,
+  effectiveReach, duplicationOf, DEFAULT_CURVE, isGrpPriced, kFromMeasured, reachByType,
 } from "../src/lib/crossmedia";
 import { periodLabel, weeksOfPeriod, monthsBetween } from "../src/lib/period";
 import { costKind } from "../src/lib/costKind";
@@ -302,6 +302,24 @@ console.log("\nKalibrace křivky z naměřených vln");
   ok("víc měření: chyba fitu je malá", many.ok && many.error < 0.005);
   ok("zásah 100 % odmítne", !fitCurve([{ grp: 500, reach: 1 }], fb).ok);
   ok("bez měření odmítne", !fitCurve([], fb).ok);
+}
+
+console.log("\nZásah ze zadané frekvence");
+{
+  const dig = DEFAULT_CURVE.Digital;
+  const one = reachByType([{ channelType: "Digital", grp: 120, curve: dig, freq: 3 }]);
+  ok("zásah = GRP ÷ 100 ÷ frekvence", Math.abs(one[0].reach - 0.4) < 1e-9);
+  const capped = reachByType([{ channelType: "Digital", grp: 500, curve: dig, freq: 1 }]);
+  ok("strop křivky platí", capped[0].reach === dig.rMax);
+  const mixed = reachByType([
+    { channelType: "Digital", grp: 120, curve: dig, freq: 3 },
+    { channelType: "Digital", grp: 60, curve: dig },
+  ]);
+  ok("přidaná položka zásah nesníží", mixed[0].reach >= 0.4 && mixed[0].grp === 180);
+  const a = reachByType([{ channelType: "Digital", grp: 60, curve: dig }, { channelType: "Digital", grp: 120, curve: dig, freq: 3 }]);
+  ok("nezávisí na pořadí", Math.abs(a[0].reach - mixed[0].reach) < 1e-12);
+  const noFreq = reachByType([{ channelType: "Digital", grp: 120, curve: dig }]);
+  ok("bez frekvence křivka", Math.abs(noFreq[0].reach - reachFromGrp(120, dig)) < 1e-12);
 }
 
 console.log(failed ? `\n${failed} testů selhalo\n` : "\nVšechny testy prošly\n");

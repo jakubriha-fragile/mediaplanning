@@ -13,7 +13,7 @@ import type { CatalogMedium } from "@/lib/catalog";
 import { estimate, type Estimate } from "@/lib/estimates";
 import { costKind } from "@/lib/costKind";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
-import { combineReach, isGrpPriced, priceHint, reachFromGrp, UNIT_LABEL, type Curve } from "@/lib/crossmedia";
+import { combineReach, isGrpPriced, priceHint, reachByType, UNIT_LABEL, type Curve } from "@/lib/crossmedia";
 import type { ChannelType, PlanUnit } from "@/db/schema";
 
 export type PlanRow = {
@@ -41,7 +41,9 @@ export type PlanRow = {
   /** kreativa / formáty */
   creative: string | null;
   /** předpoklady odhadu výsledků (src/lib/estimates.ts) */
-  est: { measurement: string | null; ctr: number | null; cr: number | null };
+  est: { measurement: string | null; ctr: number | null; cr: number | null; freq: number | null };
+  /** odkud je zásah: zadaná frekvence, nebo křivka modelu */
+  reachBy: "freq" | "model" | null;
   /** zásah 1+ položky za období z modelu (podíl 0–1); null = bez GRP nebo agenturní práce */
   reachPct: number | null;
   curve: Curve;
@@ -119,8 +121,9 @@ type Col =
 // opravdu zadává — kde, typ, nákup, cena a rozpočet. Vpravo šedě, co se dopočítá.
 // Dřív měl řádek 12 sloupců a polovinu z nich opakovaně u každé taktiky.
 // CTR má vlastní sloupec: u CPC bez něj nejsou imprese ani zásah a v detailu
-// řádku ho nikdo nehledal (zadavatel, listopad 2026).
-const LEFT_COLS = 6;   // úchyt, kde, typ, nákup, cena, CTR
+// řádku ho nikdo nehledal (zadavatel, listopad 2026). Frekvence u digitálu se
+// zadává (zásah = imprese ÷ frekvence) — křivka dávala všem řádkům stejných 1,4×.
+const LEFT_COLS = 7;   // úchyt, kde, typ, nákup, cena, CTR, frekvence
 const RIGHT_COLS = 7;  // celkem, imprese, kliky, zásah, frekvence, stav, smazat
 
 /** Jak se položka nakupuje — u TV a rádia vždy CPP. */
@@ -299,55 +302,27 @@ export function PlanTable({
       clicks: media ? est.clicks ?? 0 : 0,
       clicksDerived: est.derived.clicks,
       reach,
+      /** průměrná frekvence za období: GRP ÷ zásah (u zadané frekvence vyjde ona, pokud nenarazí na strop) */
+      freq: reach > 0 ? grp / (reach * 100) : 0,
       est,
     };
   };
-  /** dní v měsíci — týdenní frekvence se počítá po měsících (plán je měsíční) */
-  const daysIn = (m: string) => { const [y, mo] = m.split("-").map(Number); return new Date(Date.UTC(y, mo, 0)).getUTCDate(); };
   /**
-   * Zásah a frekvence řádku nebo skupiny (sdělení, kampaň, plán). Zásah se přes
-   * řádky nesčítá (invariant 10): GRP se sečtou po nosičích, z nich zásah
-   * z křivky a nosiče se složí modelem duplikace — stejně jako v panelu zásahu.
-   *
-   * Frekvence je týdenní, ale počítaná poctivě: týdenní kontakty ÷ TÝDENNÍ zásah,
-   * vážený průměr přes týdny, kdy se vysílá. Dřív se dělila frekvence za období
-   * počtem týdnů — u slabšího tlaku vycházely nesmyslné desetiny (0,1×), protože
-   * zásah za celé období je mnohem větší než zásah za týden (zadavatel, listopad 2026).
-   * Frekvence za období (u ročního TV desítky až stovky ×) je v nápovědě buňky.
+   * Zásah a frekvence řádku nebo skupiny (sdělení, kampaň, plán) za období.
+   * Zásah se přes řádky nesčítá (invariant 10) — reachByType (křivka, nebo
+   * zadaná frekvence) a combineReach, stejně jako panel zásahu a Finální mix.
+   * Efektivní frekvence řádku se odvodí ze zásahu ze serveru, takže se
+   * započítá i strop křivky. Frekvence skupiny = všechny GRP ÷ zásah.
    */
   const groupReach = (rs: PlanRow[]) => {
-    const media = rs.filter((r) => costKind(r.channel) === "media");
-    const curveOf = new Map<ChannelType, Curve>();
-    for (const r of media) if (!curveOf.has(r.channelType)) curveOf.set(r.channelType, r.curve);
-    const netOf = (grpByType: Map<ChannelType, number>) => combineReach(
-      [...grpByType.entries()].map(([channelType, g]) => ({ channelType, reach: g > 0 ? reachFromGrp(g, curveOf.get(channelType)!) : 0 })), dup,
-    ).net;
-
-    const total = new Map<ChannelType, number>();
-    let contacts = 0, reachWeeks = 0;
-    for (const m of months) {
-      const byType = new Map<ChannelType, number>();
-      for (const r of media) {
-        const g = r.cells[m]?.grp ?? 0;
-        if (g > 0) byType.set(r.channelType, (byType.get(r.channelType) ?? 0) + g);
-      }
-      if (!byType.size) continue;
-      for (const [t, g] of byType) total.set(t, (total.get(t) ?? 0) + g);
-      const wk = daysIn(m) / 7;
-      const weekly = new Map([...byType].map(([t, g]) => [t, g / wk] as const));
-      const net = netOf(weekly);
-      if (net > 0) {
-        contacts += [...byType.values()].reduce((a, g) => a + g, 0);
-        reachWeeks += net * 100 * wk;
-      }
-    }
-    const reach = total.size ? netOf(total) : 0;
-    const grp = [...total.values()].reduce((a, g) => a + g, 0);
-    return {
-      reach,
-      freq: reachWeeks > 0 ? contacts / reachWeeks : 0,
-      freqPeriod: reach > 0 ? grp / (reach * 100) : 0,
-    };
+    const items = rs.filter((r) => calcOf(r).media).map((r) => ({
+      channelType: r.channelType, grp: calcOf(r).grp, curve: r.curve,
+      freq: r.reachBy === "freq" ? calcOf(r).grp / 100 / (r.reachPct || 1) : null,
+    }));
+    const types = reachByType(items, dup);
+    const reach = combineReach(types, dup).net;
+    const grp = types.reduce((a, t) => a + t.grp, 0);
+    return { reach, freq: reach > 0 ? grp / (reach * 100) : 0 };
   };
   /**
    * Stav řádku: co chybí, aby se počítal. Hlášky jsou návod, co doplnit —
@@ -639,6 +614,7 @@ export function PlanTable({
               {!clientView && <th title="Jak se nakupuje: CPM = za tisíc impresí, CPC = za klik, Fix = balík za pevnou cenu s garantovanými impresemi. TV a rádio vždy CPP (za GRP).">Nákup</th>}
               {!clientView && <th className="r" title="Cena v jednotce podle nákupu. Šedé číslo je výchozí cena platformy nebo ceník — platí, dokud nezadáte vlastní.">Cena</th>}
               {!clientView && <th className="r" title="Míra prokliku v %. U CPC je nutná — imprese = kliky ÷ CTR. U CPM z ní vzniknou kliky. Šedé číslo je výchozí hodnota platformy.">CTR %</th>}
+              {!clientView && <th className="r" title="Průměrná frekvence za období řádku, kterou čekáte (frequency cap, zkušenost z platformy). Zásah = imprese ÷ frekvence, v % cílové skupiny. Prázdné = výchozí platformy (šedě), jinak křivka modelu. TV a rádio vždy z křivky.">Frekv.</th>}
               {cols.map((c) => (
                 <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
                     title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : c.kind === "w" ? `Týden ${c.title} · rozpočet v Kč` : "Rozpočet v Kč"}>
@@ -649,7 +625,7 @@ export function PlanTable({
               <th className="r calc" title="Imprese za období: z rozpočtu a CPM, u CPC kliky ÷ CTR, u Fix garantované, u TV z GRP a velikosti cílové skupiny">Imprese</th>
               <th className="r calc" title="Kliky za období: u CPC rozpočet ÷ CPC, jinak imprese × CTR (kurzívou)">Kliky</th>
               <th className="r calc" title="Zásah 1+ řádku za období z modelu (křivka nosiče, cílová skupina sdělení). Modelový odhad, ne měření. U sdělení, kampaně a celku se nesčítá — počítá se modelem znovu z GRP všech jejich řádků (překryv).">Zásah</th>
-              <th className="r calc" title="Průměrná týdenní frekvence: kolikrát reklamu za týden uvidí ten, koho v tom týdnu zasáhne (týdenní GRP ÷ týdenní zásah, průměr přes týdny, kdy řádek běží). Frekvenci za celé období ukáže nápověda buňky. U sdělení, kampaně a celku z modelu přes všechny jejich řádky.">Frekv./týd.</th>
+              <th className="r calc" title="Průměrná frekvence za období: kolikrát reklamu v průměru uvidí zasažený (GRP ÷ zásah). U sdělení, kampaně a celku přes všechny jejich řádky, s odečtením překryvu.">Frekvence</th>
               <th style={{ width: 24 }} title="Stav řádku — kliknutím otevřete detail" />
               <th style={{ width: 30 }} />
             </tr>
@@ -966,6 +942,15 @@ export function PlanTable({
                                   ) : <span className="share">—</span>}
                                 </td>}
 
+                                {!clientView && <td className="r ctrcell">
+                                  {c.media && !isGrpPriced(r.channelType) ? (
+                                    <EstInput kind="num" label={`Frekvence ${r.name}`} disabled={!rowEditable(r)}
+                                      value={r.est.freq} shown={plat?.freq ?? undefined}
+                                      onCommit={(v) => run(() => patchRow(r.id, { est: { ...r.est, freq: v as number | null } }), () => patchRow(r.id, { est: r.est }),
+                                        () => setTacticEstimate({ tacticId: r.id, field: "freq", value: v }))} />
+                                  ) : <span className="share" title="TV a rádio: frekvence z křivky (GRP ÷ zásah)">—</span>}
+                                </td>}
+
                                 {cols.map((col) => {
                                   const unit: PlanUnit = BUDGET_ONLY ? "budget" : rowUnit(r);
                                   // měsíc v kvartálu sbalený u měsíčního plánu: jen součet, needituje se
@@ -1037,10 +1022,9 @@ export function PlanTable({
                                   {c.clicks ? fmtCount(c.clicks) : "—"}
                                 </td>
                                 <td className="r num calc">{c.reach ? `${Math.round(c.reach * 100)} %` : "—"}</td>
-                                {(() => {
-                                  const f = groupReach([r]);
-                                  return <td className="r num calc" title={f.freqPeriod ? `Za celé období ${fmtFreq(f.freqPeriod)} na zasaženého` : undefined}>{fmtFreq(f.freq)}</td>;
-                                })()}
+                                <td className="r num calc" title={r.reachBy === "freq" ? "Zásah = imprese ÷ zadaná frekvence" : r.reachBy === "model" ? "Z křivky modelu — u digitálu raději zadejte frekvenci vlevo" : undefined}>
+                                  {fmtFreq(c.freq)}
+                                </td>
                                 <td style={{ textAlign: "center" }}>
                                   <button className={`stdot ${st.level}`} aria-label="Stav řádku"
                                     title={st.level === "ok" ? "Vše se počítá. Kliknutím otevřete detail." : st.msgs.join("\n")}
@@ -1181,7 +1165,7 @@ export function PlanTable({
 
       <div className="note">
         <b>Jak zadávat:</b> sdělení popíšete jednou v jeho hlavičce (fáze, cílová skupina, oblast) — platí pro všechny jeho řádky.
-        V řádku vyberete, <b>kde</b> se nakupuje, <b>jak</b> (CPM, CPC, Fix; TV a rádio CPP), <b>cenu</b>, u digitálu <b>CTR</b> (u CPC nutné) a rozpočet do měsíců.
+        V řádku vyberete, <b>kde</b> se nakupuje, <b>jak</b> (CPM, CPC, Fix; TV a rádio CPP), <b>cenu</b>, u digitálu <b>CTR</b> (u CPC nutné) a <b>frekvenci</b> (zásah = imprese ÷ frekvence) a rozpočet do měsíců.
         Šedé sloupce vpravo se dopočítají. Tečka na konci řádku: zelená = vše se počítá, oranžová = něco chybí
         (kliknutím na řádek otevřete detail s návodem, kreativou, měřením, konverzemi a oblastí řádku), šedá = agenturní práce nebo bez rozpočtu.
         {canEditPlan && <><br /><b>Jako v Excelu:</b> Enter a šipky přeskakují mezi měsíci, Tab doprava.
@@ -1189,7 +1173,7 @@ export function PlanTable({
         prázdné buňky nic nepřepíšou a celé vložení vrátíte jedním Zpět.</>}
         {weeks && <><br /><b>Plán po týdnech:</b> zadáváte týdny, měsíce (i sbalené) jsou jejich součet. Týden přes přelom
         se do měsíců dělí podle dnů. Přepnout zpět na měsíce jde v Nastavení plánu.</>}
-        <br />Zásah a frekvence jsou modelový odhad, ne měření. Frekvence je týdenní: kolikrát reklamu za týden uvidí ten, koho v tom týdnu zasáhne (frekvence za celé období je v nápovědě buňky). U sdělení, kampaně a celku se zásah nesčítá — počítá se znovu z GRP všech řádků s odečtením překryvu.
+        <br />Zásah a frekvence jsou modelový odhad, ne měření. Frekvence = průměrný počet kontaktů na zasaženého za období. U digitálu se zadává (vlevo), u TV a rádia vychází z křivky. U sdělení, kampaně a celku se zásah nesčítá — počítá se znovu z GRP všech řádků s odečtením překryvu.
         {canEditPlan && <> Úchyt ⠿ přetáhne řádek (pořadí, jiná kampaň) nebo celou kampaň.</>}
       </div>
     </div>
@@ -1453,8 +1437,8 @@ const fmtFreq = (f: number) => (f ? `${f.toLocaleString("cs-CZ", { maximumFracti
  * Součty dopočtených sloupců za kampaň, sdělení nebo plán. Zásah a frekvence
  * se nesčítají — přicházejí z groupReach (model přes GRP všech řádků skupiny).
  */
-function SumCells({ budget, impressions, clicks, reach, freq, freqPeriod, strong = false }: {
-  budget: number; impressions: number; clicks: number; reach: number; freq: number; freqPeriod: number; strong?: boolean;
+function SumCells({ budget, impressions, clicks, reach, freq, strong = false }: {
+  budget: number; impressions: number; clicks: number; reach: number; freq: number; strong?: boolean;
 }) {
   return (
     <>
@@ -1462,7 +1446,7 @@ function SumCells({ budget, impressions, clicks, reach, freq, freqPeriod, strong
       <td className="r num calc">{impressions ? fmtCount(impressions) : "–"}</td>
       <td className="r num calc">{clicks ? fmtCount(clicks) : "–"}</td>
       <td className="r num calc" title="Modelový odhad přes všechny řádky skupiny — překryv médií odečtený, nesčítá se">{reach ? `${Math.round(reach * 100)} %` : "–"}</td>
-      <td className="r num calc" title={freqPeriod ? `Za celé období ${fmtFreq(freqPeriod)} na zasaženého` : undefined}>{fmtFreq(freq)}</td>
+      <td className="r num calc">{fmtFreq(freq)}</td>
       <td />
       <td />
     </>
@@ -1471,7 +1455,7 @@ function SumCells({ budget, impressions, clicks, reach, freq, freqPeriod, strong
 
 /** Pole předpokladu: číslo, procento (ukládá se jako podíl), nebo text. Prázdné = nezadáno. */
 function EstInput({ kind, value, shown, label, disabled, need = false, onCommit }: {
-  kind: "pct" | "text";
+  kind: "pct" | "num" | "text";
   /** chybí a řádek bez něj nepočítá — zvýraznit */
   need?: boolean;
   value: number | string | null;
@@ -1484,12 +1468,12 @@ function EstInput({ kind, value, shown, label, disabled, need = false, onCommit 
   const [draft, setDraft] = useState<string | null>(null);
   const toText = (v: number | string | null) =>
     v === null || v === "" ? "" : kind === "text" ? String(v)
-    : String(Math.round((v as number) * 100 * 1000) / 1000).replace(".", ",");
+    : String(Math.round((v as number) * (kind === "pct" ? 100 : 1) * 1000) / 1000).replace(".", ",");
   return (
     <input className={`cell estinput ${kind === "text" ? "esttext" : ""} ${need ? "need" : ""}`} aria-label={label} disabled={disabled}
       inputMode={kind === "text" ? "text" : "decimal"}
       value={draft ?? toText(value)}
-      placeholder={shown !== undefined ? `≈ ${String(Math.round(shown * 100 * 100) / 100).replace(".", ",")}` : ""}
+      placeholder={shown !== undefined ? `≈ ${String(Math.round(shown * (kind === "pct" ? 100 : 1) * 100) / 100).replace(".", ",")}` : ""}
       onFocus={(e) => e.target.select()}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
@@ -1499,7 +1483,7 @@ function EstInput({ kind, value, shown, label, disabled, need = false, onCommit 
         let v: number | string | null;
         if (kind === "text") v = t || null;
         else if (!t) v = null;
-        else v = parseNum(t) / 100;
+        else v = kind === "pct" ? parseNum(t) / 100 : parseNum(t);
         if (v !== value) onCommit(v);
       }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); } }} />
