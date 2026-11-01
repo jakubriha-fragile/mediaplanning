@@ -983,3 +983,27 @@ table.plan tr.rowdetail td { background: color-mix(in srgb, var(--brand-soft) 18
 /* CTR přímo v řádku (listopad 2026) */
 td.ctrcell input.estinput { width: 58px; }
 td.ctrcell input.estinput.need { border: 1px solid var(--attn) !important; background: var(--attn-soft); }
+
+/* Flowchart (listopad 2026): co kdy běží, týdny, jen čtení */
+.flowchart .fc-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.fc-legend { display: inline-flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 11px; }
+.fc-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+table.fc { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+table.fc th, table.fc td { border-bottom: 1px solid var(--line); padding: 0; height: 28px; }
+table.fc th { font-weight: 400; color: var(--muted); font-size: 11px; }
+table.fc .fc-lab { position: sticky; left: 0; z-index: 1; background: var(--surface); text-align: left; padding: 0 10px; min-width: 280px; max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+table.fc .fc-month { text-align: left; padding-left: 4px; color: var(--ink); font-weight: 500; }
+table.fc .fc-wk { min-width: 22px; text-align: center; }
+table.fc .fc-ms { border-left: 1px solid var(--line-strong); }
+table.fc .fc-tot { text-align: right; padding: 0 10px; min-width: 96px; font-variant-numeric: tabular-nums; }
+table.fc .fc-num { text-align: center; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+table.fc tr.fc-group td { background: var(--calc-bg); font-weight: 500; }
+table.fc tr.fc-group .fc-lab { background: var(--calc-bg); }
+table.fc tr.fc-row { cursor: pointer; }
+table.fc tr.fc-row:hover td, table.fc tr.fc-row:hover .fc-lab { background: var(--attn-soft); }
+table.fc tr.fc-row .fc-lab { padding-left: 22px; }
+table.fc .fc-name { margin-right: 6px; }
+table.fc .fc-tag { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--calc-bg); color: var(--muted); }
+table.fc .fc-cell { height: 14px; margin: 0 -0.5px; }
+table.fc tfoot td { font-weight: 500; border-top: 1px solid var(--line-strong); }
+@media print { table.fc .fc-cell { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }

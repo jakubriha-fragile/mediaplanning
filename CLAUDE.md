@@ -50,6 +50,7 @@ src/lib/estimates.ts     odhad výsledků položky: kliky, konverze, CPA z doru�
 src/lib/mix.ts           data pro Finální mix (/mix): média, měsíce, oblasti, modelový zásah
 src/lib/metrics.ts       poměrové ukazatele (CPM, CPC, CPA, CTR, ROAS) se počítají z čerpání a základních čísel
 src/lib/displayName.ts   krátký název položky (tactic.label, jinak bez poznámek v závorkách)
+src/components/Flowchart.tsx   flowchart v Plánování (týdny × média, jen čtení, z rozpočtů; měsíce → týdny podle dnů)
 src/components/ClientPlan.tsx  Plán pro klienta — jen čtení, offline/online, bez agenturních nástrojů
 src/components/Chrome.tsx      kostra: menu vlevo (role → položky), tenká hlavička stránky (.top)
 src/app/vysledky/        Výsledky = plnění + vyplňování skutečnosti (Results.tsx); klient ji vidí jako „K vyplnění".

@@ -13,6 +13,7 @@ import type { CatalogMedium } from "@/lib/catalog";
 import { estimate, type Estimate } from "@/lib/estimates";
 import { costKind } from "@/lib/costKind";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
+import { Flowchart, type FlowWeek } from "@/components/Flowchart";
 import { combineReach, isGrpPriced, priceHint, reachByType, UNIT_LABEL, type Curve } from "@/lib/crossmedia";
 import type { ChannelType, PlanUnit } from "@/db/schema";
 
@@ -132,8 +133,10 @@ const BUY_UNIT = { cpm: "Kč / 1 000 imp.", cpc: "Kč / klik", fix: "imp. za obd
 
 export function PlanTable({
   rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel, clientView = false,
-  themes = [], weeks = null, catalog = [], targetGroups = [], dup,
+  themes = [], weeks = null, catalog = [], targetGroups = [], dup, flowWeeks = [],
 }: {
+  /** týdny období pro Flowchart (u měsíčního plánu se do nich rozloží měsíce) */
+  flowWeeks?: FlowWeek[];
   /** koeficienty duplikace pro zásah souhrnných řádků */
   dup?: Record<string, number>;
   /** cílové skupiny klienta s velikostí — výběr u sdělení */
@@ -160,6 +163,21 @@ export function PlanTable({
   const rightCols = RIGHT_COLS;
   /** rozbalený detail řádku (kreativa, měření, CTR, oblast řádku, co chybí) */
   const [open, setOpen] = useState<string | null>(null);
+  /** Tabulka (zadávání) nebo Flowchart (co kdy běží, jen čtení) — pamatuje se v prohlížeči */
+  const [mode, setModeState] = useState<"table" | "flow">("table");
+  useEffect(() => {
+    try { if (localStorage.getItem("plan-mode") === "flow") setModeState("flow"); } catch {}
+  }, []);
+  const setMode = (m: "table" | "flow") => {
+    setModeState(m);
+    try { localStorage.setItem("plan-mode", m); } catch {}
+  };
+  /** z Flowchartu: přepnout na tabulku, otevřít detail řádku a dorolovat k němu */
+  const openInTable = (id: string) => {
+    setMode("table");
+    setOpen(id);
+    setTimeout(() => document.getElementById(`row-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 50);
+  };
   const [data, setData] = useState(rows);
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
@@ -488,7 +506,13 @@ export function PlanTable({
 
   return (
     <div className="panel sticky">
-      <div className="toolbar">
+      <div className="toolbar noprint">
+        <div className="seg" role="radiogroup" aria-label="Pohled na plán">
+          <button type="button" role="radio" aria-checked={mode === "table"} className={mode === "table" ? "on" : ""} onClick={() => setMode("table")}
+            title="Zadávání plánu">Tabulka</button>
+          <button type="button" role="radio" aria-checked={mode === "flow"} className={mode === "flow" ? "on" : ""} onClick={() => setMode("flow")}
+            title="Co kdy běží a za kolik — po týdnech, jen čtení">Flowchart</button>
+        </div>
         {(["Paid", "Owned", "Earned"] as const).map((ty) => (
           <button key={ty} className="btn" aria-pressed={types[ty]}
             style={types[ty]
@@ -496,7 +520,7 @@ export function PlanTable({
               : { borderRadius: 999, color: "var(--muted)" }}
             onClick={() => setTypes((t) => ({ ...t, [ty]: !t[ty] }))}>{ty}</button>
         ))}
-        {groupsOfCols.length > 1 && (
+        {mode === "table" && groupsOfCols.length > 1 && (
           <span style={{ display: "inline-flex", gap: 3, alignItems: "center", flexWrap: "wrap" }}>
             <span className="share" style={{ marginRight: 2 }}>{weeks ? "Měsíce" : "Kvartály"}</span>
             {groupsOfCols.map((q) => (
@@ -541,9 +565,9 @@ export function PlanTable({
               className={view === v.key ? "on" : ""} onClick={() => pickView(v.key)}>{v.label}</button>
           ))}
         </div>}
-        <span className="share legend" title="Bílá pole s rámečkem vyplňujete, šedé sloupce vpravo se dopočítají">
+        {mode === "table" && <span className="share legend" title="Bílá pole s rámečkem vyplňujete, šedé sloupce vpravo se dopočítají">
           <span className="lg-in" /> vyplňujete <span className="lg-calc" /> dopočítá se
-        </span>
+        </span>}
         {canEditPlan && <UndoButton undoLabel={undoLabel} pending={pending} onUndo={() => run(() => {}, () => {}, undoLast)} />}
         {canEditPlan && <NewCampaignButton onCreate={(name) => run(() => {}, () => {}, () => createCampaign({ planId, name }))} />}
         <span className="share">
@@ -603,6 +627,9 @@ export function PlanTable({
         </div>
       )}
 
+      {mode === "flow" ? (
+        <Flowchart rows={visible} weeks={flowWeeks} monthLabels={monthLabels} weekly={!!weeks} onOpen={openInTable} />
+      ) : (<>
       <div className="scroll stick">
         {/* bez práva na úpravu se tabulka kreslí jako text, ne jako zašedlý formulář */}
         <table className={`plan ${canEditPlan ? "" : "ro"}`}>
@@ -814,7 +841,7 @@ export function PlanTable({
                           const isOpen = open === r.id;
                           return (
                             <GroupBlock key={r.id}>
-                              <tr
+                              <tr id={`row-${r.id}`}
                                 className={`trow ${isOpen ? "opened" : ""} ${dragId === r.id ? "dragging" : dh ? (dh.after ? "dropAfter" : "dropBefore") : ""}`}
                                 onClick={(e) => {
                                   // klik mimo pole otevře detail řádku
@@ -1176,6 +1203,7 @@ export function PlanTable({
         <br />Zásah a frekvence jsou modelový odhad, ne měření. Frekvence = průměrný počet kontaktů na zasaženého za období. U digitálu se zadává (vlevo), u TV a rádia vychází z křivky. U sdělení, kampaně a celku se zásah nesčítá — počítá se znovu z GRP všech řádků s odečtením překryvu.
         {canEditPlan && <> Úchyt ⠿ přetáhne řádek (pořadí, jiná kampaň) nebo celou kampaň.</>}
       </div>
+      </>)}
     </div>
   );
 }

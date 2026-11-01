@@ -284,6 +284,12 @@ název položky, kreativa, měření, konverze (prázdné = výchozí platformy)
 **CPC a frekvence:** z kliků se imprese spočítají přes CTR (kliky ÷ CTR) — bez CTR položka
 do zásahu nevstoupí. **Fix:** z garantovaných impresí a rozpočtu vyjde efektivní CPM.
 
+**Flowchart** (přepínač Tabulka / Flowchart v liště Plánování, pamatuje se): co kdy běží
+a za kolik, po týdnech. Jen čtení, stejné filtry jako tabulka. Seskupení podle médií (sdělení
+jako štítek u řádku), nebo sdělení → média. Sytost pruhu = Kč v týdnu, částka po najetí
+myší, klik na řádek ho otevře v tabulce. Měsíční plán se do týdnů rozloží podle dnů.
+Tisk / PDF z prohlížeče. Klient ho zatím nevidí.
+
 Plánuje se jen v Kč (`BUDGET_ONLY` v `PlanTable.tsx`); jednotky GRP/imprese v buňkách
 a přepínač zobrazení zůstaly v kódu vypnuté.
 
