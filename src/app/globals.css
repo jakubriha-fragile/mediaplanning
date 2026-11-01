@@ -979,3 +979,7 @@ table.plan tr.rowdetail td { background: color-mix(in srgb, var(--brand-soft) 18
 .rd-calc > div { padding: 5px 0; color: var(--ink-2); }
 .rd-grid input.estinput { width: 100%; text-align: left; border: 1px solid var(--line-strong) !important; border-radius: 4px; min-height: 28px; background: var(--surface); }
 .rd-grid input.estinput::placeholder { color: var(--muted); font-style: italic; }
+
+/* CTR přímo v řádku (listopad 2026) */
+td.ctrcell input.estinput { width: 58px; }
+td.ctrcell input.estinput.need { border: 1px solid var(--attn) !important; background: var(--attn-soft); }

@@ -392,6 +392,8 @@ export async function getPlanRows(me: Principal, planId: string) {
         const grp = months.reduce((s, m) => s + (cells[m].grp ?? 0), 0);
         return grp > 0 && costKind(r.channel) === "media" ? reachFromGrp(grp, curve) : null;
       })(),
+      // křivka řádku — souhrnné řádky v plánu z ní skládají zásah sdělení a kampaně
+      curve,
       mediumId: r.mediumId,
       platformId: r.platformId,
       targetGroupId: r.targetGroupId,
@@ -464,13 +466,15 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
   total: ReachSummary;
   universe: number;
   hasUniverse: boolean;
+  /** koeficienty duplikace — plán z nich skládá zásah souhrnných řádků */
+  dup: Record<string, number>;
 }> {
   const plan = await getPlan(planId);
   const empty: ReachSummary = {
     month: "", net: 0, gross: 0, overlap: 0, independent: 0, people: 0,
     grp: 0, impressions: 0, budget: 0, byType: [],
   };
-  if (!plan) return { months: [], total: empty, universe: 0, hasUniverse: false };
+  if (!plan) return { months: [], total: empty, universe: 0, hasUniverse: false, dup: DEFAULT_DUPLICATION };
 
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
   const ctx = await crossContext(plan.targetGroupId, plan.clientId);
@@ -571,6 +575,7 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
     },
     universe,
     hasUniverse: universe > 0,
+    dup: ctx.dup,
   };
 }
 

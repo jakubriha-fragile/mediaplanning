@@ -266,15 +266,19 @@ Sdělení z importu s cílovkou jen jako text propojí tlačítko „Propojit po
 | Typ | Paid / Owned / Earned (vlastní kanály se nastaví na Owned, PR na Earned) |
 | Nákup | CPM (za tisíc impresí), CPC (za klik), Fix (balík za pevnou cenu); TV a rádio vždy CPP |
 | Cena | v jednotce podle nákupu; u Fix garantované imprese za období. Šedé číslo = výchozí cena platformy nebo ceník |
+| CTR % | u digitálu míra prokliku; u CPC nutná (imprese = kliky ÷ CTR), u CPM z ní vzniknou kliky. Šedé = výchozí platformy, oranžově = chybí |
 | Měsíce / týdny | rozpočet v Kč |
 
 **Dopočítá se (šedé sloupce vpravo):** Celkem Kč, Imprese, Kliky (u CPM přes CTR, kurzívou),
-Zásah 1+ a Frekvence za týden, ve kterém řádek běží. Zásah a frekvence jsou modelový odhad,
-ne měření, a přes řádky se nesčítají — celkový zásah je v panelu nahoře a v Přehledu.
+Zásah 1+ a Frekvence za týden. Zásah a frekvence jsou modelový odhad, ne měření. U sdělení,
+kampaně a celku se nesčítají: GRP se sečtou po nosičích a zásah se složí modelem překryvu
+(stejně jako v panelu zásahu). **Týdenní frekvence** = týdenní kontakty ÷ týdenní zásah,
+průměr přes týdny, kdy se vysílá (vážený zásahem); frekvence za celé období je v nápovědě buňky.
+Dřív se dělila frekvence za období počtem týdnů a u slabšího tlaku vycházely desetiny.
 
 **Stav řádku** (tečka vpravo): zelená = vše se počítá, oranžová = něco chybí, šedá =
 agenturní práce nebo bez rozpočtu. Kliknutím na řádek se otevře **detail**: co doplnit,
-název položky, kreativa, měření, CTR a konverze (prázdné = výchozí platformy), oblast
+název položky, kreativa, měření, konverze (prázdné = výchozí platformy), oblast
 řádku a přesun pod jiné sdělení.
 
 **CPC a frekvence:** z kliků se imprese spočítají přes CTR (kliky ÷ CTR) — bez CTR položka

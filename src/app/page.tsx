@@ -213,6 +213,7 @@ export default async function PlanPage({
         undoLabel={undo[0]?.label ?? null}
         themes={themeList.map((t) => ({ id: t.id, name: t.name }))}
         catalog={await getCatalog()}
+        dup={reach.dup}
         // cílovky klienta plánu a společné (bez klienta) — velikost pro model
         targetGroups={tgs.filter((t) => !t.clientId || t.clientId === plan.clientId).map((t) => ({ id: t.id, name: t.name, universe: t.universe }))}
         weeks={plan.granularity === "week"

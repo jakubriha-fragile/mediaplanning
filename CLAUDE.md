@@ -165,6 +165,11 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    **CPC vstupuje do zásahu přes CTR** (`ctx.ctrFor`, imprese = kliky ÷ CTR) a **Fix**
    přes efektivní CPM z `tactic.fix_impressions` a rozpočtu za období (`priceFor`,
    `periodBudget` z `loadPlan`). Všechna volání `derive` předávají `ctr: ctx.ctrFor(r)`.
+   **Frekvence v Plánování** (`groupReach` v `PlanTable.tsx`) = týdenní kontakty ÷ TÝDENNÍ
+   zásah, vážený průměr přes měsíce s GRP (týden = dny/7); souhrnné řádky skládají zásah
+   z GRP po nosičích přes `combineReach` (křivka `row.curve`, `dup` z `getReachSummary`).
+   Nedělit frekvenci za období počtem týdnů — u slabého tlaku vychází 0,1× (stalo se).
+   Panel zásahu a Přehled to zatím počítají postaru (frekvence měsíce ÷ týdny).
    Oblast sdělení = stejné `tactic_theme` u všech jeho řádků (`setLineThemes`);
    nový řádek ji přebírá od sourozence (`insertTactic`).
 
