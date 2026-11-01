@@ -18,13 +18,13 @@ export type UndoOp =
   /** týden plánu po týdnech; `existed: false` = řádek před změnou nebyl, vrácení ho smaže */
   | { t: "budgetWeek"; tacticId: string; week: string; planned: number;
       driver: PlanUnit; driverValue: number; unitPrice: number; existed: boolean }
-  | { t: "pricing"; tacticId: string; pricing: "cpm" | "cpc" | null }
+  | { t: "pricing"; tacticId: string; pricing: "cpm" | "cpc" | "fix" | null }
   | { t: "actual"; tacticId: string; month: string; amount: number }
   | { t: "metricTarget"; metricId: string; month: string; target: number }
   | { t: "metricActual"; metricId: string; month: string; value: number }
   | { t: "note"; tacticId: string; month: string; text: string }
   | { t: "tactic"; tacticId: string; channel: string; mediaType: "Paid" | "Owned" | "Earned"; messageLineId: string; label?: string | null }
-  | { t: "line"; id: string; message: string; audience: string; phase: "Awareness" | "Consideration" | "Conversion"; code: string }
+  | { t: "line"; id: string; message: string; audience: string; phase: "Awareness" | "Consideration" | "Conversion"; code: string; targetGroupId?: string | null }
   | { t: "positions"; items: Array<{ id: string; position: number; messageLineId: string }> }
   | { t: "dropTactic"; id: string }
   | { t: "dropLine"; id: string }
@@ -119,7 +119,11 @@ export async function applyOps(ops: UndoOp[]) {
         break;
       case "line":
         await db.update(messageLines)
-          .set({ message: op.message, audience: op.audience, phase: op.phase, code: op.code })
+          .set({
+            message: op.message, audience: op.audience, phase: op.phase, code: op.code,
+            // starší záznamy zásobníku cílovku neznají — tam ji neměníme
+            ...(op.targetGroupId !== undefined ? { targetGroupId: op.targetGroupId } : {}),
+          })
           .where(eq(messageLines.id, op.id));
         break;
       case "positions":

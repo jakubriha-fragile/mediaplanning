@@ -248,47 +248,40 @@ modelový zásah 1+ za období, pruh rozdělení rozpočtu, tabulka médií (dor
 impresích, cena za jednotku jen pro agenturu, zásah) s **flowchartem po měsících** a rozpadem
 na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* schová navigaci.
 
-### Plánuje se jen rozpočet v Kč (listopad 2026)
+### Zadání plánu (listopad 2026)
 
-Tabulka teď přijímá jen Kč — sloupce Jednotka a Cena, přepínač CPM/CPC i přepínač
-zobrazení jsou vypnuté (`BUDGET_ONLY` v `PlanTable.tsx`), než se vymyslí lepší logika.
-Sloupec **Cena** (CPM / CPC, u TV a rádia CPP) zůstal a sloupec **Doručení** u každého řádku
-ukazuje, co plán za období doručí: u CPC prokliky, u CPM imprese, u TV a rádia TRP.
-Výpočty zůstávají: řádek se zadanou cenou (TV s CPP z importu) z Kč dál dopočítá GRP
-a zásah; položky bez ceny dostanou doručení z **ceníku klienta** (Kalkulačka → Ceník, značka „≈").
-Popis níž platí po zapnutí plného režimu.
+Plán je **Kampaň → Sdělení → řádky**. Co platí pro celé sdělení, se zadá jednou v jeho
+hlavičce; řádek má jen to, co se u nákupu opravdu liší.
 
-### Co tabulka ukazuje a CPM / CPC
+**Hlavička sdělení:** název, fáze, **cílová skupina** (ze seznamu, s velikostí — z ní se
+počítají GRP, zásah a frekvence všech řádků) a **oblast** (platí pro všechny řádky; výjimku
+pro jeden řádek uděláte v jeho detailu). Nové sdělení dostane cílovou skupinu plánu.
+Sdělení z importu s cílovkou jen jako text propojí tlačítko „Propojit podle názvu".
 
-Přepínač **Zobrazit: Zadání · Kč · Imprese · Kliky · GRP** nad tabulkou. *Zadání* ukazuje každý
-řádek v jednotce, ve které se plánuje (tady se píše); ostatní zobrazení ukazují jednu metriku
-pro všechny řádky a součty v ní. Buňka v jiné jednotce, než se řádek plánuje, je jen ke čtení
-(přepsat Kč u řádku na GRP by změnilo model). Všechny dopočty jsou v nápovědě buňky.
+**Řádek — vyplňujete (bílá pole s rámečkem):**
 
-U online a ostatních médií se v buňce Cena volí **CPM / CPC**. Na CPC se z rozpočtu a ceny
-za klik dopočítají kliky (nebo z kliků rozpočet — jednotka *Kliky*). Z kliků se nedá určit
-zásah, takže CPC položky do modelu zásahu nevstupují (Přehled je nehlásí jako chybějící data).
-Přepnutí cenového modelu vynuluje cenu za jednotku, rozpočty zůstanou.
+| Sloupec | Co do něj patří |
+|---|---|
+| Kde | médium › platforma z číselníku (Nastavení → Média a platformy); určí i nosič |
+| Typ | Paid / Owned / Earned (vlastní kanály se nastaví na Owned, PR na Earned) |
+| Nákup | CPM (za tisíc impresí), CPC (za klik), Fix (balík za pevnou cenu); TV a rádio vždy CPP |
+| Cena | v jednotce podle nákupu; u Fix garantované imprese za období. Šedé číslo = výchozí cena platformy nebo ceník |
+| Měsíce / týdny | rozpočet v Kč |
 
-### Odhad výsledků položky
+**Dopočítá se (šedé sloupce vpravo):** Celkem Kč, Imprese, Kliky (u CPM přes CTR, kurzívou),
+Zásah 1+ a Frekvence za týden, ve kterém řádek běží. Zásah a frekvence jsou modelový odhad,
+ne měření, a přes řádky se nesčítají — celkový zásah je v panelu nahoře a v Přehledu.
 
-Tlačítko **Odhad výsledků** nad tabulkou plánu přidá vpravo čtyři sloupce: **CTR %**,
-**Konv. %**, **Odhad výsledků** a **Měření**. Inspirací byl mediaplán Fragile (case study),
-ale bez zdvojených vstupů:
+**Stav řádku** (tečka vpravo): zelená = vše se počítá, oranžová = něco chybí, šedá =
+agenturní práce nebo bez rozpočtu. Kliknutím na řádek se otevře **detail**: co doplnit,
+název položky, kreativa, měření, CTR a konverze (prázdné = výchozí platformy), oblast
+řádku a přesun pod jiné sdělení.
 
-- **Cena** (CPM/CPC) je jen ve sloupci Cena — z ní plán počítá doručení (imprese, kliky, TRP).
-- **Zásah 1+** počítá model z GRP položky za celé období, nezadává se frekvence ani velikost CS.
-- **CTR a konverzní poměr** se zadávají jen u digitálních médií. U TV, rádia a agenturní
-  práce se nezadává nic.
-- **Výchozí předpoklady platforem** (Nastavení → Média a platformy, u digitálu): CPM, CPC,
-  CTR a konverze. Platí v plánech všude, kde položka nemá vlastní hodnotu — cena se
-  pak značí „≈" jako odhad, CTR a konverze se v poli ukážou šedě. Přepsat jde u položky.
+**CPC a frekvence:** z kliků se imprese spočítají přes CTR (kliky ÷ CTR) — bez CTR položka
+do zásahu nevstoupí. **Fix:** z garantovaných impresí a rozpočtu vyjde efektivní CPM.
 
-Sloupec Odhad výsledků ukáže jedním řádkem kliky · konverze · CPA a zásah 1+, kurzívou
-co je dopočtené přes CTR. V součtu bloku a plánu se sčítají kliky a konverze, CPA je jen
-z položek s konverzemi; zásah se nesčítá (je v Přehledu). Konverze se počítají z kliků.
-Všechno jsou to pracovní odhady k validaci media specialistou, zásah je modelový odhad,
-ne měření.
+Plánuje se jen v Kč (`BUDGET_ONLY` v `PlanTable.tsx`); jednotky GRP/imprese v buňkách
+a přepínač zobrazení zůstaly v kódu vypnuté.
 
 ### Médium a platforma
 

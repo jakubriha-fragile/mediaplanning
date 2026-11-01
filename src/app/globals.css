@@ -37,6 +37,11 @@
   --ctl-h: 32px;
   --ctl-r: 5px;
   --focus: 0 0 0 3px var(--brand-soft);
+  /* „něco chybí" v plánu — jantarová, aby se nepletla s chybou (červená) ani s akcentem Fragile */
+  --attn: #b8620b;
+  --attn-soft: #fbeedd;
+  /* dopočítané sloupce plánu */
+  --calc-bg: #f4f4f6;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -68,6 +73,9 @@
     --bad: #ff8a85;
     --bad-soft: #4a1f2e;
     --idle-soft: #262058;
+    --attn: #f2a65a;
+    --attn-soft: #3d2a18;
+    --calc-bg: #1f1a52;
   }
 }
 
@@ -421,11 +429,10 @@ td.qcol .cellbox { background: transparent; }
 
 /* jednotková cena */
 .pricecell { display: inline-flex; align-items: baseline; gap: 4px; justify-content: flex-end; }
-.pricecell .cell { width: 62px; text-align: right; padding: 2px 5px; }
-.pricecell i {
-  font-style: normal; font-size: 9px; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .06em;
-}
+.pricecell { flex-direction: column; align-items: flex-end; gap: 1px; }
+.pricecell .cell { width: 86px; text-align: right; padding: 2px 5px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); }
+.pricecell .cell::placeholder { color: var(--muted); font-style: italic; }
+.pricecell i { font-style: normal; font-size: 10px; color: var(--muted); }
 
 /* proužky v souhrnu zásahu */
 .minibar {
@@ -605,16 +612,16 @@ td.qcol .cellbox { background: transparent; }
    plánu jinak odjely a nešlo poznat, který řádek se upravuje. Řádky bloků
    a součtů se neukotvují: přes celou šířku by překryly měsíce. */
 table.plan thead th:nth-child(-n+2),
-table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(-n+2) {
+table.plan tbody tr.trow td:nth-child(-n+2) {
   position: sticky; z-index: 3; background: var(--surface);
 }
 /* nad řádky bloků (25) i patičkou (30), stejně jako ostatní záhlaví (40) */
 table.plan thead th:nth-child(-n+2) { z-index: 45; }
 table.plan thead th:nth-child(2) { box-shadow: inset -1px 0 0 var(--line-strong), inset 0 -1px 0 0 var(--line-strong); }
-table.plan thead th:nth-child(1), table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(1) { left: 0; }
-table.plan thead th:nth-child(2), table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(2) { left: 28px; }
-table.plan tbody tr:not(.grp):not(.emptygrp) td:nth-child(2) { box-shadow: inset -1px 0 0 var(--line-strong); }
-table.plan tbody tr:not(.grp):not(.emptygrp):hover td:nth-child(-n+2) { background: var(--surface-2); }
+table.plan thead th:nth-child(1), table.plan tbody tr.trow td:nth-child(1) { left: 0; }
+table.plan thead th:nth-child(2), table.plan tbody tr.trow td:nth-child(2) { left: 28px; }
+table.plan tbody tr.trow td:nth-child(2) { box-shadow: inset -1px 0 0 var(--line-strong); }
+table.plan tbody tr.trow:hover td:nth-child(-n+2) { background: var(--surface-2); }
 /* měsíc nesmí spadnout pod šířku, do které se vejde 1 500 000 */
 table.plan td.budgetcell { min-width: 96px; }
 
@@ -893,6 +900,8 @@ table.catalog-defaults td:first-child { min-width: 170px; }
 input.defaultinput { width: 72px; text-align: right; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
 input.defaultinput:placeholder-shown { border-style: dashed; }
 .estresult { white-space: nowrap; }
+/* cílovka jen jako text — model s ní nepočítá */
+.tgfree { color: var(--warn, #b26a00); font-size: 11px; margin-left: 4px; cursor: help; }
 .catalog-row .btn.danger { opacity: 0; }
 .catalog-row:hover .btn.danger, .catalog-row .btn.danger:focus-visible { opacity: 1; }
 /* kód sdělení pod názvem jde přepnout — vypadá jako text, šipka až pod myší */
@@ -919,3 +928,54 @@ input.estinput:focus { border-style: solid !important; }
 input.estinput.esttext { width: 130px; text-align: left; }
 input.estinput::placeholder { color: var(--muted); font-style: italic; }
 .estderived { color: var(--muted); font-style: italic; }
+
+/* ---- zadání plánu: hlavička sdělení, řádek, detail (listopad 2026) ---- */
+/* vyplňuje se vlevo, dopočítává vpravo — šedé pozadí a žádné rámečky */
+table.plan th.calc { background: color-mix(in srgb, var(--calc-bg) 70%, var(--surface-2)); }
+table.plan td.calc { background: var(--calc-bg); color: var(--ink-2); white-space: nowrap; }
+table.plan .calcfirst { border-left: 2px solid var(--line-strong); }
+table.plan td.calc .sub { font-size: 10px; color: var(--muted); }
+table.plan td.calc.estderived { font-style: italic; }
+.legend { display: inline-flex; align-items: center; gap: 5px; }
+.legend .lg-in, .legend .lg-calc { display: inline-block; width: 11px; height: 11px; border-radius: 2px; vertical-align: -1px; }
+.legend .lg-in { border: 1px solid var(--line-strong); background: var(--surface); }
+.legend .lg-calc { background: var(--calc-bg); margin-left: 6px; }
+
+table.plan tr.linehead td { background: color-mix(in srgb, var(--brand-soft) 35%, var(--surface)); border-top: 1px solid var(--line); }
+table.plan tr.linehead td.calc { background: color-mix(in srgb, var(--brand-soft) 25%, var(--calc-bg)); }
+.linehead-box { position: sticky; left: 36px; display: inline-flex; align-items: flex-end; gap: 10px; padding: 4px 0; flex-wrap: nowrap; }
+.linecode { font-size: 10.5px; color: var(--muted); letter-spacing: .04em; padding-bottom: 7px; white-space: nowrap; }
+.lf { display: flex; flex-direction: column; gap: 2px; font-size: 12px; min-width: 0; }
+.lf > span { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.lf .txt, .lf select { border: 1px solid var(--line-strong) !important; border-radius: 4px; background: var(--surface); min-height: 28px; }
+.lf-msg input { width: 230px; font-weight: 500; }
+.lf select { max-width: 240px; }
+.lf-warn > span { color: var(--attn); }
+.lf-warn select { border-color: var(--attn) !important; box-shadow: 0 0 0 2px var(--attn-soft); }
+.lf .themecell { min-height: 28px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); padding: 3px 8px; min-width: 110px; text-align: left; }
+.btn.lineadd { font-size: 11px; padding: 3px 10px; margin-bottom: 1px; white-space: nowrap; }
+
+table.plan tr.trow { cursor: default; }
+table.plan tr.trow.opened td { background: color-mix(in srgb, var(--brand-soft) 30%, var(--surface)); }
+table.plan tr.trow.opened td.calc { background: color-mix(in srgb, var(--brand-soft) 20%, var(--calc-bg)); }
+table.plan select.need { border-color: var(--attn) !important; color: var(--attn); }
+table.plan .rowname { font-size: 10.5px; color: var(--muted); padding: 1px 6px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.buyfixed { font-size: 11px; color: var(--muted); padding-left: 6px; }
+.pricecell .cell.need { border-color: var(--attn); }
+
+.stdot { width: 11px; height: 11px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; display: inline-block; }
+.stdot.ok { background: var(--ok); }
+.stdot.warn { background: var(--attn); }
+.stdot.off { background: var(--line-strong); }
+.stdot:focus-visible { box-shadow: 0 0 0 3px var(--brand-soft); outline: none; }
+
+table.plan tr.rowdetail td { background: color-mix(in srgb, var(--brand-soft) 18%, var(--surface)); border-bottom: 1px solid var(--line-strong); }
+.rowdetail-box { position: sticky; left: 36px; max-width: min(1100px, calc(100vw - 320px)); padding: 8px 0 10px; }
+.rd-msgs { font-size: 12px; margin-bottom: 8px; line-height: 1.6; }
+.rd-msgs.warn { color: var(--attn); }
+.rd-msgs.off { color: var(--muted); }
+.rd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 14px; }
+.rd-grid .lf input { width: 100%; }
+.rd-calc > div { padding: 5px 0; color: var(--ink-2); }
+.rd-grid input.estinput { width: 100%; text-align: left; border: 1px solid var(--line-strong) !important; border-radius: 4px; min-height: 28px; background: var(--surface); }
+.rd-grid input.estinput::placeholder { color: var(--muted); font-style: italic; }

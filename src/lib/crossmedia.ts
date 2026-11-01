@@ -26,19 +26,21 @@ const GRP_PRICED: ChannelType[] = ["TV", "Rádio"];
 export const isGrpPriced = (t: ChannelType) => GRP_PRICED.includes(t);
 
 /**
- * Cenový model položky: CPP u TV a rádia (dané nosičem), jinak CPM, nebo CPC
- * (cena za klik — search, výkonnostní kampaně). U CPC se z rozpočtu dopočítají
- * kliky; imprese ani zásah se z kliků určit nedají, takže CPC položky do modelu
- * zásahu nevstupují.
+ * Cenový model položky: CPP u TV a rádia (dané nosičem), jinak CPM, CPC
+ * (cena za klik — nativní reklama, search), nebo fix (balík za pevnou cenu
+ * s garantovanými impresemi). U CPC se z rozpočtu dopočítají kliky a přes CTR
+ * imprese — bez CTR položka do modelu zásahu nevstoupí. Fix se do modelu
+ * dostane přes efektivní CPM = rozpočet ÷ imprese × 1000.
  */
-export type Pricing = "cpm" | "cpc";
+export type Pricing = "cpm" | "cpc" | "fix";
 export const isCpc = (t: ChannelType, pricing?: Pricing | null) => !isGrpPriced(t) && pricing === "cpc";
 
 /** Jak se u daného nosiče a cenového modelu jmenuje jednotková cena. */
 export const priceLabel = (t: ChannelType, pricing?: Pricing | null) =>
-  isGrpPriced(t) ? "CPP" : pricing === "cpc" ? "CPC" : "CPM";
+  isGrpPriced(t) ? "CPP" : pricing === "cpc" ? "CPC" : pricing === "fix" ? "imprese" : "CPM";
 export const priceHint = (t: ChannelType, pricing?: Pricing | null) =>
-  isGrpPriced(t) ? "Kč za jeden GRP" : pricing === "cpc" ? "Kč za jeden klik" : "Kč za tisíc impresí";
+  isGrpPriced(t) ? "Kč za jeden GRP" : pricing === "cpc" ? "Kč za jeden klik"
+  : pricing === "fix" ? "Garantované imprese za celé období — z nich a z rozpočtu vyjde efektivní CPM" : "Kč za tisíc impresí";
 
 export const UNIT_LABEL: Record<PlanUnit, string> = {
   budget: "Rozpočet",
@@ -131,6 +133,8 @@ export type TacticInput = {
   unitPrice: number;
   universe: number;
   curve?: Curve;
+  /** míra prokliku 0–1 — u CPC z ní vychází imprese (kliky ÷ CTR) */
+  ctr?: number | null;
 };
 
 export type Derived = {
@@ -163,11 +167,20 @@ export function derive(t: TacticInput): Derived {
 
   if (!v || v <= 0) return EMPTY;
 
-  // CPC: rozpočet ↔ kliky; imprese a zásah z kliků určit nejde
+  // CPC: rozpočet ↔ kliky; imprese až přes CTR (kliky ÷ CTR), jinak zásah neznáme
   if (isCpc(channelType, t.pricing)) {
-    if (driver === "clicks") return { ...EMPTY, clicks: v, budget: v * p, missing: p > 0 ? null : "price" };
-    const budget = driver === "budget" ? v : 0;
-    return { ...EMPTY, budget, clicks: p > 0 ? budget / p : 0, missing: p > 0 ? null : "price" };
+    const clicks = driver === "clicks" ? v : p > 0 && driver === "budget" ? v / p : 0;
+    const budget = driver === "clicks" ? v * p : driver === "budget" ? v : 0;
+    const missing = p > 0 ? null : "price" as const;
+    const ctr = t.ctr && t.ctr > 0 ? t.ctr : 0;
+    if (!ctr || !clicks || U <= 0) return { ...EMPTY, budget, clicks, missing };
+    const impressions = clicks / ctr;
+    const grp = (impressions / U) * 100;
+    const reach = reachFromGrp(grp, curve);
+    return {
+      budget, grp, impressions, reach, reachPeople: reach * U,
+      frequency: reach > 0 ? grp / (reach * 100) : 0, clicks, missing,
+    };
   }
 
   let budget = 0;

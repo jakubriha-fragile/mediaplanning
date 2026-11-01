@@ -140,7 +140,7 @@ export async function getDashboard(
       if (!b) continue;
       const price = ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice);
       const d = derive({
-        channelType: r.channelType, pricing: r.pricing, driver: b.driver as PlanUnit, driverValue: b.driverValue,
+        channelType: r.channelType, pricing: r.pricing, ctr: ctx.ctrFor(r), driver: b.driver as PlanUnit, driverValue: b.driverValue,
         unitPrice: price.unitPrice, universe: ctx.universeOf(r.targetGroupId),
         curve: ctx.curveOf(r.channelType, r.targetGroupId),
       });
@@ -189,7 +189,7 @@ export async function getDashboard(
         if (!b) continue;
         const price = ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice);
         const d = derive({
-          channelType: r.channelType, pricing: r.pricing, driver: b.driver as PlanUnit, driverValue: b.driverValue,
+          channelType: r.channelType, pricing: r.pricing, ctr: ctx.ctrFor(r), driver: b.driver as PlanUnit, driverValue: b.driverValue,
           unitPrice: price.unitPrice, universe: ctx.universeOf(r.targetGroupId),
           curve: ctx.curveOf(r.channelType, r.targetGroupId),
         });

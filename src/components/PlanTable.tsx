@@ -4,16 +4,16 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
-  setTacticThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks, setTacticCatalog, autofillCatalog, setRowPricing,
+  setTacticThemes, setLineThemes, createTheme, renameCampaign, setPlannedBudgets, setPlannedWeeks, setTacticCatalog, autofillCatalog, setRowPricing,
+  setFixImpressions, linkLineTargetGroups,
   setTacticEstimate,
   spreadMonthToWeeks,
 } from "@/lib/actions";
 import type { CatalogMedium } from "@/lib/catalog";
-import { estimate, sumEstimates, type Estimate } from "@/lib/estimates";
+import { estimate, type Estimate } from "@/lib/estimates";
 import { costKind } from "@/lib/costKind";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
-import { Combo, type ComboOption } from "@/components/Combo";
-import { isGrpPriced, priceLabel, priceHint, UNIT_LABEL } from "@/lib/crossmedia";
+import { isGrpPriced, priceHint, UNIT_LABEL } from "@/lib/crossmedia";
 import type { ChannelType, PlanUnit } from "@/db/schema";
 
 export type PlanRow = {
@@ -32,8 +32,12 @@ export type PlanRow = {
   name: string;
   mediaType: "Paid" | "Owned" | "Earned";
   channelType: ChannelType;
-  /** cenový model: CPM, nebo CPC; null = podle nosiče */
-  pricing: "cpm" | "cpc" | null;
+  /** cenový model: CPM, CPC, nebo fix (balík s garantovanými impresemi); null = podle nosiče */
+  pricing: "cpm" | "cpc" | "fix" | null;
+  /** garantované imprese za období u nákupu „fix" */
+  fixImpressions: number | null;
+  /** cílovka sdělení z číselníku (null = jen text, platí cílovka plánu) */
+  lineTargetGroupId: string | null;
   /** kreativa / formáty */
   creative: string | null;
   /** předpoklady odhadu výsledků (src/lib/estimates.ts) */
@@ -100,7 +104,7 @@ const VIEWS: Array<{ key: View; label: string; title: string }> = [
 ];
 
 /** Jednotky podle cenového modelu: u CPC rozpočet nebo kliky, jinak rozpočet, GRP, imprese. */
-const unitsFor = (ct: ChannelType, pricing: "cpm" | "cpc" | null): PlanUnit[] =>
+const unitsFor = (ct: ChannelType, pricing: "cpm" | "cpc" | "fix" | null): PlanUnit[] =>
   !isGrpPriced(ct) && pricing === "cpc" ? ["budget", "clicks"] : ["budget", "grp", "impressions"];
 
 /** Sloupec tabulky je buď měsíc, nebo sbalený kvartál. */
@@ -109,29 +113,23 @@ type Col =
   | { kind: "q"; key: string; label: string; months: string[] }
   | { kind: "w"; key: string; label: string; months: string[]; title: string };
 
-// Vždy viditelné: úchyt, sdělení, typ (Paid/Owned/Earned), kanál, oblast, nosič.
-// Pod „Podrobnostmi" fáze a cílení, u agentury navíc jednotka a cena — mění se
-// zřídka a plánovač je nepotřebuje mít před očima pořád.
-const BASE_COLS = 7;
-const RIGHT_COLS = 4;  // celkem, podíl, doručení, smazat
+// Zadání plánu (návrh se zadavatelem, listopad 2026): sdělení se popíše jednou
+// v hlavičce (fáze, cílová skupina, oblast), řádek má jen to, co se u nákupu
+// opravdu zadává — kde, typ, nákup, cena a rozpočet. Vpravo šedě, co se dopočítá.
+// Dřív měl řádek 12 sloupců a polovinu z nich opakovaně u každé taktiky.
+const LEFT_COLS = 5;   // úchyt, kde, typ, nákup, cena
+const RIGHT_COLS = 7;  // celkem, imprese, kliky, zásah, frekvence, stav, smazat
 
-/**
- * Odhad výsledků — sloupce vpravo. Cena je ve sloupci Cena, zásah z modelu;
- * zadává se jen CTR a konverzní poměr, a to jen tam, kde se liší od výchozích
- * hodnot platformy. U TV, rádia a agenturní práce se nezadává nic.
- */
-type EstKey = "ctr" | "cr" | "result" | "measurement";
-const EST_COLS: Array<{ k: EstKey; label: string; title: string; input?: "pct" | "text" }> = [
-  { k: "ctr", label: "CTR %", title: "Míra prokliku. Prázdné = výchozí hodnota platformy (šedě), nastavuje se v Nastavení → Média a platformy", input: "pct" },
-  { k: "cr", label: "Konv. %", title: "Konverzní poměr z kliků. Prázdné = výchozí hodnota platformy (šedě)", input: "pct" },
-  { k: "result", label: "Odhad výsledků", title: "Kliky, konverze a CPA z doručení a předpokladů; zásah 1+ z modelu. Modelový odhad, ne měření." },
-  { k: "measurement", label: "Měření", title: "Jak se výsledek měří (brandlift, GA4…)", input: "text" },
-];
+/** Jak se položka nakupuje — u TV a rádia vždy CPP. */
+const BUY_LABEL = { cpm: "CPM", cpc: "CPC", fix: "Fix", cpp: "CPP" } as const;
+const BUY_UNIT = { cpm: "Kč / 1 000 imp.", cpc: "Kč / klik", fix: "imp. za období", cpp: "Kč / GRP" } as const;
 
 export function PlanTable({
   rows, campaigns, planId, months, monthLabels, quarters, periodName, canEditPlan, undoLabel, clientView = false,
-  themes = [], weeks = null, catalog = [],
+  themes = [], weeks = null, catalog = [], targetGroups = [],
 }: {
+  /** cílové skupiny klienta s velikostí — výběr u sdělení */
+  targetGroups?: Array<{ id: string; name: string; universe: number }>;
   /** číselník médií a platforem */
   catalog?: CatalogMedium[];
   /** plán po týdnech — sloupce jsou týdny, sbalit jde po měsících */
@@ -150,31 +148,10 @@ export function PlanTable({
   /** tematické oblasti klienta */
   themes?: ThemeOption[];
 }) {
-  const [details, setDetails] = useState(false);
-  const [showEst, setShowEst] = useState(false);
-  useEffect(() => {
-    try { setShowEst(localStorage.getItem("plan.odhad") === "1"); } catch { /* bez úložiště */ }
-  }, []);
-  const toggleEst = () => setShowEst((v) => {
-    try { localStorage.setItem("plan.odhad", v ? "0" : "1"); } catch { /* bez úložiště */ }
-    return !v;
-  });
-  const rightCols = RIGHT_COLS + (showEst && !clientView ? EST_COLS.length : 0);
-  useEffect(() => {
-    try { setDetails(localStorage.getItem("plan.podrobnosti") === "1"); } catch { /* bez úložiště */ }
-  }, []);
-  const toggleDetails = () => {
-    setDetails((d) => {
-      try { localStorage.setItem("plan.podrobnosti", d ? "0" : "1"); } catch { /* bez úložiště */ }
-      return !d;
-    });
-  };
-  // jednotka a cena jsou vidět vždy — zadat CPM a rozpočet a nechat dopočítat
-  // imprese je běžná práce plánovače, ne „podrobnost"
-  const showUnit = !clientView && !BUDGET_ONLY;
-  // cena (CPM/CPC/CPP) je vidět i v režimu jen Kč — z ní se dopočítají prokliky a imprese
-  const showPrice = !clientView;
-  const leftCols = BASE_COLS + (details ? 3 : 0) + (showUnit ? 1 : 0) + (showPrice ? 1 : 0);
+  const leftCols = clientView ? 3 : LEFT_COLS;
+  const rightCols = RIGHT_COLS;
+  /** rozbalený detail řádku (kreativa, měření, CTR, oblast řádku, co chybí) */
+  const [open, setOpen] = useState<string | null>(null);
   const [data, setData] = useState(rows);
   const [themeList, setThemeList] = useState<ThemeOption[]>(themes);
   const [pending, startTransition] = useTransition();
@@ -301,20 +278,52 @@ export function PlanTable({
       ctr: r.est.ctr ?? plat?.ctr, cr: r.est.cr ?? plat?.cr,
     });
   };
-  /** Doručení řádku za období — jedna jednotka podle toho, jak se položka nakupuje. */
-  const deliveryOf = (r: PlanRow): { text: string; hint: string } => {
-    const sum = (k: "clicks" | "impressions" | "grp") => months.reduce((s, m) => s + (r.cells[m]?.[k] ?? 0), 0);
-    if (!isGrpPriced(r.channelType) && r.pricing === "cpc") {
-      const v = sum("clicks");
-      return v ? { text: `${kc(v)} prokliků`, hint: "Z rozpočtu a CPC" } : { text: "—", hint: "Doplňte CPC v ceně" };
-    }
-    if (isGrpPriced(r.channelType)) {
-      const v = sum("grp");
-      // u TV a rádia se plánuje v TRP — GRP v cílové skupině kampaně (tak je bere i import z Excelu)
-      return v ? { text: `${(Math.round(v * 10) / 10).toLocaleString("cs-CZ")} TRP`, hint: "TRP = GRP v cílové skupině kampaně; z rozpočtu a ceny za bod (CPP)" } : { text: "—", hint: "Doplňte cenu za bod (CPP) v ceně" };
-    }
-    const v = sum("impressions");
-    return v ? { text: `${unitFmt(v, "impressions")} imp.`, hint: "Z rozpočtu a CPM (nebo z ceníku)" } : { text: "—", hint: "Doplňte CPM v ceně nebo v ceníku" };
+  /** dní v měsíci — frekvence se řídí týdně (invariant 12) */
+  const daysIn = (m: string) => { const [y, mo] = m.split("-").map(Number); return new Date(Date.UTC(y, mo, 0)).getUTCDate(); };
+  const buyOf = (r: PlanRow): keyof typeof BUY_LABEL => isGrpPriced(r.channelType) ? "cpp" : r.pricing ?? "cpm";
+  /** Co řádek doručí za období — všechno dopočtené, nic se tu nezadává. */
+  const calcOf = (r: PlanRow) => {
+    const sum = (k: "impressions" | "grp") => months.reduce((s, m) => s + (r.cells[m]?.[k] ?? 0), 0);
+    const media = costKind(r.channel) === "media";
+    const est = estOf(r);
+    const grp = sum("grp");
+    const reach = r.reachPct ?? 0;
+    // týdny, kdy řádek běží — u měsíční kampaně by průměr přes celý rok frekvenci rozředil k nule
+    const activeWeeks = months.filter((m) => (r.budgets[m] ?? 0) > 0).reduce((s, m) => s + daysIn(m), 0) / 7;
+    return {
+      media,
+      budget: budgetOf(r),
+      impressions: media ? sum("impressions") : 0,
+      grp,
+      clicks: media ? est.clicks ?? 0 : 0,
+      clicksDerived: est.derived.clicks,
+      reach,
+      freqWeek: reach > 0 && activeWeeks > 0 ? grp / (reach * 100) / activeWeeks : 0,
+      est,
+    };
+  };
+  /**
+   * Stav řádku: co chybí, aby se počítal. Hlášky jsou návod, co doplnit —
+   * dřív se to plánovač dozvěděl jen z pomlčky a tooltipu.
+   */
+  const statusOf = (r: PlanRow): { level: "ok" | "warn" | "off"; msgs: string[] } => {
+    const c = calcOf(r);
+    if (!c.media) return { level: "off", msgs: ["Agenturní práce nebo honorář (pozná se podle názvu položky) — do doručení a zásahu se nepočítá."] };
+    if (!c.budget) return { level: "off", msgs: ["Bez rozpočtu — zadejte částky do měsíců."] };
+    const msgs: string[] = [];
+    const buy = buyOf(r);
+    if (!r.mediumId) msgs.push("Vyberte, kde se nakupuje (médium › platforma).");
+    if (buy === "fix" && !r.fixImpressions) msgs.push("Doplňte garantované imprese za období do sloupce Cena.");
+    else if (buy === "cpc" && !c.clicks) msgs.push("Doplňte cenu za klik (CPC) — u řádku, nebo jako výchozí u platformy v Nastavení.");
+    else if (buy === "cpc" && !c.impressions) msgs.push("Doplňte CTR v detailu řádku (nebo u platformy) — bez něj se z kliků nedají spočítat imprese, zásah ani frekvence.");
+    else if (!c.impressions) msgs.push(`Doplňte cenu (${BUY_LABEL[buy]}) — u řádku, nebo jako výchozí u platformy či v ceníku.`);
+    if (!r.lineTargetGroupId) msgs.push("Sdělení nemá cílovou skupinu ze seznamu — zásah a frekvence se počítají s cílovou skupinou plánu.");
+    return { level: msgs.length ? "warn" : "ok", msgs };
+  };
+  /** výchozí cena platformy (šedě v poli Cena), dokud se nezadá vlastní */
+  const defaultPriceOf = (r: PlanRow): number | null => {
+    const p = platformOf(r);
+    return r.pricing === "cpc" ? p?.cpc ?? null : r.pricing === "fix" || isGrpPriced(r.channelType) ? null : p?.cpm ?? null;
   };
   const fmtSum = (v: number) => (sumKey === "budget" ? kc(v) : unitFmt(v, sumKey) || "0");
   const grand = data.reduce((s, r) => s + rowTotal(r), 0);
@@ -441,20 +450,19 @@ export function PlanTable({
   };
 
 
-  const lineOptions: ComboOption[] = useMemo(() => {
-    const seen = new Map<string, ComboOption>();
-    for (const r of rows) {
-      if (!seen.has(r.messageLineId)) {
-        seen.set(r.messageLineId, { value: r.messageLineId, label: r.message, hint: `${r.code} · ${r.campaign}` });
-      }
-    }
-    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "cs"));
-  }, [rows]);
 
   const campaignLines = (campaignId: string) =>
     campaigns.find((c) => c.id === campaignId)?.lines ?? [];
   /** text sdělení podle linky — do nabídky „přesunout pod sdělení" */
   const lineText = useMemo(() => new Map(rows.map((r) => [r.messageLineId, r.message])), [rows]);
+
+  /** nová oblast z editoru — u sdělení i u řádku */
+  const createThemeFor = async (name: string) => {
+    const res = await createTheme({ planId, name });
+    if (!res.ok || !res.themeId) { setError(res.ok ? "Oblast se nepodařilo založit." : res.error); return null; }
+    setThemeList((l) => l.some((t) => t.id === res.themeId) ? l : [...l, { id: res.themeId!, name }]);
+    return res.themeId;
+  };
 
   return (
     <div className="panel sticky">
@@ -511,16 +519,9 @@ export function PlanTable({
               className={view === v.key ? "on" : ""} onClick={() => pickView(v.key)}>{v.label}</button>
           ))}
         </div>}
-        {!clientView && (
-          <button className="btn" aria-pressed={showEst} onClick={toggleEst}
-            title="Předpoklady (CPM, CPC, CTR, konverzní poměr, frekvence) a dopočtené imprese, kliky, konverze, CPA a zásah">
-            {showEst ? "Skrýt odhad výsledků" : "Odhad výsledků"}
-          </button>
-        )}
-        <button className="btn" aria-pressed={details} onClick={toggleDetails}
-          title="Fáze, cílení a u agentury jednotka a cena položky">
-          {details ? "Skrýt podrobnosti" : "Podrobnosti"}
-        </button>
+        <span className="share legend" title="Bílá pole s rámečkem vyplňujete, šedé sloupce vpravo se dopočítají">
+          <span className="lg-in" /> vyplňujete <span className="lg-calc" /> dopočítá se
+        </span>
         {canEditPlan && <UndoButton undoLabel={undoLabel} pending={pending} onUndo={() => run(() => {}, () => {}, undoLast)} />}
         {canEditPlan && <NewCampaignButton onCreate={(name) => run(() => {}, () => {}, () => createCampaign({ planId, name }))} />}
         <span className="share">
@@ -551,6 +552,27 @@ export function PlanTable({
           })}>Doplnit podle názvů</button>
         </div>
       )}
+      {canEditPlan && (() => {
+        // sdělení s cílovkou jen jako text, ke které existuje stejnojmenná cílová skupina
+        const norm = (x: string) => x.trim().toLowerCase().replace(/\s+/g, " ").replace(/[–—]/g, "-");
+        const names = new Set(targetGroups.map((t) => norm(t.name)));
+        const lines = new Map(data.filter((r) => !r.lineTargetGroupId && r.audience && names.has(norm(r.audience))).map((r) => [r.messageLineId, r]));
+        if (!lines.size) return null;
+        return (
+          <div className="banner info" style={{ margin: 0, borderRadius: 0 }}>
+            <span>
+              <b>{lines.size} sdělení má cílovou skupinu jen jako text</b> („{[...lines.values()][0].audience}"…), i když stejnojmenná
+              cílová skupina existuje. Propojením se začne počítat s její velikostí.
+            </span>
+            <span className="spacer" />
+            <button className="btn" disabled={pending} onClick={() => run(() => {}, () => {}, async () => {
+              const res = await linkLineTargetGroups(planId);
+              if (res.ok) setInfo(`Propojeno ${res.linked ?? 0} sdělení. Vrátíte jedním Zpět.`);
+              return res;
+            })}>Propojit podle názvu</button>
+          </div>
+        );
+      })()}
       {info && !error && (
         <div className="banner info" style={{ margin: 0, borderRadius: 0 }}>
           <span>{info}</span>
@@ -565,36 +587,35 @@ export function PlanTable({
           <thead>
             <tr>
               <th style={{ width: 28 }} />
-              <th>Sdělení</th>
-              {details && <th>Fáze</th>}
-              {details && <th>Cílení</th>}
-              {details && <th>Kreativa / formáty</th>}
-              <th>Typ</th>
-              <th title="Kde se nakupuje (Google Ads, Meta Ads, Nova…). Určuje nosič.">Médium</th>
-              <th title="Typ kampaně nebo prostor v médiu (Search, Performance Max, YouTube…)">Platforma</th>
-              <th title="Na kterou tematickou oblast položka míří — u smíšených podíl v %">Oblast</th>
-              <th>Nosič</th>
-              {showUnit && <th>Jednotka</th>}
-              {showPrice && <th className="r" title="CPP u TV a rádia (Kč za 1 GRP), jinak CPM (Kč za 1 000 impresí). S rozpočtem se z ní dopočítají imprese nebo GRP.">Cena (Kč)</th>}
+              <th title="Kde se nakupuje: médium a platforma z číselníku (Nastavení → Média a platformy). Určí i nosič — TV, rádio, digitál…">Kde · médium › platforma</th>
+              <th title="Paid / Owned / Earned">Typ</th>
+              {!clientView && <th title="Jak se nakupuje: CPM = za tisíc impresí, CPC = za klik, Fix = balík za pevnou cenu s garantovanými impresemi. TV a rádio vždy CPP (za GRP).">Nákup</th>}
+              {!clientView && <th className="r" title="Cena v jednotce podle nákupu. Šedé číslo je výchozí cena platformy nebo ceník — platí, dokud nezadáte vlastní.">Cena</th>}
               {cols.map((c) => (
                 <th className={`r ${c.kind === "q" ? "qcol" : ""}`} key={c.key}
-                    title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : c.kind === "w" ? `Týden ${c.title}` : undefined}>
+                    title={c.kind === "q" ? `${c.label} — sbaleno, rozbalíte v liště` : c.kind === "w" ? `Týden ${c.title} · rozpočet v Kč` : "Rozpočet v Kč"}>
                   {c.label}
                 </th>
               ))}
-              <th className="r">Celkem ({sumKey === "budget" ? "Kč" : UNIT_LABEL[sumKey].toLowerCase()})</th>
-              <th className="r">Podíl</th>
-              <th className="r" title="Co plán za období doručí: u CPC prokliky, u CPM imprese, u TV a rádia TRP. Počítá se z Kč a ceny.">Doručení</th>
-              {showEst && !clientView && EST_COLS.map((e, i) => (
-                <th key={e.k} className={`r estcol ${e.input ? "estin" : ""} ${i === 0 ? "estfirst" : ""}`} title={e.title}>{e.label}</th>
-              ))}
+              <th className="r calc calcfirst" title="Rozpočet za celé období">Celkem Kč</th>
+              <th className="r calc" title="Imprese za období: z rozpočtu a CPM, u CPC kliky ÷ CTR, u Fix garantované, u TV z GRP a velikosti cílové skupiny">Imprese</th>
+              <th className="r calc" title="Kliky za období: u CPC rozpočet ÷ CPC, jinak imprese × CTR (kurzívou)">Kliky</th>
+              <th className="r calc" title="Zásah 1+ řádku za období z modelu (křivka nosiče, cílová skupina sdělení). Modelový odhad, ne měření. Přes řádky se nesčítá — celkový zásah je v panelu nahoře a v Přehledu.">Zásah</th>
+              <th className="r calc" title="Průměrný počet kontaktů na zasaženého za týden, ve kterém řádek běží">Frekv./týd.</th>
+              <th style={{ width: 24 }} title="Stav řádku — kliknutím otevřete detail" />
               <th style={{ width: 30 }} />
             </tr>
           </thead>
           <tbody>
             {groups.map((g) => {
               const gt = g.rows.reduce((s, r) => s + rowTotal(r), 0);
-              const lines = campaignLines(g.campaignId);
+              const gc = g.rows.map(calcOf);
+              // řádky bloku po sděleních, v pořadí, v jakém v bloku jsou
+              const lineGroups: Array<{ id: string; rows: PlanRow[] }> = [];
+              for (const r of g.rows) {
+                const lg = lineGroups.find((x) => x.id === r.messageLineId);
+                if (lg) lg.rows.push(r); else lineGroups.push({ id: r.messageLineId, rows: [r] });
+              }
               return (
                 <GroupBlock key={g.campaignId}>
                   <tr className={`grp ${dropCamp === g.campaignId ? "dropInto" : ""}`}
@@ -617,16 +638,15 @@ export function PlanTable({
                     }}>
                     <td colSpan={leftCols} style={{ boxShadow: `inset 3px 0 0 0 ${campColor(g.campaign)}` }}>
                       {canEditPlan && (
-                        <span className="grip" draggable title="Přetažením změníte pořadí bloků"
+                        <span className="grip" draggable title="Přetažením změníte pořadí kampaní"
                           onDragStart={() => setDragCamp(g.campaignId)}
                           onDragEnd={() => { setDragCamp(null); setDropCamp(null); }}
                           style={{ marginRight: 8 }}>⠿</span>
                       )}
-                      <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2,
-                        background: campColor(g.campaign), marginRight: 7 }} />
+                      <span className="share" style={{ fontWeight: 300, marginRight: 6 }}>Kampaň</span>
                       {canEditPlan ? (
-                        <input className="txt blockname" defaultValue={g.campaign} aria-label="Název bloku"
-                          title="Klikněte a přepište název bloku"
+                        <input className="txt blockname" defaultValue={g.campaign} aria-label="Název kampaně"
+                          title="Klikněte a přepište název kampaně"
                           size={Math.max(8, g.campaign.length + 1)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
@@ -639,376 +659,440 @@ export function PlanTable({
                             run(() => {}, () => { e.target.value = g.campaign; }, () => renameCampaign({ campaignId: g.campaignId, name }));
                           }} />
                       ) : g.campaign}{" "}
-                      <span className="share" style={{ fontWeight: 300 }}>{g.rows.length} taktik</span>
-                      {canEditPlan && lines[0] && (
-                        <button className="btn blockact" style={{ marginLeft: 10, fontSize: 11, padding: "2px 8px" }}
-                          title="Přidá řádek k prvnímu sdělení bloku — k jinému sdělení použijte „+ řádek“ u něj"
-                          onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: lines[0].id }))}>
-                          + Taktika
-                        </button>
-                      )}
+                      <span className="share" style={{ fontWeight: 300 }}>{lineGroups.length} sděl. · {g.rows.length} řádků</span>
                       {canEditPlan && (
-                        <button className="btn blockact" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
-                          title="Nové sdělení v tomto bloku, rovnou s první taktikou"
+                        <button className="btn" style={{ marginLeft: 10, fontSize: 11, padding: "2px 8px" }}
+                          title="Nové sdělení v této kampani, rovnou s prvním řádkem"
                           onClick={() => run(() => {}, () => {}, () => createMessageLine({ campaignId: g.campaignId }))}>
-                          + Linka sdělení
+                          + sdělení
                         </button>
                       )}
                       {canEditPlan && (
                         <button className="btn danger blockact" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
-                          title="Smazat blok"
+                          title="Smazat kampaň"
                           onClick={() => {
                             const n = g.rows.length;
                             if (n > 0 && !confirm(
-                              `Blok „${g.campaign}" obsahuje ${n} taktik.\n\n` +
+                              `Kampaň „${g.campaign}" obsahuje ${n} řádků.\n\n` +
                               `Smazáním zmizí i všechny jejich rozpočty, metriky a skutečnost. ` +
-                              `Tohle nejde vrátit zpět.\n\nOpravdu smazat celý blok včetně obsahu?`)) return;
-                            if (n === 0 && !confirm(`Smazat prázdný blok „${g.campaign}"?`)) return;
+                              `Tohle nejde vrátit zpět.\n\nOpravdu smazat celou kampaň včetně obsahu?`)) return;
+                            if (n === 0 && !confirm(`Smazat prázdnou kampaň „${g.campaign}"?`)) return;
                             run(() => {}, () => {}, () => deleteCampaign(g.campaignId, n > 0));
-                          }}>Smazat blok</button>
+                          }}>Smazat kampaň</button>
                       )}
                     </td>
                     {cols.map((c) => {
                       const v = g.rows.reduce((s, r) => s + colOf(r, c), 0);
                       return <td className={`r share num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{v ? fmtSum(v) : "–"}</td>;
                     })}
-                    <td className="r num">{fmtSum(gt)}</td>
-                    <td className="r share num">{grand ? pct(gt / grand) : ""}</td>
-                    <td />
-                    {showEst && !clientView && <EstSumCells sum={sumEstimates(g.rows.map((r) => ({ budget: budgetOf(r), est: estOf(r) })))} />}
-                    <td />
+                    <SumCells budget={gt} impressions={gc.reduce((s, x) => s + x.impressions, 0)} clicks={gc.reduce((s, x) => s + x.clicks, 0)} />
                   </tr>
 
                   {!g.rows.length && (
                     <tr className="emptygrp">
                       <td />
                       <td colSpan={leftCols - 1 + cols.length + rightCols}>
-                        Blok zatím nemá žádnou taktiku — přidejte ji tlačítkem „+ Taktika" výše.
+                        Kampaň zatím nemá žádné sdělení — přidejte ho tlačítkem „+ sdělení" výše.
                       </td>
                     </tr>
                   )}
-                  {g.rows.map((r) => {
-                    const dh = dropHint?.id === r.id ? dropHint : null;
+                  {lineGroups.map((lg) => {
+                    const l = lg.rows[0];
+                    const lc = lg.rows.map(calcOf);
+                    // oblast sdělení = oblast jeho řádků; když se liší, řádky mají výjimky
+                    const key = (x: PlanRow) => JSON.stringify([...x.themes].sort((a, b) => a.themeId.localeCompare(b.themeId)).map((t) => [t.themeId, Math.round(t.share * 100)]));
+                    const sameThemes = lg.rows.every((x) => key(x) === key(l));
+                    const lineEditable = canEditPlan && lg.rows.every(rowEditable);
                     return (
-                      <tr key={r.id}
-                        className={dragId === r.id ? "dragging" : dh ? (dh.after ? "dropAfter" : "dropBefore") : ""}
-                        onDragOver={(e) => {
-                          if (dragCamp) return;
-                          if (!dragId || dragId === r.id) return;
-                          e.preventDefault();
-                          const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          setDropHint({ id: r.id, after: e.clientY > box.top + box.height / 2 });
-                        }}
-                        onDrop={(e) => {
-                          if (!dragId || dragId === r.id) return;
-                          e.preventDefault();
-                          const id = dragId, after = dropHint?.after ?? false;
-                          setDragId(null); setDropHint(null);
-                          run(() => {}, () => {}, () => moveTactic({ tacticId: id, targetTacticId: r.id, after }));
-                        }}>
-                        <td style={{ boxShadow: `inset 3px 0 0 0 ${campColor(r.campaign)}`, textAlign: "center" }}>
-                          {canEditPlan && (
-                            <span className="grip" draggable
-                              title="Přetažením změníte pořadí nebo přeřadíte taktiku"
-                              onDragStart={() => setDragId(r.id)}
-                              onDragEnd={() => { setDragId(null); setDropHint(null); }}>⠿</span>
-                          )}
-                        </td>
+                      <GroupBlock key={lg.id}>
+                        <tr className="linehead">
+                          <td style={{ boxShadow: `inset 3px 0 0 0 ${campColor(g.campaign)}` }} />
+                          <td colSpan={leftCols - 1 + cols.length}>
+                            <div className="linehead-box">
+                              <span className="linecode" title="Kód sdělení — přiděluje se sám">{l.code}</span>
+                              <label className="lf lf-msg">
+                                <span>Sdělení</span>
+                                <input className="txt" defaultValue={l.message} key={`msg-${lg.id}-${l.message}`} disabled={!canEditPlan}
+                                  placeholder="např. Brand – podzim"
+                                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                  onBlur={(e) => {
+                                    const v = e.target.value.trim();
+                                    if (!v || v === l.message) { e.target.value = l.message; return; }
+                                    run(() => patchLine(lg.id, { message: v }), () => patchLine(lg.id, { message: l.message }),
+                                        () => updateMessageLine({ messageLineId: lg.id, message: v }));
+                                  }} />
+                              </label>
+                              <label className="lf">
+                                <span>Fáze</span>
+                                <select className="txt" value={l.phase} disabled={!canEditPlan}
+                                  onChange={(e) => {
+                                    const v = e.target.value as (typeof PHASES)[number];
+                                    run(() => patchLine(lg.id, { phase: v }), () => patchLine(lg.id, { phase: l.phase }),
+                                        () => updateMessageLine({ messageLineId: lg.id, phase: v }));
+                                  }}>
+                                  {PHASES.map((p) => <option key={p}>{p}</option>)}
+                                </select>
+                              </label>
+                              <label className={`lf ${l.lineTargetGroupId ? "" : "lf-warn"}`}
+                                title={l.lineTargetGroupId ? "Z velikosti cílové skupiny se počítají GRP, zásah a frekvence všech řádků sdělení"
+                                  : "Vyberte cílovou skupinu ze seznamu — dokud ji sdělení nemá, počítá se s cílovou skupinou plánu. Nové skupiny se zakládají v Nastavení."}>
+                                <span>Cílová skupina</span>
+                                <select className="txt" disabled={!canEditPlan}
+                                  value={l.lineTargetGroupId ?? (l.audience && l.audience !== "—" ? "__text" : "")}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (v === "__text") return;
+                                    const tg = targetGroups.find((t) => t.id === v) ?? null;
+                                    const audience = tg ? tg.name : "";
+                                    const prev = { audience: l.audience, lineTargetGroupId: l.lineTargetGroupId };
+                                    run(() => patchLine(lg.id, { audience, lineTargetGroupId: tg?.id ?? null }), () => patchLine(lg.id, prev),
+                                        () => updateMessageLine({ messageLineId: lg.id, audience, targetGroupId: tg?.id ?? null }));
+                                  }}>
+                                  <option value="">— vyberte —</option>
+                                  {!l.lineTargetGroupId && l.audience && l.audience !== "—" && <option value="__text">„{l.audience}" (jen text, nepočítá se)</option>}
+                                  {targetGroups.map((t) => <option key={t.id} value={t.id}>{t.name} · {kc(t.universe)} osob</option>)}
+                                </select>
+                              </label>
+                              <label className="lf" title={sameThemes ? "Na kterou oblast sdělení míří — platí pro všechny jeho řádky" : "Řádky sdělení mají různé oblasti. Nastavením tady je sjednotíte; výjimku pro jeden řádek uděláte v jeho detailu."}>
+                                <span>Oblast{sameThemes ? "" : " (různé)"}</span>
+                                <ThemeCell
+                                  value={sameThemes ? l.themes : []}
+                                  themes={themeList}
+                                  disabled={!lineEditable}
+                                  onSave={(shares) => {
+                                    const total = shares.reduce((a, x) => a + x.share, 0) || 1;
+                                    const norm = shares.map((x) => ({ ...x, share: x.share / total }));
+                                    const before = new Map(lg.rows.map((x) => [x.id, x.themes]));
+                                    run(() => setData((d) => d.map((x) => (x.messageLineId === lg.id ? { ...x, themes: norm } : x))),
+                                        () => setData((d) => d.map((x) => (before.has(x.id) ? { ...x, themes: before.get(x.id)! } : x))),
+                                        () => setLineThemes({ messageLineId: lg.id, shares: norm }));
+                                  }}
+                                  onCreate={createThemeFor} />
+                              </label>
+                              {canEditPlan && (
+                                <button className="btn lineadd" title={`Přidat řádek ke sdělení „${l.message}"`}
+                                  onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: lg.id }))}>
+                                  + řádek
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <SumCells budget={lg.rows.reduce((s, r) => s + rowTotal(r), 0)}
+                            impressions={lc.reduce((s, x) => s + x.impressions, 0)} clicks={lc.reduce((s, x) => s + x.clicks, 0)} />
+                        </tr>
 
-                        <td style={{ maxWidth: 230, minWidth: 190 }}>
-                          <Combo
-                            value={r.message}
-                            options={lineOptions}
-                            disabled={!canEditPlan}
-                            placeholder="sdělení"
-                            onCommit={(text, opt) => {
-                              // výběr z nabídky = přeřazení pod existující linku,
-                              // vlastní text = přejmenování té současné
-                              if (opt && opt.value !== r.messageLineId) {
-                                run(() => patchRow(r.id, { messageLineId: opt.value, message: opt.label }),
-                                    () => patchRow(r.id, { messageLineId: r.messageLineId, message: r.message }),
-                                    () => updateTactic({ tacticId: r.id, messageLineId: opt.value }));
-                              } else if (text !== r.message) {
-                                run(() => patchLine(r.messageLineId, { message: text }),
-                                    () => patchLine(r.messageLineId, { message: r.message }),
-                                    () => updateMessageLine({ messageLineId: r.messageLineId, message: text }));
-                              }
-                            }} />
-                          <div className="share" style={{ paddingLeft: 6, display: "flex", gap: 8, alignItems: "center" }}>
-                            {canEditPlan ? (
-                              /* přeřazení řádku pod jiné sdělení — např. z -2 na -1; nabídka hlavně z vlastního bloku */
-                              <select className="linesel" value={r.messageLineId} aria-label="Sdělení řádku"
-                                title="Přesunout řádek pod jiné sdělení"
-                                onChange={(e) => {
-                                  const id = e.target.value;
-                                  const prev = { messageLineId: r.messageLineId, message: r.message, code: r.code };
-                                  const target = campaigns.flatMap((c) => c.lines).find((l) => l.id === id);
-                                  run(() => patchRow(r.id, { messageLineId: id, message: lineText.get(id) ?? r.message, code: target?.code ?? r.code }),
-                                      () => patchRow(r.id, prev),
-                                      () => updateTactic({ tacticId: r.id, messageLineId: id }));
-                                }}>
-                                {[...campaigns].sort((a, b) => Number(b.id === r.campaignId) - Number(a.id === r.campaignId)).map((c) => (
-                                  <optgroup key={c.id} label={c.id === r.campaignId ? `${c.name} (tento blok)` : c.name}>
-                                    {c.lines.map((l) => (
-                                      <option key={l.id} value={l.id}>{l.code}{lineText.get(l.id) ? ` · ${lineText.get(l.id)}` : ""}</option>
-                                    ))}
-                                  </optgroup>
-                                ))}
-                              </select>
-                            ) : r.code}
-                            {/* nový řádek patří k TOMUHLE sdělení — tlačítko v bloku přidává k prvnímu */}
-                            {canEditPlan && (
-                              <button className="linkbtn rowadd" title={`Přidat řádek ke sdělení „${r.message}"`}
-                                onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: r.messageLineId }))}>
-                                + řádek
-                              </button>
-                            )}
-                          </div>
-                        </td>
-
-                        {details && <td>
-                          <select className="txt" value={r.phase} disabled={!canEditPlan} style={{ minWidth: 118 }}
-                            onChange={(e) => {
-                              const v = e.target.value as (typeof PHASES)[number], prev = r.phase;
-                              run(() => patchLine(r.messageLineId, { phase: v }),
-                                  () => patchLine(r.messageLineId, { phase: prev }),
-                                  () => updateMessageLine({ messageLineId: r.messageLineId, phase: v }));
-                            }}>
-                            {PHASES.map((p) => <option key={p}>{p}</option>)}
-                          </select>
-                        </td>}
-
-                        {details && <td style={{ minWidth: 120, maxWidth: 170 }}>
-                          <input className="txt" defaultValue={r.audience} disabled={!canEditPlan} title={r.audience}
-                            key={`aud-${r.messageLineId}-${r.audience}`}
-                            onBlur={(e) => {
-                              const v = e.target.value, prev = r.audience;
-                              if (v === prev) return;
-                              run(() => patchLine(r.messageLineId, { audience: v }),
-                                  () => patchLine(r.messageLineId, { audience: prev }),
-                                  () => updateMessageLine({ messageLineId: r.messageLineId, audience: v }));
-                            }} />
-                        </td>}
-                        {details && <td style={{ minWidth: 150, maxWidth: 220 }}>
-                          <input className="txt" defaultValue={r.creative ?? ""} disabled={!canEditPlan} title={r.creative ?? ""}
-                            key={`cr-${r.id}-${r.creative ?? ""}`} placeholder="např. 6s video + banner"
-                            onBlur={(e) => {
-                              const v = e.target.value.trim(), prev = r.creative ?? "";
-                              if (v === prev) return;
-                              run(() => patchRow(r.id, { creative: v || null }), () => patchRow(r.id, { creative: prev || null }),
-                                  () => setTacticEstimate({ tacticId: r.id, field: "creative", value: v || null }));
-                            }} />
-                        </td>}
-
-                        <td>
-                          <select className={`txt pill ${r.mediaType}`} value={r.mediaType} disabled={!canEditPlan}
-                            style={{ width: 84 }}
-                            onChange={(e) => {
-                              const v = e.target.value as PlanRow["mediaType"], prev = r.mediaType;
-                              run(() => patchRow(r.id, { mediaType: v }),
-                                  () => patchRow(r.id, { mediaType: prev }),
-                                  () => updateTactic({ tacticId: r.id, mediaType: v }));
-                            }}>
-                            <option>Paid</option><option>Owned</option><option>Earned</option>
-                          </select>
-                        </td>
-
-                        <td style={{ minWidth: 150 }}>
-                          <select className="txt" value={r.mediumId ?? ""} disabled={!canEditPlan}
-                            title={`${r.channel}${mediumOf(r) ? ` · nosič ${mediumOf(r)!.channelType}` : " — vyberte médium, určí i nosič"}`}
-                            onChange={(e) => {
-                              const m = catalog.find((x) => x.id === e.target.value) ?? null;
-                              const prev = { mediumId: r.mediumId, platformId: r.platformId, channelType: r.channelType };
-                              run(() => patchRow(r.id, { mediumId: m?.id ?? null, platformId: null, ...(m ? { channelType: m.channelType } : {}) }),
-                                  () => patchRow(r.id, prev),
-                                  () => setTacticCatalog({ tacticId: r.id, mediumId: m?.id ?? null, platformId: null }));
-                            }}>
-                            <option value="">— vybrat —</option>
-                            {[...new Set(catalog.map((m) => m.channelType))].map((ct) => (
-                              <optgroup key={ct} label={ct}>
-                                {catalog.filter((m) => m.channelType === ct).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                              </optgroup>
-                            ))}
-                          </select>
-                        </td>
-                        <td style={{ minWidth: 140 }}>
-                          <select className="txt" value={r.platformId ?? ""} disabled={!canEditPlan || !mediumOf(r)}
-                            title={mediumOf(r) ? "Platforma vybraného média" : "Nejdřív vyberte médium"}
-                            onChange={(e) => {
-                              const pid = e.target.value || null, prev = r.platformId;
-                              run(() => patchRow(r.id, { platformId: pid }), () => patchRow(r.id, { platformId: prev }),
-                                  () => setTacticCatalog({ tacticId: r.id, mediumId: r.mediumId, platformId: pid }));
-                            }}>
-                            <option value="">{mediumOf(r) ? "— vybrat —" : "—"}</option>
-                            {mediumOf(r)?.platforms.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                          </select>
-                        </td>
-                        <td style={{ minWidth: 130 }}>
-                          <ThemeCell
-                            value={r.themes}
-                            themes={themeList}
-                            disabled={!canEditPlan}
-                            onSave={(shares) => {
-                              const total = shares.reduce((a, x) => a + x.share, 0) || 1;
-                              const norm = shares.map((x) => ({ ...x, share: x.share / total }));
-                              run(() => patchRow(r.id, { themes: norm }), () => patchRow(r.id, { themes: r.themes }),
-                                  () => setTacticThemes({ tacticId: r.id, shares: norm }));
-                            }}
-                            onCreate={async (name) => {
-                              const res = await createTheme({ planId, name });
-                              if (!res.ok || !res.themeId) { setError(res.ok ? "Oblast se nepodařilo založit." : res.error); return null; }
-                              setThemeList((l) => l.some((t) => t.id === res.themeId) ? l : [...l, { id: res.themeId!, name }]);
-                              return res.themeId;
-                            }} />
-                        </td>
-
-                        <td>
-                          <select className="txt pill" value={r.channelType} disabled={!canEditPlan}
-                            style={{ width: 86 }}
-                            title="Nosič rozhoduje, jestli se nakupuje na GRP nebo na tisíc kontaktů"
-                            onChange={(e) => {
-                              const v = e.target.value as ChannelType, prev = r.channelType;
-                              run(() => patchRow(r.id, { channelType: v }),
-                                  () => patchRow(r.id, { channelType: prev }),
-                                  () => setTacticMedia({ tacticId: r.id, channelType: v }));
-                            }}>
-                            {CHANNEL_TYPES.map((t) => <option key={t}>{t}</option>)}
-                          </select>
-                        </td>
-
-                        {showUnit && <td>
-                          <select className="txt" value={rowUnit(r)} disabled={!rowEditable(r)}
-                            style={{ width: 104 }}
-                            title="Co zadáváte do měsíců. Zbylé jednotky se dopočítají."
-                            onChange={(e) => {
-                              const v = e.target.value as PlanUnit;
-                              run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, driver: v }));
-                            }}>
-                            {unitsFor(r.channelType, r.pricing).map((u) => <option key={u} value={u}>{UNIT_LABEL[u]}</option>)}
-                          </select>
-                        </td>}
-
-                        {showPrice && <td className="r" style={{ whiteSpace: "nowrap" }}>
-                          {/* CPM, nebo CPC — u TV a rádia je cena vždy CPP */}
-                          {!isGrpPriced(r.channelType) && (
-                            <select className="txt pricemodel" value={r.pricing ?? "cpm"} disabled={!rowEditable(r)}
-                              aria-label="Cenový model" title="Nakupuje se za tisíc impresí (CPM), nebo za klik (CPC)?"
-                              onChange={(e) => {
-                                const v = e.target.value as "cpm" | "cpc";
-                                if (rowPrice(r) > 0 && !confirm(`Přepnout na ${v.toUpperCase()}? Cena za jednotku se vynuluje (Kč za tisíc impresí není Kč za klik), rozpočty zůstanou.`)) {
-                                  e.target.value = r.pricing ?? "cpm";
-                                  return;
-                                }
-                                run(() => patchRow(r.id, { pricing: v }), () => patchRow(r.id, { pricing: r.pricing }),
-                                    () => setRowPricing({ tacticId: r.id, pricing: v }));
-                              }}>
-                              <option value="cpm">CPM</option>
-                              <option value="cpc">CPC</option>
-                            </select>
-                          )}
-                          <PriceCell
-                            value={rowPrice(r)}
-                            label={priceLabel(r.channelType, r.pricing)}
-                            hint={priceHint(r.channelType, r.pricing)}
-                            disabled={!rowEditable(r)}
-                            onCommit={(v) => run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, unitPrice: v }))} />
-                        </td>}
-
-                        {cols.map((c) => {
-                          const unit: PlanUnit = BUDGET_ONLY ? "budget" : rowUnit(r);
-                          // měsíc v kvartálu sbalený u měsíčního plánu: jen součet, needituje se
-                          if (c.kind === "q" && !weeks) {
-                            const sum = c.months.reduce((s, m) => s + metricOf(r.cells[m], r.budgets[m], r), 0);
-                            return (
-                              <td key={c.key} className="budgetcell qcol">
-                                <div className="cellbox locked filled" title="Sbalený kvartál — rozbalte v liště, chcete-li editovat">
-                                  <span className="cell num" style={{ display: "block", textAlign: "right", padding: "0 7px" }}>
-                                    {sum ? unitFmt(sum, viewUnit(r)) : "–"}
-                                  </span>
-                                </div>
-                              </td>
-                            );
-                          }
-                          // co buňka nese: měsíc, sbalený měsíc týdenního plánu, nebo týden
-                          const isWeek = c.kind === "w";
-                          const m = c.kind === "w" ? c.months[0] : c.kind === "q" ? c.months[0] : c.key;
-                          const cell = isWeek ? r.weekCells?.[c.key] : r.cells[m];
-                          const budget = isWeek ? cell?.budget ?? 0 : r.budgets[m];
-                          const editable = isWeek ? !!r.weekEditable?.[c.key]
-                            : c.kind === "q" ? (weeks ?? []).filter((w) => w.home === m).every((w) => !!r.weekEditable?.[w.key])
-                            : r.editable[m];
-                          // v jiném zobrazení než v jednotce řádku se jen čte — psát Kč do řádku na GRP by změnilo model
-                          const inUnit = BUDGET_ONLY || view === "input" || view === unit;
-                          const commit = (v: number) => {
-                            const current = BUDGET_ONLY ? budget ?? 0 : cell?.driverValue ?? 0;
-                            if (Math.abs(current - v) < 1e-9) return;
-                            run(() => {}, () => {}, () =>
-                              isWeek ? setPlannedWeeks({ items: [{ tacticId: r.id, week: c.key, driver: unit, value: v }] })
-                              : c.kind === "q" ? spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v })
-                              : setPlannedBudget({ tacticId: r.id, month: m, driver: unit, value: v }));
-                          };
+                        {lg.rows.map((r) => {
+                          const dh = dropHint?.id === r.id ? dropHint : null;
+                          const c = calcOf(r);
+                          const st = statusOf(r);
+                          const buy = buyOf(r);
+                          const plat = platformOf(r);
+                          const isOpen = open === r.id;
                           return (
-                            <td key={c.key} className={`budgetcell ${c.kind === "q" ? "qcol" : ""}`}>
-                              <BudgetCell
-                                value={metricOf(cell, budget, r)}
-                                unit={viewUnit(r)}
-                                budget={budget}
-                                grp={cell?.grp ?? 0}
-                                impressions={cell?.impressions ?? 0}
-                                clicks={cell?.clicks ?? 0}
-                                reach={cell?.reach ?? 0}
-                                actual={isWeek ? 0 : r.actuals[m]}
-                                max={c.kind === "q" ? Math.max(axisMax, ...data.map((x) => x.budgets[m] ?? 0)) : axisMax}
-                                type={r.mediaType}
-                                disabled={!editable || !inUnit}
-                                lockedHint={editable && !inUnit ? `Řádek se plánuje v jednotce ${UNIT_LABEL[unit]} — upravíte ho v zobrazení Zadání` : undefined}
-                                showDerived={false}
-                                estimated={!!cell?.estimated}
-                                grpPriced={isGrpPriced(r.channelType)}
-                                grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(c)}`}
-                                onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(c), dr, dc)}
-                                onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(c))}
-                                onCommit={commit}
-                                // týden: zadané číslo jako rozpočet celého měsíce → rovnoměrně do jeho týdnů
-                                onSpread={isWeek && editable && inUnit
-                                  ? (v) => run(() => {}, () => {}, () => spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v }))
-                                  : undefined}
-                                spreadTitle={`Vzít číslo v buňce jako rozpočet celého měsíce (${monthLabels[m] ?? m}) a rozdělit rovnoměrně do jeho týdnů`} />
-                            </td>
+                            <GroupBlock key={r.id}>
+                              <tr
+                                className={`trow ${isOpen ? "opened" : ""} ${dragId === r.id ? "dragging" : dh ? (dh.after ? "dropAfter" : "dropBefore") : ""}`}
+                                onClick={(e) => {
+                                  // klik mimo pole otevře detail řádku
+                                  if ((e.target as HTMLElement).closest("input, select, button, .grip, .cellbox, .themecell")) return;
+                                  setOpen(isOpen ? null : r.id);
+                                }}
+                                onDragOver={(e) => {
+                                  if (dragCamp) return;
+                                  if (!dragId || dragId === r.id) return;
+                                  e.preventDefault();
+                                  const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  setDropHint({ id: r.id, after: e.clientY > box.top + box.height / 2 });
+                                }}
+                                onDrop={(e) => {
+                                  if (!dragId || dragId === r.id) return;
+                                  e.preventDefault();
+                                  const id = dragId, after = dropHint?.after ?? false;
+                                  setDragId(null); setDropHint(null);
+                                  run(() => {}, () => {}, () => moveTactic({ tacticId: id, targetTacticId: r.id, after }));
+                                }}>
+                                <td style={{ boxShadow: `inset 3px 0 0 0 ${campColor(r.campaign)}`, textAlign: "center" }}>
+                                  {canEditPlan && (
+                                    <span className="grip" draggable
+                                      title="Přetažením změníte pořadí nebo přesunete řádek do jiné kampaně"
+                                      onDragStart={() => setDragId(r.id)}
+                                      onDragEnd={() => { setDragId(null); setDropHint(null); }}>⠿</span>
+                                  )}
+                                </td>
+
+                                <td style={{ minWidth: 220, maxWidth: 280 }}>
+                                  <select className={`txt ${r.mediumId ? "" : "need"}`} disabled={!canEditPlan}
+                                    value={r.platformId ? `p:${r.platformId}` : r.mediumId ? `m:${r.mediumId}` : ""}
+                                    title={`${r.channel}${mediumOf(r) ? ` · nosič ${mediumOf(r)!.channelType}` : " — vyberte, kde se nakupuje"}`}
+                                    onChange={(e) => {
+                                      const [kind, id] = e.target.value.split(":");
+                                      const m = kind === "m" ? catalog.find((x) => x.id === id) ?? null
+                                        : kind === "p" ? catalog.find((x) => x.platforms.some((p) => p.id === id)) ?? null : null;
+                                      const pid = kind === "p" ? id : null;
+                                      const p = m?.platforms.find((x) => x.id === pid) ?? null;
+                                      // typ média podle nosiče — vlastní kanály jsou Owned, PR Earned; jinak se nemění
+                                      const type = m?.channelType === "Vlastní" ? "Owned" : m?.channelType === "PR" ? "Earned" : null;
+                                      // platforma, která se kupuje jen za klik, přepne nákup na CPC
+                                      const toCpc = !!p && !!p.cpc && !p.cpm && r.pricing !== "cpc" && m?.channelType !== "TV" && m?.channelType !== "Rádio";
+                                      const prev = { mediumId: r.mediumId, platformId: r.platformId, channelType: r.channelType, mediaType: r.mediaType, pricing: r.pricing };
+                                      run(() => patchRow(r.id, {
+                                            mediumId: m?.id ?? null, platformId: pid, ...(m ? { channelType: m.channelType } : {}),
+                                            ...(type ? { mediaType: type } : {}), ...(toCpc ? { pricing: "cpc" as const } : {}),
+                                          }),
+                                          () => patchRow(r.id, prev),
+                                          async () => {
+                                            const res = await setTacticCatalog({ tacticId: r.id, mediumId: m?.id ?? null, platformId: pid });
+                                            if (!res.ok) return res;
+                                            if (type && type !== r.mediaType) { const t = await updateTactic({ tacticId: r.id, mediaType: type }); if (!t.ok) return t; }
+                                            if (toCpc) return setRowPricing({ tacticId: r.id, pricing: "cpc" });
+                                            return res;
+                                          });
+                                    }}>
+                                    <option value="">— vyberte —</option>
+                                    {catalog.map((m) => (
+                                      <optgroup key={m.id} label={`${m.name} · ${m.channelType}`}>
+                                        {m.platforms.map((p) => <option key={p.id} value={`p:${p.id}`}>{m.name} › {p.name}</option>)}
+                                        <option value={`m:${m.id}`}>{m.name}{m.platforms.length ? " › bez platformy" : ""}</option>
+                                      </optgroup>
+                                    ))}
+                                  </select>
+                                  <div className="rowname" title={r.channel}>{r.channel}</div>
+                                </td>
+
+                                <td>
+                                  <select className={`txt pill ${r.mediaType}`} value={r.mediaType} disabled={!canEditPlan}
+                                    style={{ width: 84 }}
+                                    onChange={(e) => {
+                                      const v = e.target.value as PlanRow["mediaType"], prev = r.mediaType;
+                                      run(() => patchRow(r.id, { mediaType: v }),
+                                          () => patchRow(r.id, { mediaType: prev }),
+                                          () => updateTactic({ tacticId: r.id, mediaType: v }));
+                                    }}>
+                                    <option>Paid</option><option>Owned</option><option>Earned</option>
+                                  </select>
+                                </td>
+
+                                {!clientView && <td>
+                                  {isGrpPriced(r.channelType) ? (
+                                    <span className="buyfixed" title="TV a rádio se nakupují na GRP — cena za bod (CPP)">CPP</span>
+                                  ) : (
+                                    <select className="txt" value={r.pricing ?? "cpm"} disabled={!rowEditable(r)} style={{ width: 70 }}
+                                      aria-label="Jak se nakupuje" title="CPM = za tisíc impresí, CPC = za klik, Fix = balík za pevnou cenu s garantovanými impresemi"
+                                      onChange={(e) => {
+                                        const v = e.target.value as "cpm" | "cpc" | "fix";
+                                        if (rowPrice(r) > 0 && !confirm(`Přepnout na ${v === "fix" ? "pevnou cenu (Fix)" : v.toUpperCase()}? Zadaná cena se vynuluje (Kč za tisíc impresí není Kč za klik), rozpočty zůstanou.`)) {
+                                          e.target.value = r.pricing ?? "cpm";
+                                          return;
+                                        }
+                                        run(() => patchRow(r.id, { pricing: v }), () => patchRow(r.id, { pricing: r.pricing }),
+                                            () => setRowPricing({ tacticId: r.id, pricing: v }));
+                                      }}>
+                                      <option value="cpm">CPM</option>
+                                      <option value="cpc">CPC</option>
+                                      <option value="fix">Fix</option>
+                                    </select>
+                                  )}
+                                </td>}
+
+                                {!clientView && <td className="r" style={{ whiteSpace: "nowrap" }}>
+                                  {buy === "fix" ? (
+                                    <PriceCell value={r.fixImpressions ?? 0} unit={BUY_UNIT.fix} hint={priceHint(r.channelType, "fix")}
+                                      placeholder="" disabled={!rowEditable(r)}
+                                      onCommit={(v) => run(() => patchRow(r.id, { fixImpressions: v || null }), () => patchRow(r.id, { fixImpressions: r.fixImpressions }),
+                                        () => setFixImpressions({ tacticId: r.id, value: v || null }))} />
+                                  ) : (
+                                    <PriceCell value={rowPrice(r)} unit={BUY_UNIT[buy]} hint={priceHint(r.channelType, r.pricing)}
+                                      placeholder={defaultPriceOf(r) ? `${kc(defaultPriceOf(r)!)}` : months.some((m) => r.cells[m]?.estimated) ? "ceník" : ""}
+                                      disabled={!rowEditable(r)}
+                                      onCommit={(v) => run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, unitPrice: v }))} />
+                                  )}
+                                </td>}
+
+                                {cols.map((col) => {
+                                  const unit: PlanUnit = BUDGET_ONLY ? "budget" : rowUnit(r);
+                                  // měsíc v kvartálu sbalený u měsíčního plánu: jen součet, needituje se
+                                  if (col.kind === "q" && !weeks) {
+                                    const sum = col.months.reduce((s, m) => s + metricOf(r.cells[m], r.budgets[m], r), 0);
+                                    return (
+                                      <td key={col.key} className="budgetcell qcol">
+                                        <div className="cellbox locked filled" title="Sbalený kvartál — rozbalte v liště, chcete-li editovat">
+                                          <span className="cell num" style={{ display: "block", textAlign: "right", padding: "0 7px" }}>
+                                            {sum ? unitFmt(sum, viewUnit(r)) : "–"}
+                                          </span>
+                                        </div>
+                                      </td>
+                                    );
+                                  }
+                                  // co buňka nese: měsíc, sbalený měsíc týdenního plánu, nebo týden
+                                  const isWeek = col.kind === "w";
+                                  const m = col.kind === "w" ? col.months[0] : col.kind === "q" ? col.months[0] : col.key;
+                                  const cell = isWeek ? r.weekCells?.[col.key] : r.cells[m];
+                                  const budget = isWeek ? cell?.budget ?? 0 : r.budgets[m];
+                                  const editable = isWeek ? !!r.weekEditable?.[col.key]
+                                    : col.kind === "q" ? (weeks ?? []).filter((w) => w.home === m).every((w) => !!r.weekEditable?.[w.key])
+                                    : r.editable[m];
+                                  const inUnit = BUDGET_ONLY || view === "input" || view === unit;
+                                  const commit = (v: number) => {
+                                    const current = BUDGET_ONLY ? budget ?? 0 : cell?.driverValue ?? 0;
+                                    if (Math.abs(current - v) < 1e-9) return;
+                                    run(() => {}, () => {}, () =>
+                                      isWeek ? setPlannedWeeks({ items: [{ tacticId: r.id, week: col.key, driver: unit, value: v }] })
+                                      : col.kind === "q" ? spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v })
+                                      : setPlannedBudget({ tacticId: r.id, month: m, driver: unit, value: v }));
+                                  };
+                                  return (
+                                    <td key={col.key} className={`budgetcell ${col.kind === "q" ? "qcol" : ""}`}>
+                                      <BudgetCell
+                                        value={metricOf(cell, budget, r)}
+                                        unit={viewUnit(r)}
+                                        budget={budget}
+                                        grp={cell?.grp ?? 0}
+                                        impressions={cell?.impressions ?? 0}
+                                        clicks={cell?.clicks ?? 0}
+                                        reach={cell?.reach ?? 0}
+                                        actual={isWeek ? 0 : r.actuals[m]}
+                                        max={col.kind === "q" ? Math.max(axisMax, ...data.map((x) => x.budgets[m] ?? 0)) : axisMax}
+                                        type={r.mediaType}
+                                        disabled={!editable || !inUnit}
+                                        lockedHint={editable && !inUnit ? `Řádek se plánuje v jednotce ${UNIT_LABEL[unit]} — upravíte ho v zobrazení Zadání` : undefined}
+                                        showDerived={false}
+                                        estimated={!!cell?.estimated}
+                                        grpPriced={isGrpPriced(r.channelType)}
+                                        grid={`${rowIdx.get(r.id) ?? 0}:${cols.indexOf(col)}`}
+                                        onNav={(dr, dc) => moveFocus(rowIdx.get(r.id) ?? 0, cols.indexOf(col), dr, dc)}
+                                        onPasteGrid={(text) => pasteGrid(text, rowIdx.get(r.id) ?? 0, cols.indexOf(col))}
+                                        onCommit={commit}
+                                        onSpread={isWeek && editable && inUnit
+                                          ? (v) => run(() => {}, () => {}, () => spreadMonthToWeeks({ tacticId: r.id, month: m, driver: unit, value: v }))
+                                          : undefined}
+                                        spreadTitle={`Vzít číslo v buňce jako rozpočet celého měsíce (${monthLabels[m] ?? m}) a rozdělit rovnoměrně do jeho týdnů`} />
+                                    </td>
+                                  );
+                                })}
+
+                                <td className="r num calc calcfirst" style={{ fontWeight: 500 }} title={grand ? `${pct(c.budget / grand)} rozpočtu plánu` : undefined}>{kc(c.budget)}</td>
+                                <td className="r num calc" title={isGrpPriced(r.channelType) && c.grp ? `${(Math.round(c.grp * 10) / 10).toLocaleString("cs-CZ")} TRP` : undefined}>
+                                  {c.impressions ? fmtCount(c.impressions) : "—"}
+                                  {isGrpPriced(r.channelType) && c.grp > 0 && <div className="sub">{(Math.round(c.grp)).toLocaleString("cs-CZ")} TRP</div>}
+                                </td>
+                                <td className={`r num calc ${c.clicksDerived ? "estderived" : ""}`} title={c.clicksDerived ? "Imprese × CTR" : buy === "cpc" ? "Rozpočet ÷ CPC" : undefined}>
+                                  {c.clicks ? fmtCount(c.clicks) : "—"}
+                                </td>
+                                <td className="r num calc">{c.reach ? `${Math.round(c.reach * 100)} %` : "—"}</td>
+                                <td className="r num calc">{c.freqWeek ? `${c.freqWeek.toLocaleString("cs-CZ", { maximumFractionDigits: 1 })}×` : "—"}</td>
+                                <td style={{ textAlign: "center" }}>
+                                  <button className={`stdot ${st.level}`} aria-label="Stav řádku"
+                                    title={st.level === "ok" ? "Vše se počítá. Kliknutím otevřete detail." : st.msgs.join("\n")}
+                                    onClick={() => setOpen(isOpen ? null : r.id)} />
+                                </td>
+                                <td className="r">
+                                  {canEditPlan && (
+                                    <button className="rowdel" title="Smazat řádek"
+                                      onClick={() => {
+                                        if (!confirm(`Smazat řádek „${r.channel}"? Smažou se i jeho rozpočty a metriky.`)) return;
+                                        run(() => setData((d) => d.filter((x) => x.id !== r.id)), () => setData(rows),
+                                            () => deleteTactic(r.id));
+                                      }}>×</button>
+                                  )}
+                                </td>
+                              </tr>
+                              {isOpen && (
+                                <tr className="rowdetail">
+                                  <td />
+                                  <td colSpan={leftCols - 1 + cols.length + rightCols}>
+                                    <div className="rowdetail-box">
+                                      {st.msgs.length > 0 && (
+                                        <div className={`rd-msgs ${st.level}`}>
+                                          {st.msgs.map((m) => <div key={m}>{st.level === "warn" ? "⚠ " : ""}{m}</div>)}
+                                        </div>
+                                      )}
+                                      <div className="rd-grid">
+                                        <label className="lf">
+                                          <span>Název položky</span>
+                                          <input className="txt" defaultValue={r.channel} key={`ch-${r.id}-${r.channel}`} disabled={!canEditPlan}
+                                            title="Vznikne sám z média a platformy. Přepište, je-li potřeba (např. „ag. práce“ — taková položka se do doručení nepočítá)."
+                                            onBlur={(e) => {
+                                              const v = e.target.value.trim();
+                                              if (!v || v === r.channel) { e.target.value = r.channel; return; }
+                                              run(() => patchRow(r.id, { channel: v }), () => patchRow(r.id, { channel: r.channel }),
+                                                  () => updateTactic({ tacticId: r.id, channel: v }));
+                                            }} />
+                                        </label>
+                                        <label className="lf">
+                                          <span>Kreativa / formáty</span>
+                                          <input className="txt" defaultValue={r.creative ?? ""} key={`cr-${r.id}-${r.creative ?? ""}`} disabled={!canEditPlan}
+                                            placeholder="6s video + banner"
+                                            onBlur={(e) => {
+                                              const v = e.target.value.trim(), prev = r.creative ?? "";
+                                              if (v === prev) return;
+                                              run(() => patchRow(r.id, { creative: v || null }), () => patchRow(r.id, { creative: prev || null }),
+                                                  () => setTacticEstimate({ tacticId: r.id, field: "creative", value: v || null }));
+                                            }} />
+                                        </label>
+                                        <label className="lf">
+                                          <span>Měření</span>
+                                          <EstInput kind="text" label={`Měření ${r.name}`} disabled={!canEditPlan} value={r.est.measurement}
+                                            onCommit={(v) => run(() => patchRow(r.id, { est: { ...r.est, measurement: v as string | null } }), () => patchRow(r.id, { est: r.est }),
+                                              () => setTacticEstimate({ tacticId: r.id, field: "measurement", value: v }))} />
+                                        </label>
+                                        {c.media && !isGrpPriced(r.channelType) && (["ctr", "cr"] as const).map((f) => (
+                                          <label className="lf" key={f}
+                                            title={f === "ctr" ? "Míra prokliku. Prázdné = výchozí hodnota platformy (šedě)." : "Konverzní poměr z kliků. Prázdné = výchozí hodnota platformy."}>
+                                            <span>{f === "ctr" ? "CTR %" : "Konverze %"}{(f === "ctr" ? plat?.ctr : plat?.cr) != null ? " · výchozí platformy šedě" : ""}</span>
+                                            <EstInput kind="pct" label={`${f.toUpperCase()} ${r.name}`} disabled={!canEditPlan}
+                                              value={r.est[f]} shown={(f === "ctr" ? plat?.ctr : plat?.cr) ?? undefined}
+                                              onCommit={(v) => run(() => patchRow(r.id, { est: { ...r.est, [f]: v as number | null } }), () => patchRow(r.id, { est: r.est }),
+                                                () => setTacticEstimate({ tacticId: r.id, field: f, value: v }))} />
+                                          </label>
+                                        ))}
+                                        {c.media && c.est.conversions !== null && (
+                                          <div className="lf rd-calc">
+                                            <span>Konverze · CPA (dopočteno)</span>
+                                            <div>{fmtCount(c.est.conversions)} · {c.est.cpa ? `${kc(c.est.cpa)} Kč` : "—"}</div>
+                                          </div>
+                                        )}
+                                        <label className="lf" title="Výjimka z oblasti sdělení — třeba TV spot pro víc produktů rozdělený procenty">
+                                          <span>Oblast řádku</span>
+                                          <ThemeCell value={r.themes} themes={themeList} disabled={!canEditPlan}
+                                            onSave={(shares) => {
+                                              const total = shares.reduce((a, x) => a + x.share, 0) || 1;
+                                              const norm = shares.map((x) => ({ ...x, share: x.share / total }));
+                                              run(() => patchRow(r.id, { themes: norm }), () => patchRow(r.id, { themes: r.themes }),
+                                                  () => setTacticThemes({ tacticId: r.id, shares: norm }));
+                                            }}
+                                            onCreate={createThemeFor} />
+                                        </label>
+                                        {canEditPlan && (
+                                          <label className="lf">
+                                            <span>Přesunout pod sdělení</span>
+                                            <select className="txt" value={r.messageLineId}
+                                              onChange={(e) => {
+                                                const id = e.target.value;
+                                                const prev = { messageLineId: r.messageLineId, message: r.message, code: r.code };
+                                                const target = campaigns.flatMap((x) => x.lines).find((x) => x.id === id);
+                                                run(() => patchRow(r.id, { messageLineId: id, message: lineText.get(id) ?? r.message, code: target?.code ?? r.code }),
+                                                    () => patchRow(r.id, prev),
+                                                    () => updateTactic({ tacticId: r.id, messageLineId: id }));
+                                              }}>
+                                              {[...campaigns].sort((a, b) => Number(b.id === r.campaignId) - Number(a.id === r.campaignId)).map((x) => (
+                                                <optgroup key={x.id} label={x.id === r.campaignId ? `${x.name} (tato kampaň)` : x.name}>
+                                                  {x.lines.map((ln) => (
+                                                    <option key={ln.id} value={ln.id}>{ln.code}{lineText.get(ln.id) ? ` · ${lineText.get(ln.id)}` : ""}</option>
+                                                  ))}
+                                                </optgroup>
+                                              ))}
+                                            </select>
+                                          </label>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </GroupBlock>
                           );
                         })}
-
-                        <td className="r num" style={{ fontWeight: 500 }}>{fmtSum(rowTotal(r))}</td>
-                        <td className="r share num">{grand ? pct(rowTotal(r) / grand) : "—"}</td>
-                        <td className="r num delivery" title={deliveryOf(r).hint}>{deliveryOf(r).text}</td>
-                        {showEst && !clientView && (() => {
-                          const est = estOf(r);
-                          const plat = platformOf(r);
-                          return EST_COLS.map((e, i) => (
-                            <td key={e.k} className={`r num estcol ${e.input ? "estin" : ""} ${i === 0 ? "estfirst" : ""}`}>
-                              {e.k === "result" ? <EstResult est={est} reachPct={r.reachPct} applies={estApplies(r)} fee={costKind(r.channel) !== "media"} />
-                              : (e.k === "ctr" || e.k === "cr") && !estApplies(r) ? null
-                              : (
-                                <EstInput kind={e.input!} label={`${e.label} ${r.name}`} disabled={!canEditPlan}
-                                  value={r.est[e.k]}
-                                  shown={e.k === "ctr" ? plat?.ctr ?? undefined : e.k === "cr" ? plat?.cr ?? undefined : undefined}
-                                  onCommit={(v) => run(() => patchRow(r.id, { est: { ...r.est, [e.k]: v } }), () => patchRow(r.id, { est: r.est }),
-                                    () => setTacticEstimate({ tacticId: r.id, field: e.k as "ctr" | "cr" | "measurement", value: v }))} />
-                              )}
-                            </td>
-                          ));
-                        })()}
-                        <td className="r">
-                          {canEditPlan && (
-                            <button className="rowdel" title="Smazat taktiku"
-                              onClick={() => {
-                                if (!confirm(`Smazat taktiku „${r.channel}"? Smažou se i její rozpočty a metriky.`)) return;
-                                run(() => setData((d) => d.filter((x) => x.id !== r.id)), () => setData(rows),
-                                    () => deleteTactic(r.id));
-                              }}>×</button>
-                          )}
-                        </td>
-                      </tr>
+                      </GroupBlock>
                     );
                   })}
                 </GroupBlock>
@@ -1016,41 +1100,37 @@ export function PlanTable({
             })}
             {!visible.length && (
               <tr><td colSpan={leftCols + cols.length + rightCols} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
-                Žádná taktika neodpovídá filtru.
+                {data.length ? "Žádný řádek neodpovídá filtru." : "Plán je prázdný. Začněte tlačítkem „+ Přidat kampaň“ nahoře, pak v kampani „+ sdělení“."}
               </td></tr>
             )}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={leftCols}>CELKEM {anyFilter ? "(výběr)" : periodName} <span className="share" style={{ fontWeight: 300 }}>{sumKey === "budget" ? "v Kč" : `· ${UNIT_LABEL[sumKey].toLowerCase()}`}</span></td>
+              <td colSpan={leftCols}>CELKEM {anyFilter ? "(výběr)" : periodName} <span className="share" style={{ fontWeight: 300 }}>v Kč</span></td>
               {cols.map((c) => (
                 <td className={`r num ${c.kind === "q" ? "qcol" : ""}`} key={c.key}>{fmtSum(colTotal(c))}</td>
               ))}
-              <td className="r num">{fmtSum(selTotal)}</td>
-              <td className="r num">{grand ? pct(selTotal / grand) : "—"}</td>
-              <td />
-              {showEst && !clientView && <EstSumCells sum={sumEstimates(visible.map((r) => ({ budget: budgetOf(r), est: estOf(r) })))} />}
-              <td />
+              {(() => {
+                const all = visible.map(calcOf);
+                return <SumCells budget={selTotal} impressions={all.reduce((s, x) => s + x.impressions, 0)} clicks={all.reduce((s, x) => s + x.clicks, 0)} strong />;
+              })()}
             </tr>
           </tfoot>
         </table>
       </div>
 
       <div className="note">
-        {canEditPlan && <><b>Jako v Excelu:</b> Enter a šipky přeskakují mezi měsíci, Tab doprava.
+        <b>Jak zadávat:</b> sdělení popíšete jednou v jeho hlavičce (fáze, cílová skupina, oblast) — platí pro všechny jeho řádky.
+        V řádku vyberete, <b>kde</b> se nakupuje, <b>jak</b> (CPM, CPC, Fix; TV a rádio CPP), <b>cenu</b> a rozpočet do měsíců.
+        Šedé sloupce vpravo se dopočítají. Tečka na konci řádku: zelená = vše se počítá, oranžová = něco chybí
+        (kliknutím na řádek otevřete detail s návodem, kreativou, měřením, CTR a oblastí řádku), šedá = agenturní práce nebo bez rozpočtu.
+        {canEditPlan && <><br /><b>Jako v Excelu:</b> Enter a šipky přeskakují mezi měsíci, Tab doprava.
         Blok zkopírovaný z Excelu vložíte Ctrl+V (⌘V) do první buňky — rozloží se doprava a dolů,
-        prázdné buňky nic nepřepíšou a celé vložení vrátíte jedním Zpět.<br /></>}
-        {weeks && <><b>Plán po týdnech:</b> zadáváte týdny, měsíce (i sbalené) jsou jejich součet. Týden přes přelom
-        se do měsíců dělí podle dnů. Přepnout zpět na měsíce jde v Nastavení plánu.<br /></>}
-        Délka pruhu = investice v {weeks ? "týdnu" : "měsíci"} na společném měřítku 0–{kc(axisMax)} Kč, oranžový proužek u dna =
-        skutečné čerpání. Barevný proužek u levého okraje řádku = kampaň.
-        {canEditPlan && <> Úchyt ⠿ u řádku přetáhne taktiku — mezi řádky změní pořadí, na jiný blok ji přesune;
-        úchyt u názvu bloku přetahuje celý blok.</>}
-        <br />
-        <b>Sdělení, fáze a cílová skupina patří lince sdělení</b>, ne jednotlivé taktice — změna se projeví
-        u všech taktik téže linky. Kanál a typ média jsou vlastní každé taktice.
-        Při přesunu taktiky do jiného bloku si <b>své sdělení, fázi i cílovku nese s sebou</b> — v cílovém bloku
-        se použije shodná linka, a když tam žádná není, založí se její kopie.
+        prázdné buňky nic nepřepíšou a celé vložení vrátíte jedním Zpět.</>}
+        {weeks && <><br /><b>Plán po týdnech:</b> zadáváte týdny, měsíce (i sbalené) jsou jejich součet. Týden přes přelom
+        se do měsíců dělí podle dnů. Přepnout zpět na měsíce jde v Nastavení plánu.</>}
+        <br />Zásah a frekvence u řádku jsou modelový odhad, ne měření; přes řádky se nesčítají — celkový zásah je v panelu nahoře a v Přehledu.
+        {canEditPlan && <> Úchyt ⠿ přetáhne řádek (pořadí, jiná kampaň) nebo celou kampaň.</>}
       </div>
     </div>
   );
@@ -1197,18 +1277,18 @@ function BudgetCell({
 
 /** Jednotková cena — CPP u TV a rádia, jinak CPM. */
 function PriceCell({
-  value, label, hint, disabled, onCommit,
-}: { value: number; label: string; hint: string; disabled: boolean; onCommit: (v: number) => void }) {
+  value, unit, hint, placeholder, disabled, onCommit,
+}: { value: number; unit: string; hint: string; placeholder: string; disabled: boolean; onCommit: (v: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? (value ? kc(value) : "");
   return (
-    <span className="pricecell" title={`${label} — ${hint}`}>
+    <span className="pricecell" title={`${unit} — ${hint}${!value && placeholder ? ". Šedě je výchozí hodnota, platí, dokud nezadáte vlastní." : ""}`}>
       <input
-        className="cell num"
+        className={`cell num ${!value && !placeholder ? "need" : ""}`}
         inputMode="numeric"
         disabled={disabled}
         value={shown}
-        placeholder={label}
+        placeholder={placeholder}
         onFocus={(e) => { setDraft(value ? String(value) : ""); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ""))}
         onBlur={() => { if (draft !== null) { onCommit(parseNum(draft)); setDraft(null); } }}
@@ -1217,7 +1297,7 @@ function PriceCell({
           if (e.key === "Escape") { setDraft(null); (e.target as HTMLInputElement).blur(); }
         }}
       />
-      {value > 0 && <i>{label}</i>}
+      <i>{unit}</i>
     </span>
   );
 }
@@ -1236,7 +1316,7 @@ function UndoButton({
 function NewCampaignButton({ onCreate }: { onCreate: (name: string) => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  if (!open) return <button className="btn primary" onClick={() => setOpen(true)}>+ Přidat blok</button>;
+  if (!open) return <button className="btn primary" onClick={() => setOpen(true)}>+ Přidat kampaň</button>;
   return (
     <form
       style={{ display: "flex", gap: 6 }}
@@ -1247,7 +1327,7 @@ function NewCampaignButton({ onCreate }: { onCreate: (name: string) => void }) {
         setName(""); setOpen(false);
       }}
     >
-      <input autoFocus placeholder="Název bloku" value={name} onChange={(e) => setName(e.target.value)}
+      <input autoFocus placeholder="Název kampaně" value={name} onChange={(e) => setName(e.target.value)}
         style={{ font: "inherit", fontSize: 12, padding: "5px 10px", border: "1px solid var(--brand)",
           borderRadius: 4, background: "var(--surface)", color: "var(--ink)", minWidth: 170 }} />
       <button className="btn primary" type="submit">Založit</button>
@@ -1307,40 +1387,20 @@ const fmtCount = (v: number) => v >= 1_000_000
   ? (v / 1_000_000).toLocaleString("cs-CZ", { maximumFractionDigits: 2 }) + " mil."
   : kc(v);
 
-/** Výsledek položky jedním řádkem: kliky · konverze · CPA, u TV a rádia zásah 1+. */
-function EstResult({ est, reachPct, applies, fee }: { est: Estimate; reachPct: number | null; applies: boolean; fee: boolean }) {
-  if (fee) return <span className="share">agenturní práce</span>;
-  const parts: React.ReactNode[] = [];
-  if (applies && est.clicks !== null) {
-    parts.push(<span key="k" className={est.derived.clicks ? "estderived" : undefined}
-      title={est.derived.clicks ? "Kliky = imprese × CTR" : "Kliky z rozpočtu a CPC"}>{fmtCount(est.clicks)} kliků</span>);
-  }
-  if (est.conversions !== null) parts.push(<span key="c">{fmtCount(est.conversions)} konv.</span>);
-  if (est.cpa !== null) parts.push(<span key="a">CPA {kc(est.cpa)} Kč</span>);
-  if (reachPct !== null) {
-    parts.push(<span key="r" title="Zásah 1+ položky za období z modelu (křivka nosiče) — modelový odhad, ne měření">
-      zásah 1+ {(reachPct * 100).toLocaleString("cs-CZ", { maximumFractionDigits: 0 })} %</span>);
-  }
-  if (!parts.length) {
-    return <span className="share" title={applies ? "Doplňte cenu (CPM/CPC) a CTR — u položky, nebo jako výchozí u platformy" : undefined}>—</span>;
-  }
-  return <span className="estresult">{parts.flatMap((p, i) => (i ? [<span key={`s${i}`} className="share"> · </span>, p] : [p]))}</span>;
-}
-
-function EstSumCells({ sum }: { sum: ReturnType<typeof sumEstimates> }) {
-  const parts = [
-    sum.clicks !== null ? `${fmtCount(sum.clicks)} kliků` : null,
-    sum.conversions !== null ? `${fmtCount(sum.conversions)} konv.` : null,
-    sum.cpa !== null ? `CPA ${kc(sum.cpa)} Kč` : null,
-  ].filter(Boolean);
+/**
+ * Součty dopočtených sloupců za kampaň, sdělení nebo plán. Zásah a frekvence
+ * se přes řádky nesčítají (lidé se překrývají) — celkový je v panelu zásahu.
+ */
+function SumCells({ budget, impressions, clicks, strong = false }: { budget: number; impressions: number; clicks: number; strong?: boolean }) {
   return (
     <>
-      {EST_COLS.map((e, i) => (
-        <td key={e.k} className={`r num share estcol ${i === 0 ? "estfirst" : ""}`}
-          title={e.k === "result" ? "Součet kliků a konverzí; zásah se přes položky nesčítá — je v Přehledu" : undefined}>
-          {e.k === "result" ? parts.join(" · ") : ""}
-        </td>
-      ))}
+      <td className="r num calc calcfirst" style={strong ? { fontWeight: 500 } : undefined}>{kc(budget)}</td>
+      <td className="r num calc">{impressions ? fmtCount(impressions) : "–"}</td>
+      <td className="r num calc">{clicks ? fmtCount(clicks) : "–"}</td>
+      <td className="r num calc share" title="Zásah se přes řádky nesčítá — celkový je v panelu Zásah a frekvence nahoře a v Přehledu">·</td>
+      <td className="r num calc share" />
+      <td />
+      <td />
     </>
   );
 }

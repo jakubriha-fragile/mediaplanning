@@ -91,7 +91,7 @@ export async function getMix(me: Principal, planId: string): Promise<Mix | null>
       const driver = b.driver as PlanUnit;
       const price = ctx.priceFor(r, driver, b.unitPrice);
       const d = derive({
-        channelType: r.channelType, pricing: r.pricing, driver, driverValue: b.driverValue, unitPrice: price.unitPrice,
+        channelType: r.channelType, pricing: r.pricing, ctr: ctx.ctrFor(r), driver, driverValue: b.driverValue, unitPrice: price.unitPrice,
         universe: ctx.universeOf(r.targetGroupId), curve: ctx.curveOf(r.channelType, r.targetGroupId),
       });
       const cost = b.planned || d.budget;

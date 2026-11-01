@@ -57,7 +57,8 @@ async function tacticCoords(tacticId: string) {
       label: tactics.label,
       channelType: tactics.channelType,
       pricing: tactics.pricing,
-      targetGroupId: tactics.targetGroupId,
+      // vlastní cílovka taktiky, jinak cílovka sdělení — pro velikost (universe) v přepočtech
+      targetGroupId: sql<string | null>`coalesce(${tactics.targetGroupId}, ${messageLines.targetGroupId})`,
       campaignId: messageLines.campaignId,
       planId: campaigns.planId,
     })
@@ -1081,6 +1082,8 @@ const linePatch = z.object({
   audience: z.string().max(120).optional(),
   phase: z.enum(["Awareness", "Consideration", "Conversion"]).optional(),
   code: z.string().max(60).optional(),
+  /** cílovka z číselníku; null = jen text (platí cílovka plánu) */
+  targetGroupId: z.string().min(1).nullable().optional(),
 });
 
 /** Sdělení, cílovka a fáze se mění na lince — projeví se u všech jejích taktik. */
@@ -1091,7 +1094,14 @@ export async function updateMessageLine(raw: z.input<typeof linePatch>): Promise
     const [line] = await db.select().from(messageLines).where(eq(messageLines.id, data.messageLineId));
     if (!line) throw new Error("Linka sdělení neexistuje");
 
-    assertCan(me, "write", { area: "plan", mediaType: null, planId: await campaignPlan(line.campaignId), campaignId: line.campaignId, month: null });
+    const planId = await campaignPlan(line.campaignId);
+    assertCan(me, "write", { area: "plan", mediaType: null, planId, campaignId: line.campaignId, month: null });
+    // cílovka musí patřit klientovi plánu (nebo být společná) — jinak by plán viděl velikosti cizího klienta
+    if (data.targetGroupId) {
+      const [tg] = await db.select().from(targetGroups).where(eq(targetGroups.id, data.targetGroupId));
+      const [p] = await db.select({ clientId: plans.clientId }).from(plans).where(eq(plans.id, planId));
+      if (!tg || (tg.clientId && tg.clientId !== p?.clientId)) return { ok: false, error: "Cílová skupina nepatří klientovi plánu." };
+    }
 
     const items: string[] = [];
     const pairs: Array<[keyof typeof data, string, string | null]> = [
@@ -1104,10 +1114,12 @@ export async function updateMessageLine(raw: z.input<typeof linePatch>): Promise
       const next = data[key];
       if (next !== undefined && next !== old) items.push(`${label} ${line.code}: „${old}" → „${next}"`);
     }
+    const tgChanged = data.targetGroupId !== undefined && data.targetGroupId !== line.targetGroupId;
+    if (tgChanged && !items.length) items.push(`Cílová skupina ${line.code}: změna velikosti pro model`);
     if (!items.length) return { ok: true };
 
     await pushUndo(me!.id, items[0], [
-      { t: "line", id: line.id, message: line.message, audience: line.audience, phase: line.phase, code: line.code },
+      { t: "line", id: line.id, message: line.message, audience: line.audience, phase: line.phase, code: line.code, targetGroupId: line.targetGroupId },
     ]);
 
     await db
@@ -1117,6 +1129,7 @@ export async function updateMessageLine(raw: z.input<typeof linePatch>): Promise
         ...(data.audience !== undefined ? { audience: data.audience } : {}),
         ...(data.phase ? { phase: data.phase } : {}),
         ...(data.code !== undefined ? { code: data.code } : {}),
+        ...(tgChanged ? { targetGroupId: data.targetGroupId } : {}),
       })
       .where(eq(messageLines.id, data.messageLineId));
 
@@ -1199,6 +1212,7 @@ export async function moveTactic(raw: {
             message: currentLine.message,
             phase: currentLine.phase,
             audience: currentLine.audience,
+            targetGroupId: currentLine.targetGroupId,
           })
           .returning();
         newLineId = copy.id;
@@ -1363,6 +1377,14 @@ async function insertTactic(
   await db.insert(tacticBudgets).values(
     monthsBetween(plan.periodStart, plan.periodEnd).map((month) => ({ tacticId: t.id, month, planned: 0 })),
   );
+  // oblast patří sdělení — nový řádek ji převezme od sourozence, ať nevznikne „Nezařazeno"
+  const [sibling] = await db.select({ id: tactics.id }).from(tactics)
+    .innerJoin(tacticThemes, eq(tacticThemes.tacticId, tactics.id))
+    .where(and(eq(tactics.messageLineId, line.id), sql`${tactics.id} <> ${t.id}`)).limit(1);
+  if (sibling) {
+    const shares = await db.select().from(tacticThemes).where(eq(tacticThemes.tacticId, sibling.id));
+    if (shares.length) await db.insert(tacticThemes).values(shares.map((x) => ({ tacticId: t.id, themeId: x.themeId, share: x.share })));
+  }
   // sada metrik podle fáze linky — stejná logika jako v seedu
   const brand = line.phase === "Awareness";
   await db.insert(metrics).values([
@@ -1531,7 +1553,15 @@ export async function createMessageLine(raw: z.input<typeof newLine>): Promise<R
       .where(eq(messageLines.campaignId, data.campaignId));
     const code = data.code?.trim() || nextLineCode(camp.name, existing.map((r) => r.code));
 
-    const [line] = await db.insert(messageLines).values({ ...data, code }).returning();
+    // nové sdělení začíná s cílovou skupinou plánu — změní se v hlavičce, ale hned se počítá
+    let tg: { id: string; name: string } | null = null;
+    if (!data.audience?.trim() || data.audience.trim() === "—") {
+      const [p] = await db.select({ tgId: plans.targetGroupId }).from(campaigns)
+        .innerJoin(plans, eq(campaigns.planId, plans.id)).where(eq(campaigns.id, data.campaignId));
+      if (p?.tgId) [tg] = await db.select({ id: targetGroups.id, name: targetGroups.name }).from(targetGroups).where(eq(targetGroups.id, p.tgId));
+    }
+    const [line] = await db.insert(messageLines)
+      .values({ ...data, code, ...(tg ? { audience: tg.name, targetGroupId: tg.id } : {}) }).returning();
     await insertTactic(line, "Nový kanál", "Paid");
 
     // smazáním linky padnou kaskádou i její taktika, rozpočty a metriky
@@ -1703,7 +1733,7 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
             .insert(messageLines)
             .values({
               campaignId: nc.id, code: l.code, message: l.message,
-              phase: l.phase, audience: l.audience,
+              phase: l.phase, audience: l.audience, targetGroupId: l.targetGroupId,
             })
             .returning();
 
@@ -1718,6 +1748,7 @@ export async function createPlan(raw: z.input<typeof newPlan>): Promise<Result &
               mediumId: t.mediumId, platformId: t.platformId, label: t.label, pricing: t.pricing,
               // předpoklady odhadu jsou součást struktury plánu, ne čísla — kopírují se
               creative: t.creative, estMeasurement: t.estMeasurement, estCtr: t.estCtr, estCr: t.estCr,
+              fixImpressions: t.fixImpressions,
               position: t.position, note: t.note,
             }).returning();
 
@@ -2019,6 +2050,54 @@ export async function setTacticThemes(raw: z.input<typeof sharesInput>): Promise
           .map((t) => `${t.name} ${Math.round((next.find((x) => x.themeId === t.id)!.share) * 100)} %`).join(", ")
       : "nezařazeno";
     await log(me!.id, "plan", [`Oblasti taktiky „${c.channel}": ${names}`]);
+    revalidatePath("/");
+    revalidatePath("/prehled");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Oblast celého sdělení — nastaví stejné rozdělení všem jeho řádkům naráz
+ * (jeden krok Zpět). Výjimku pro jeden řádek pak udělá setTacticThemes.
+ * Smí jen ten, kdo smí měnit každý řádek sdělení.
+ */
+export async function setLineThemes(raw: { messageLineId: string; shares: Array<{ themeId: string; share: number }> }): Promise<Result> {
+  try {
+    const data = z.object({
+      messageLineId: z.string().min(1),
+      shares: sharesInput.shape.shares,
+    }).parse(raw);
+    const me = await currentPrincipal();
+    const ts = await db.select({ id: tactics.id }).from(tactics).where(eq(tactics.messageLineId, data.messageLineId));
+    if (!ts.length) return { ok: false, error: "Sdělení nemá žádný řádek." };
+    const coords = await Promise.all(ts.map((t) => tacticCoords(t.id)));
+    for (const c of coords) assertCan(me, "write", at(c, "plan", null));
+
+    const [plan] = await db.select({ clientId: plans.clientId }).from(plans).where(eq(plans.id, coords[0].planId));
+    const ids = data.shares.filter((x) => x.share > 0).map((x) => x.themeId);
+    if (ids.length) {
+      const own = await db.select({ id: themes.id }).from(themes)
+        .where(and(eq(themes.clientId, plan.clientId), inArray(themes.id, ids)));
+      if (own.length !== new Set(ids).size) throw new PermissionError("Oblast nepatří klientovi tohoto plánu.");
+    }
+    const total = data.shares.reduce((a, x) => a + x.share, 0);
+    const next = total > 0
+      ? data.shares.filter((x) => x.share > 0).map((x) => ({ themeId: x.themeId, share: x.share / total }))
+      : [];
+
+    const undo: UndoOp[] = [];
+    for (const t of ts) {
+      const before = await db.select({ themeId: tacticThemes.themeId, share: tacticThemes.share })
+        .from(tacticThemes).where(eq(tacticThemes.tacticId, t.id));
+      undo.push({ t: "themes", tacticId: t.id, shares: before });
+      await db.delete(tacticThemes).where(eq(tacticThemes.tacticId, t.id));
+      if (next.length) await db.insert(tacticThemes).values(next.map((x) => ({ tacticId: t.id, ...x })));
+    }
+    const [line] = await db.select().from(messageLines).where(eq(messageLines.id, data.messageLineId));
+    await pushUndo(me!.id, `Oblast sdělení ${line?.code ?? ""}`, undo);
+    await log(me!.id, "plan", [`Oblast sdělení ${line?.code ?? ""}: ${next.length ? next.length + " oblast(i)" : "nezařazeno"}`]);
     revalidatePath("/");
     revalidatePath("/prehled");
     return { ok: true };
@@ -2631,9 +2710,9 @@ export async function deletePlatform(id: string): Promise<Result> {
  * (Kč za tisíc impresí ≠ Kč za klik), proto se vynuluje a hodnoty se převedou
  * na rozpočet — peníze v plánu zůstanou, jen se znovu zadá cena. Jeden krok Zpět.
  */
-export async function setRowPricing(raw: { tacticId: string; pricing: "cpm" | "cpc" }): Promise<Result> {
+export async function setRowPricing(raw: { tacticId: string; pricing: "cpm" | "cpc" | "fix" }): Promise<Result> {
   try {
-    const data = z.object({ tacticId: z.string().min(1), pricing: z.enum(["cpm", "cpc"]) }).parse(raw);
+    const data = z.object({ tacticId: z.string().min(1), pricing: z.enum(["cpm", "cpc", "fix"]) }).parse(raw);
     const me = await currentPrincipal();
     const c = await tacticCoords(data.tacticId);
     const [plan] = await db.select().from(plans).where(eq(plans.id, c.planId));
@@ -2651,7 +2730,9 @@ export async function setRowPricing(raw: { tacticId: string; pricing: "cpm" | "c
       await db.update(tacticBudgetWeeks).set({ driver: "budget", driverValue: w.planned, unitPrice: 0 }).where(eq(tacticBudgetWeeks.id, w.id));
     }
     await db.update(tactics).set({ pricing: data.pricing }).where(eq(tactics.id, c.tacticId));
-    const label = `${c.channel}: nákup na ${data.pricing.toUpperCase()} (cena za jednotku vynulována)`;
+    const label = data.pricing === "fix"
+      ? `${c.channel}: nákup za pevnou cenu (fix) — doplňte imprese`
+      : `${c.channel}: nákup na ${data.pricing.toUpperCase()} (cena za jednotku vynulována)`;
     await pushUndo(me!.id, label, undo);
     await log(me!.id, "plan", [label]);
     revalidatePath("/");
@@ -2728,6 +2809,66 @@ export async function setPlatformEstimate(raw: { platformId: string; field: keyo
     revalidatePath("/nastaveni");
     revalidatePath("/");
     return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Garantované imprese za období u nákupu „fix" (spolupráce, sponzoring, UGC).
+ * Mění doručení všech měsíců položky, proto stejné právo jako cena: ke všem měsícům.
+ */
+export async function setFixImpressions(raw: { tacticId: string; value: number | null }): Promise<Result> {
+  try {
+    const data = z.object({ tacticId: z.string().min(1), value: z.number().min(0).max(1e12).nullable() }).parse(raw);
+    const me = await currentPrincipal();
+    const c = await tacticCoords(data.tacticId);
+    const [plan] = await db.select().from(plans).where(eq(plans.id, c.planId));
+    for (const m of monthsBetween(plan.periodStart, plan.periodEnd)) assertCan(me, "write", at(c, "plan", m));
+    if (c.pricing !== "fix") return { ok: false, error: "Imprese se zadávají u nákupu za pevnou cenu (fix)." };
+    const value = data.value && data.value > 0 ? Math.round(data.value) : null;
+    await db.update(tactics).set({ fixImpressions: value }).where(eq(tactics.id, data.tacticId));
+    await log(me!.id, "plan", [`${c.channel}: garantované imprese ${value ?? "—"}`]);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Propojí cílové skupiny sdělení zadané jen textem se stejnojmennou cílovou
+ * skupinou klienta (import z Excelu a starší plány je mají jako text). Co se
+ * jménem neshoduje, zůstane — vybere se ručně v hlavičce sdělení.
+ */
+export async function linkLineTargetGroups(planId: string): Promise<Result & { linked?: number; left?: number }> {
+  try {
+    const me = await currentPrincipal();
+    const [plan] = await db.select().from(plans).where(eq(plans.id, planId));
+    if (!plan) return { ok: false, error: "Plán neexistuje." };
+    const tgs = (await db.select().from(targetGroups)).filter((t) => !t.clientId || t.clientId === plan.clientId);
+    const norm = (x: string) => x.trim().toLowerCase().replace(/\s+/g, " ").replace(/[–—]/g, "-");
+    const byName = new Map(tgs.map((t) => [norm(t.name), t]));
+    const lines = await db.select({ line: messageLines }).from(messageLines)
+      .innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
+      .where(eq(campaigns.planId, planId));
+    const undo: UndoOp[] = [];
+    let linked = 0, left = 0;
+    for (const { line } of lines) {
+      if (line.targetGroupId) continue;
+      const tg = line.audience ? byName.get(norm(line.audience)) : undefined;
+      if (!tg) { left++; continue; }
+      assertCan(me, "write", { area: "plan", mediaType: null, planId, campaignId: line.campaignId, month: null });
+      undo.push({ t: "line", id: line.id, message: line.message, audience: line.audience, phase: line.phase, code: line.code, targetGroupId: null });
+      await db.update(messageLines).set({ targetGroupId: tg.id, audience: tg.name }).where(eq(messageLines.id, line.id));
+      linked++;
+    }
+    if (undo.length) {
+      await pushUndo(me!.id, `Propojeno ${linked} cílových skupin sdělení`, undo);
+      await log(me!.id, "plan", [`Cílové skupiny sdělení propojeny podle názvu: ${linked}`]);
+    }
+    revalidatePath("/");
+    return { ok: true, linked, left };
   } catch (e) {
     return fail(e);
   }

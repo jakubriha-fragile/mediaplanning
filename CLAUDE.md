@@ -158,6 +158,16 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    zdroj odhadu ceny. Odhad výsledků nemá vlastní cenu ani frekvenci — bere doručení
    z plánu a zásah z modelu, aby existovalo jen jedno číslo pro totéž.
 
+13b. **Cílová skupina patří sdělení** (`message_line.target_group_id`), taktika ji dědí:
+   efektivní cílovka = `coalesce(tactic.target_group_id, message_line.target_group_id)`,
+   jinak cílovka plánu. Skládá se v `loadPlan` i `tacticCoords` — kdo čte cílovku taktiky
+   jinudy, rozejde se s modelem. `updateMessageLine` ověřuje, že cílovka patří klientovi.
+   **CPC vstupuje do zásahu přes CTR** (`ctx.ctrFor`, imprese = kliky ÷ CTR) a **Fix**
+   přes efektivní CPM z `tactic.fix_impressions` a rozpočtu za období (`priceFor`,
+   `periodBudget` z `loadPlan`). Všechna volání `derive` předávají `ctr: ctx.ctrFor(r)`.
+   Oblast sdělení = stejné `tactic_theme` u všech jeho řádků (`setLineThemes`);
+   nový řádek ji přebírá od sourozence (`insertTactic`).
+
 14. **Koeficienty duplikace se ukládají seřazené** (`sortedPair` = stejné pořadí
    jako `dupKey`). Seed do databáze zapisuje i výchozí hodnoty, proto se
    „vlastní" pozná podle odchylky od výchozí, ne podle existence řádku.

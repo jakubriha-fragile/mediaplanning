@@ -268,6 +268,11 @@ export const messageLines = pgTable(
     message: text("message").notNull(),
     phase: phaseEnum("phase").notNull(),
     audience: text("audience").notNull(),
+    /**
+     * Cílová skupina sdělení z číselníku (velikost → GRP, zásah, frekvence).
+     * Taktiky ji dědí, pokud nemají vlastní. NULL = jen text, platí cílovka plánu.
+     */
+    targetGroupId: text("target_group_id").references(() => targetGroups.id, { onDelete: "set null" }),
   },
   (t) => ({ uq: uniqueIndex("message_line_uq").on(t.code, t.campaignId) }),
 );
@@ -283,8 +288,13 @@ export const tactics = pgTable(
     label: text("label"),
     mediaType: mediaTypeEnum("media_type").notNull(),
     channelType: channelTypeEnum("channel_type").notNull().default("Digital"),
-    /** Cenový model: "cpm" | "cpc"; NULL = podle nosiče (TV a rádio CPP, jinak CPM). */
-    pricing: text("pricing").$type<"cpm" | "cpc">(),
+    /**
+     * Cenový model: "cpm" | "cpc" | "fix" (pevná cena za balík s garantovanými
+     * impresemi — spolupráce, sponzoring, UGC); NULL = podle nosiče (TV a rádio CPP, jinak CPM).
+     */
+    pricing: text("pricing").$type<"cpm" | "cpc" | "fix">(),
+    /** Imprese za celé období u nákupu „fix" — z nich a z rozpočtu vychází efektivní CPM. */
+    fixImpressions: doublePrecision("fix_impressions"),
     /** Médium a platforma z číselníku (NULL = zatím nevybráno). */
     mediumId: text("medium_id").references(() => media.id, { onDelete: "set null" }),
     platformId: text("platform_id").references(() => platforms.id, { onDelete: "set null" }),

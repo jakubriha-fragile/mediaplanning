@@ -192,7 +192,12 @@ console.log("\nCPC: rozpočet ↔ kliky");
 {
   const a = derive({ channelType: "Digital", pricing: "cpc", driver: "budget", driverValue: 1_000_000, unitPrice: 5, universe: 2_000_000 });
   ok("1 000 000 Kč při CPC 5 Kč = 200 000 kliků", a.clicks === 200_000 && a.budget === 1_000_000);
-  ok("CPC nemá imprese ani zásah", a.impressions === 0 && a.reach === 0);
+  ok("CPC bez CTR nemá imprese ani zásah", a.impressions === 0 && a.reach === 0);
+  const withCtr = derive({ channelType: "Digital", pricing: "cpc", ctr: 0.005, driver: "budget", driverValue: 50_000, unitPrice: 5, universe: 2_000_000 });
+  ok("CPC s CTR: imprese = kliky ÷ CTR", withCtr.clicks === 10_000 && withCtr.impressions === 2_000_000, JSON.stringify(withCtr));
+  ok("CPC s CTR vstupuje do zásahu", withCtr.grp === 100 && withCtr.reach > 0 && withCtr.frequency > 0);
+  const fix = derive({ channelType: "Digital", pricing: "fix", driver: "budget", driverValue: 233_021, unitPrice: 233_021 / 500_000 * 1000, universe: 2_000_000 });
+  ok("fix: efektivní CPM z garantovaných impresí vrátí ty imprese", Math.round(fix.impressions) === 500_000);
   const b = derive({ channelType: "Digital", pricing: "cpc", driver: "clicks", driverValue: 1000, unitPrice: 8, universe: 2_000_000 });
   ok("1 000 kliků při CPC 8 Kč = 8 000 Kč", b.budget === 8000 && b.clicks === 1000);
   const c = derive({ channelType: "Digital", pricing: "cpm", driver: "budget", driverValue: 100_000, unitPrice: 200, universe: 2_000_000 });

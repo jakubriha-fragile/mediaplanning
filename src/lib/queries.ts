@@ -1,4 +1,4 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   campaigns, messageLines, tactics, tacticBudgets, tacticBudgetWeeks, actualSpends,
@@ -13,7 +13,7 @@ import { resolveMetrics, type ResolvedMetric } from "@/lib/metrics";
 import { can, canSeePlan, canSeeTactic, channelGroupOf, type Principal } from "@/lib/permissions";
 import {
   derive, combineReach, DEFAULT_CURVE, DEFAULT_DUPLICATION, dupKey, UNCALIBRATED_SOURCE, isGrpPriced, reachFromGrp,
-  type Curve, type Derived,
+  type Curve, type Derived, type Pricing,
 } from "@/lib/crossmedia";
 
 const byMonth = <T extends { month: string }>(rows: T[], months: string[], pick: (r: T) => number) =>
@@ -98,8 +98,14 @@ export type CrossContext = {
    * platformy (přesnější), pak ceník klienta. Ceník platí jen pro média zadaná v Kč — ne pro agenturní práci
    * a ne pro smíšené položky, kde by odhad nafoukl doručení i z honorářů.
    */
-  priceFor: (row: { channelType: ChannelType; channel: string; pricing?: "cpm" | "cpc" | null; platformId?: string | null }, driver: PlanUnit, unitPrice: number) =>
-    { unitPrice: number; estimated: boolean };
+  priceFor: (row: PriceRow, driver: PlanUnit, unitPrice: number) => { unitPrice: number; estimated: boolean };
+  /** CTR položky na CPC (vlastní, jinak výchozí platformy) — z ní imprese pro model zásahu */
+  ctrFor: (row: PriceRow) => number | null;
+};
+
+export type PriceRow = {
+  channelType: ChannelType; channel: string; pricing?: Pricing | null; platformId?: string | null;
+  estCtr?: number | null; fixImpressions?: number | null; periodBudget?: number;
 };
 
 export async function crossContext(planTargetGroupId: string | null, clientId?: string): Promise<CrossContext> {
@@ -108,7 +114,7 @@ export async function crossContext(planTargetGroupId: string | null, clientId?: 
     db.select().from(reachCurves),
     db.select().from(duplications),
     clientId ? db.select().from(rateCards).where(eq(rateCards.clientId, clientId)) : Promise.resolve([]),
-    db.select({ id: platforms.id, cpm: platforms.estCpm, cpc: platforms.estCpc }).from(platforms),
+    db.select({ id: platforms.id, cpm: platforms.estCpm, cpc: platforms.estCpc, ctr: platforms.estCtr }).from(platforms),
   ]);
   const platById = new Map(plats.map((p) => [p.id, p]));
   const rateOf = new Map(rates.map((r) => [r.channelType, r.price]));
@@ -137,7 +143,13 @@ export async function crossContext(planTargetGroupId: string | null, clientId?: 
         (c.targetGroupId === target || c.targetGroupId === null));
     },
     dup,
+    ctrFor: (row) => row.pricing === "cpc" ? row.estCtr ?? (row.platformId ? platById.get(row.platformId)?.ctr : null) ?? null : null,
     priceFor: (row, driver, unitPrice) => {
+      // balík za pevnou cenu: efektivní CPM z garantovaných impresí — zadaná hodnota, ne odhad
+      if (row.pricing === "fix") {
+        const imp = row.fixImpressions ?? 0, b = row.periodBudget ?? 0;
+        return { unitPrice: imp > 0 && b > 0 ? (b / imp) * 1000 : 0, estimated: false };
+      }
       if (unitPrice > 0 || driver !== "budget" || costKind(row.channel) !== "media") return { unitPrice, estimated: false };
       // výchozí cena platformy — u CPC jediný zdroj odhadu, TV a rádio mají CPP z ceníku
       const plat = row.platformId && !isGrpPriced(row.channelType) ? platById.get(row.platformId) : undefined;
@@ -244,9 +256,12 @@ export async function loadPlan(planId: string) {
       estMeasurement: tactics.estMeasurement,
       estCtr: tactics.estCtr,
       estCr: tactics.estCr,
+      fixImpressions: tactics.fixImpressions,
       mediumId: tactics.mediumId,
       platformId: tactics.platformId,
-      targetGroupId: tactics.targetGroupId,
+      // cílovka taktiky, jinak cílovka sdělení (NULL = cílovka plánu) — jedno místo pro celý model
+      targetGroupId: sql<string | null>`coalesce(${tactics.targetGroupId}, ${messageLines.targetGroupId})`,
+      lineTargetGroupId: messageLines.targetGroupId,
       position: tactics.position,
       code: messageLines.code,
       message: messageLines.message,
@@ -275,8 +290,11 @@ export async function loadPlan(planId: string) {
 
   const ids = new Set(rows.map((r) => r.tacticId));
   const shares = (await db.select().from(tacticThemes)).filter((x) => ids.has(x.tacticId));
+  // rozpočet za období — z něj u nákupu „fix" vychází efektivní CPM (priceFor)
+  const periodBudget = new Map<string, number>();
+  for (const b of budgets) if (ids.has(b.tacticId)) periodBudget.set(b.tacticId, (periodBudget.get(b.tacticId) ?? 0) + (b.planned ?? 0));
   return {
-    rows,
+    rows: rows.map((r) => ({ ...r, periodBudget: periodBudget.get(r.tacticId) ?? 0 })),
     themeShares: shares,
     budgets: budgets.filter((b) => ids.has(b.tacticId)),
     weeks: weekRows.filter((w) => ids.has(w.tacticId)),
@@ -319,7 +337,7 @@ export async function getPlanRows(me: Principal, planId: string) {
         const unitPrice = b?.unitPrice ?? 0;
         const price = ctx.priceFor(r, driver, unitPrice);
         const d = derive({
-          channelType: r.channelType, pricing: r.pricing, driver, driverValue, unitPrice: price.unitPrice, universe, curve,
+          channelType: r.channelType, pricing: r.pricing, ctr: ctx.ctrFor(r), driver, driverValue, unitPrice: price.unitPrice, universe, curve,
         });
         // Uložený rozpočet má přednost — porovnává se se skutečností. Nula ale
         // znamená „ještě nedopočítáno" (import, seed), proto tam pustíme dopočet;
@@ -336,7 +354,7 @@ export async function getPlanRows(me: Principal, planId: string) {
           const driverValue = b?.driverValue ?? 0;
           const unitPrice = b?.unitPrice ?? 0;
           const price = ctx.priceFor(r, driver, unitPrice);
-          const d = derive({ channelType: r.channelType, pricing: r.pricing, driver, driverValue, unitPrice: price.unitPrice, universe, curve });
+          const d = derive({ channelType: r.channelType, pricing: r.pricing, ctr: ctx.ctrFor(r), driver, driverValue, unitPrice: price.unitPrice, universe, curve });
           return [w.key, { ...d, budget: b?.planned || d.budget, driver, driverValue, unitPrice, estimated: price.estimated } as PlanCell];
         }))
       : null;
@@ -365,6 +383,8 @@ export async function getPlanRows(me: Principal, planId: string) {
       mediaType: r.mediaType,
       channelType: r.channelType,
       pricing: r.pricing,
+      fixImpressions: r.fixImpressions,
+      lineTargetGroupId: r.lineTargetGroupId,
       creative: r.creative,
       est: { measurement: r.estMeasurement, ctr: r.estCtr, cr: r.estCr },
       // zásah 1+ položky za celé období z modelu — z nasčítaných GRP, ne součet měsíců (invariant 10)
@@ -476,6 +496,7 @@ export async function getReachSummary(me: Principal, planId: string): Promise<{
       const d = derive({
         channelType: r.channelType,
         pricing: r.pricing,
+        ctr: ctx.ctrFor(r),
         driver: b.driver as PlanUnit,
         driverValue: b.driverValue,
         unitPrice: ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice).unitPrice,
