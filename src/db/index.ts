@@ -13,8 +13,12 @@ import * as schema from "./schema";
  */
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
+// Pool se drží v globalThis VŽDY, i v produkci. Proxy níže volá connect() při
+// každém přístupu k db — bez cache by každý dotaz založil nový pool a nové DNS
+// dotazy, spojení by zůstávala viset a teplá funkce na Vercelu by po chvíli
+// padala na „getaddrinfo EBUSY" (stalo se v listopadu 2026). V dev to navíc
+// přežije hot reload.
 const globalForDb = globalThis as unknown as {
-  conn?: ReturnType<typeof postgres>;
   db?: Db;
 };
 
@@ -31,15 +35,12 @@ function connect(): Db {
   // prepare: false je nutné kvůli poolovanému připojení přes pgBouncer.
   // DATABASE_POOL_MAX je jen pro lokální testy proti PGlite, které má jediný
   // backend a souběžná spojení si pletou; v produkci nenastavovat.
+  // idle_timeout: nečinná spojení zavřít — zmrazená serverless funkce by je
+  // jinak držela, dokud je Neon sám neutne.
   const max = Number(process.env.DATABASE_POOL_MAX) || 5;
-  const conn = globalForDb.conn ?? postgres(url, { max, prepare: false });
-  const db = drizzle(conn, { schema });
-
-  if (process.env.NODE_ENV !== "production") {
-    globalForDb.conn = conn;
-    globalForDb.db = db;
-  }
-  return db;
+  const conn = postgres(url, { max, prepare: false, idle_timeout: 20 });
+  globalForDb.db = drizzle(conn, { schema });
+  return globalForDb.db;
 }
 
 export const db = new Proxy({} as Db, {
