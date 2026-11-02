@@ -250,7 +250,7 @@ na položky, a rozdělení podle tematických oblastí. Tlačítko *Tisk / PDF* 
 
 ### Zadání plánu (listopad 2026)
 
-Plán je **Kampaň → Sdělení → řádky**. Co platí pro celé sdělení, se zadá jednou v jeho
+Plán je **Propozice → Sdělení → taktiky** (v datech a kódu se propozici dál říká kampaň/blok, `campaign`). Co platí pro celé sdělení, se zadá jednou v jeho
 hlavičce; řádek má jen to, co se u nákupu opravdu liší.
 
 **Hlavička sdělení:** název, fáze, **cílová skupina** (ze seznamu, s velikostí — z ní se

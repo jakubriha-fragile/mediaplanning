@@ -1385,11 +1385,12 @@ async function insertTactic(
     const shares = await db.select().from(tacticThemes).where(eq(tacticThemes.tacticId, sibling.id));
     if (shares.length) await db.insert(tacticThemes).values(shares.map((x) => ({ tacticId: t.id, themeId: x.themeId, share: x.share })));
   }
-  // sada metrik podle fáze linky — stejná logika jako v seedu
+  // sada metrik podle fáze linky. Konverze a CPA zadavatel nechce (listopad 2026,
+  // nedělají performance kampaně) — místo nich kliky a CPC
   const brand = line.phase === "Awareness";
   await db.insert(metrics).values([
-    { tacticId: t.id, name: brand ? "Reach" : "Konverze", kind: "cumulative" as const, unit: "", slot: 0 },
-    { tacticId: t.id, name: brand ? "CPM" : "CPA", kind: "rate_low" as const, unit: "Kč", slot: 1 },
+    { tacticId: t.id, name: brand ? "Reach" : "Kliky", kind: "cumulative" as const, unit: "", slot: 0 },
+    { tacticId: t.id, name: brand ? "CPM" : "CPC", kind: "rate_low" as const, unit: "Kč", slot: 1 },
   ]);
   return t;
 }
@@ -1459,10 +1460,10 @@ export async function createCampaign(raw: z.input<typeof newCampaign>): Promise<
       .values({ name: data.name, planId: data.planId, position: Number(max) + 1 })
       .returning();
 
-    const code = data.name.toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) + "-1";
+    const codes = await planLineCodes(data.planId, c.id);
     await db.insert(messageLines).values({
       campaignId: c.id,
-      code: code || "NOVA-1",
+      code: nextLineCode(data.name, [], codes.others),
       message: data.message,
       phase: data.phase,
       audience: data.audience,
@@ -1523,15 +1524,37 @@ async function dropEmptyLines(campaignId: string, only?: string) {
   if (drop.length) await db.delete(messageLines).where(inArray(messageLines.id, drop));
 }
 
-function nextLineCode(campaignName: string, existing: string[]): string {
-  const base =
-    existing.map((c) => c.match(/^(.*)-\d+$/)?.[1]).find(Boolean) ??
-    (campaignName.toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) || "NOVA");
+/** Základ kódu z názvu propozice: bez diakritiky (dřív „Značka" → „ZNAKA"), velkými písmeny. */
+const codeSlug = (name: string) =>
+  name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 12) || "NOVA";
+const codeBase = (code: string) => code.match(/^(.*)-\d+$/)?.[1] ?? code;
+
+/**
+ * Kód nového sdělení, unikátní v celém plánu. Dřív se hlídal jen v rámci
+ * propozice — „Probio" i „probio v2" pak měly PROBIO-1, PROBIO-2 a ve výběru
+ * „Přesunout pod sdělení" je nešlo rozlišit (zadavatel, listopad 2026).
+ * Propozice drží svůj základ, pokud ho nemá i jiná; jinak dostane vlastní.
+ */
+function nextLineCode(campaignName: string, own: string[], others: string[]): string {
+  const otherBases = new Set(others.map(codeBase));
+  let base = own.map(codeBase).find((b) => !otherBases.has(b)) ?? codeSlug(campaignName);
+  for (let k = 2; otherBases.has(base); k++) base = `${codeSlug(campaignName).slice(0, 10)}${k}`;
   // nejnižší volné číslo — po smazání sdělení se číslo znovu použije a řada zůstane souvislá
-  const taken = new Set(existing);
+  const taken = new Set([...own, ...others]);
   let n = 1;
   while (taken.has(`${base}-${n}`)) n++;
   return `${base}-${n}`;
+}
+
+/** Kódy sdělení v plánu: vlastní propozice a ostatní. */
+async function planLineCodes(planId: string, campaignId: string | null) {
+  const rows = await db.select({ code: messageLines.code, campaignId: messageLines.campaignId })
+    .from(messageLines).innerJoin(campaigns, eq(messageLines.campaignId, campaigns.id))
+    .where(eq(campaigns.planId, planId));
+  return {
+    own: rows.filter((r) => r.campaignId === campaignId).map((r) => r.code),
+    others: rows.filter((r) => r.campaignId !== campaignId).map((r) => r.code),
+  };
 }
 
 /**
@@ -1547,11 +1570,8 @@ export async function createMessageLine(raw: z.input<typeof newLine>): Promise<R
     const [camp] = await db.select({ name: campaigns.name }).from(campaigns).where(eq(campaigns.id, data.campaignId));
     // sdělení bez řádků (zbylá po dřívějším mazání) nejsou vidět, ale blokovala by čísla
     await dropEmptyLines(data.campaignId);
-    const existing = await db
-      .select({ code: messageLines.code })
-      .from(messageLines)
-      .where(eq(messageLines.campaignId, data.campaignId));
-    const code = data.code?.trim() || nextLineCode(camp.name, existing.map((r) => r.code));
+    const codes = await planLineCodes(await campaignPlan(data.campaignId), data.campaignId);
+    const code = data.code?.trim() || nextLineCode(camp.name, codes.own, codes.others);
 
     // nové sdělení začíná s cílovou skupinou plánu — změní se v hlavičce, ale hned se počítá
     let tg: { id: string; name: string } | null = null;

@@ -69,7 +69,6 @@ export function MediaCatalog({ rows, canEdit }: { rows: CatalogMedium[]; canEdit
                           <th className="r" title="Výchozí cena za 1 000 impresí — použije se u položky na CPM bez vlastní ceny (≈)">CPM (Kč)</th>
                           <th className="r" title="Výchozí cena za klik — u položky na CPC bez vlastní ceny (≈)">CPC (Kč)</th>
                           <th className="r" title="Výchozí míra prokliku pro odhad výsledků">CTR %</th>
-                          <th className="r" title="Výchozí konverzní poměr z kliků">Konv. %</th>
                           <th className="r" title="Výchozí průměrná frekvence za kampaň — z ní zásah = imprese ÷ frekvence. Prázdné = zásah z křivky modelu.">Frekv.</th>
                           <th />
                         </tr>
@@ -78,7 +77,7 @@ export function MediaCatalog({ rows, canEdit }: { rows: CatalogMedium[]; canEdit
                         {m.platforms.map((p) => (
                           <tr key={p.id}>
                             <td>{p.name}</td>
-                            {(["cpm", "cpc", "ctr", "cr", "freq"] as const).map((f) => (
+                            {(["cpm", "cpc", "ctr", "freq"] as const).map((f) => (
                               <td key={f} className="r">
                                 <DefaultInput platform={p} field={f} disabled={!canEdit}
                                   onCommit={(v) => run(() => setPlatformEstimate({ platformId: p.id, field: f, value: v }))} />
@@ -150,7 +149,7 @@ export function MediaCatalog({ rows, canEdit }: { rows: CatalogMedium[]; canEdit
         </div>
       )}
       <div className="note">
-        Platformu přidáte napsáním do pole „+ platforma“ a Enterem. Výchozí CPM, CPC, CTR, konverze a frekvence u digitálních
+        Platformu přidáte napsáním do pole „+ platforma“ a Enterem. Výchozí CPM, CPC, CTR a frekvence u digitálních
         platforem platí v plánech všude, kde položka nemá vlastní hodnotu — v plánu jsou označené „≈“ nebo šedě. Změna nosiče u média se projeví u nově vybraných
         položek; u položek, které médium už mají, nosič zůstane, dokud médium v řádku znovu nevyberete.
       </div>

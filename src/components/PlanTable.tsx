@@ -689,15 +689,15 @@ export function PlanTable({
                     }}>
                     <td colSpan={leftCols} style={{ boxShadow: `inset 3px 0 0 0 ${campColor(g.campaign)}` }}>
                       {canEditPlan && (
-                        <span className="grip" draggable title="Přetažením změníte pořadí kampaní"
+                        <span className="grip" draggable title="Přetažením změníte pořadí propozic"
                           onDragStart={() => setDragCamp(g.campaignId)}
                           onDragEnd={() => { setDragCamp(null); setDropCamp(null); }}
                           style={{ marginRight: 8 }}>⠿</span>
                       )}
-                      <span className="share" style={{ fontWeight: 300, marginRight: 6 }}>Kampaň</span>
+                      <span className="share" style={{ fontWeight: 300, marginRight: 6 }}>Propozice</span>
                       {canEditPlan ? (
-                        <input className="txt blockname" defaultValue={g.campaign} aria-label="Název kampaně"
-                          title="Klikněte a přepište název kampaně"
+                        <input className="txt blockname" defaultValue={g.campaign} aria-label="Název propozice"
+                          title="Klikněte a přepište název propozice"
                           size={Math.max(8, g.campaign.length + 1)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
@@ -713,23 +713,23 @@ export function PlanTable({
                       <span className="share" style={{ fontWeight: 300 }}>{lineGroups.length} sděl. · {g.rows.length} řádků</span>
                       {canEditPlan && (
                         <button className="btn" style={{ marginLeft: 10, fontSize: 11, padding: "2px 8px" }}
-                          title="Nové sdělení v této kampani, rovnou s prvním řádkem"
+                          title="Nové sdělení v této propozici, rovnou s první taktikou"
                           onClick={() => run(() => {}, () => {}, () => createMessageLine({ campaignId: g.campaignId }))}>
                           + sdělení
                         </button>
                       )}
                       {canEditPlan && (
                         <button className="btn danger blockact" style={{ marginLeft: 6, fontSize: 11, padding: "2px 8px" }}
-                          title="Smazat kampaň"
+                          title="Smazat propozici"
                           onClick={() => {
                             const n = g.rows.length;
                             if (n > 0 && !confirm(
-                              `Kampaň „${g.campaign}" obsahuje ${n} řádků.\n\n` +
+                              `Propozice „${g.campaign}" obsahuje ${n} taktik.\n\n` +
                               `Smazáním zmizí i všechny jejich rozpočty, metriky a skutečnost. ` +
-                              `Tohle nejde vrátit zpět.\n\nOpravdu smazat celou kampaň včetně obsahu?`)) return;
-                            if (n === 0 && !confirm(`Smazat prázdnou kampaň „${g.campaign}"?`)) return;
+                              `Tohle nejde vrátit zpět.\n\nOpravdu smazat celou propozici včetně obsahu?`)) return;
+                            if (n === 0 && !confirm(`Smazat prázdnou propozici „${g.campaign}"?`)) return;
                             run(() => {}, () => {}, () => deleteCampaign(g.campaignId, n > 0));
-                          }}>Smazat kampaň</button>
+                          }}>Smazat propozici</button>
                       )}
                     </td>
                     {cols.map((c) => {
@@ -743,7 +743,7 @@ export function PlanTable({
                     <tr className="emptygrp">
                       <td />
                       <td colSpan={leftCols - 1 + cols.length + rightCols}>
-                        Kampaň zatím nemá žádné sdělení — přidejte ho tlačítkem „+ sdělení" výše.
+                        Propozice zatím nemá žádné sdělení — přidejte ho tlačítkem „+ sdělení" výše.
                       </td>
                     </tr>
                   )}
@@ -821,9 +821,9 @@ export function PlanTable({
                                   onCreate={createThemeFor} />
                               </label>
                               {canEditPlan && (
-                                <button className="btn lineadd" title={`Přidat řádek ke sdělení „${l.message}"`}
+                                <button className="btn lineadd" title={`Přidat taktiku ke sdělení „${l.message}"`}
                                   onClick={() => run(() => {}, () => {}, () => createTactic({ messageLineId: lg.id }))}>
-                                  + řádek
+                                  + taktiku
                                 </button>
                               )}
                             </div>
@@ -865,7 +865,7 @@ export function PlanTable({
                                 <td style={{ boxShadow: `inset 3px 0 0 0 ${campColor(r.campaign)}`, textAlign: "center" }}>
                                   {canEditPlan && (
                                     <span className="grip" draggable
-                                      title="Přetažením změníte pořadí nebo přesunete řádek do jiné kampaně"
+                                      title="Přetažením změníte pořadí nebo přesunete taktiku do jiné propozice"
                                       onDragStart={() => setDragId(r.id)}
                                       onDragEnd={() => { setDragId(null); setDropHint(null); }}>⠿</span>
                                   )}
@@ -1073,6 +1073,11 @@ export function PlanTable({
                                   <td />
                                   <td colSpan={leftCols - 1 + cols.length + rightCols}>
                                     <div className="rowdetail-box">
+                                      {/* podrobnosti patří k taktice nad sebou — bez hlavičky vypadaly jako další řádek plánu */}
+                                      <div className="rd-head">
+                                        <span>▴ Podrobnosti taktiky <b>{r.name}</b></span>
+                                        <button className="linkbtn" onClick={() => setOpen(null)}>zavřít ×</button>
+                                      </div>
                                       {st.msgs.length > 0 && (
                                         <div className={`rd-msgs ${st.level}`}>
                                           {st.msgs.map((m) => <div key={m}>{st.level === "warn" ? "⚠ " : ""}{m}</div>)}
@@ -1107,21 +1112,6 @@ export function PlanTable({
                                             onCommit={(v) => run(() => patchRow(r.id, { est: { ...r.est, measurement: v as string | null } }), () => patchRow(r.id, { est: r.est }),
                                               () => setTacticEstimate({ tacticId: r.id, field: "measurement", value: v }))} />
                                         </label>
-                                        {c.media && !isGrpPriced(r.channelType) && (
-                                          <label className="lf" title="Konverzní poměr z kliků. Prázdné = výchozí hodnota platformy.">
-                                            <span>Konverze %{plat?.cr != null ? " · výchozí platformy šedě" : ""}</span>
-                                            <EstInput kind="pct" label={`Konverze ${r.name}`} disabled={!canEditPlan}
-                                              value={r.est.cr} shown={plat?.cr ?? undefined}
-                                              onCommit={(v) => run(() => patchRow(r.id, { est: { ...r.est, cr: v as number | null } }), () => patchRow(r.id, { est: r.est }),
-                                                () => setTacticEstimate({ tacticId: r.id, field: "cr", value: v }))} />
-                                          </label>
-                                        )}
-                                        {c.media && c.est.conversions !== null && (
-                                          <div className="lf rd-calc">
-                                            <span>Konverze · CPA (dopočteno)</span>
-                                            <div>{fmtCount(c.est.conversions)} · {c.est.cpa ? `${kc(c.est.cpa)} Kč` : "—"}</div>
-                                          </div>
-                                        )}
                                         <label className="lf" title="Výjimka z oblasti sdělení — třeba TV spot pro víc produktů rozdělený procenty">
                                           <span>Oblast řádku</span>
                                           <ThemeCell value={r.themes} themes={themeList} disabled={!canEditPlan}
@@ -1146,7 +1136,7 @@ export function PlanTable({
                                                     () => updateTactic({ tacticId: r.id, messageLineId: id }));
                                               }}>
                                               {[...campaigns].sort((a, b) => Number(b.id === r.campaignId) - Number(a.id === r.campaignId)).map((x) => (
-                                                <optgroup key={x.id} label={x.id === r.campaignId ? `${x.name} (tato kampaň)` : x.name}>
+                                                <optgroup key={x.id} label={x.id === r.campaignId ? `${x.name} (tato propozice)` : x.name}>
                                                   {x.lines.map((ln) => (
                                                     <option key={ln.id} value={ln.id}>{ln.code}{lineText.get(ln.id) ? ` · ${lineText.get(ln.id)}` : ""}</option>
                                                   ))}
@@ -1171,7 +1161,7 @@ export function PlanTable({
             })}
             {!visible.length && (
               <tr><td colSpan={leftCols + cols.length + rightCols} style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>
-                {data.length ? "Žádný řádek neodpovídá filtru." : "Plán je prázdný. Začněte tlačítkem „+ Přidat kampaň“ nahoře, pak v kampani „+ sdělení“."}
+                {data.length ? "Žádný řádek neodpovídá filtru." : "Plán je prázdný. Začněte tlačítkem „+ Přidat propozici“ nahoře, pak v propozici „+ sdělení“."}
               </td></tr>
             )}
           </tbody>
@@ -1194,14 +1184,14 @@ export function PlanTable({
         <b>Jak zadávat:</b> sdělení popíšete jednou v jeho hlavičce (fáze, cílová skupina, oblast) — platí pro všechny jeho řádky.
         V řádku vyberete, <b>kde</b> se nakupuje, <b>jak</b> (CPM, CPC, Fix; TV a rádio CPP), <b>cenu</b>, u digitálu <b>CTR</b> (u CPC nutné) a <b>frekvenci</b> (zásah = imprese ÷ frekvence) a rozpočet do měsíců.
         Šedé sloupce vpravo se dopočítají. Tečka na konci řádku: zelená = vše se počítá, oranžová = něco chybí
-        (kliknutím na řádek otevřete detail s návodem, kreativou, měřením, konverzemi a oblastí řádku), šedá = agenturní práce nebo bez rozpočtu.
+        (kliknutím na řádek otevřete podrobnosti taktiky: co doplnit, kreativa, měření, oblast), šedá = agenturní práce nebo bez rozpočtu.
         {canEditPlan && <><br /><b>Jako v Excelu:</b> Enter a šipky přeskakují mezi měsíci, Tab doprava.
         Blok zkopírovaný z Excelu vložíte Ctrl+V (⌘V) do první buňky — rozloží se doprava a dolů,
         prázdné buňky nic nepřepíšou a celé vložení vrátíte jedním Zpět.</>}
         {weeks && <><br /><b>Plán po týdnech:</b> zadáváte týdny, měsíce (i sbalené) jsou jejich součet. Týden přes přelom
         se do měsíců dělí podle dnů. Přepnout zpět na měsíce jde v Nastavení plánu.</>}
         <br />Zásah a frekvence jsou modelový odhad, ne měření. Frekvence = průměrný počet kontaktů na zasaženého za období. U digitálu se zadává (vlevo), u TV a rádia vychází z křivky. U sdělení, kampaně a celku se zásah nesčítá — počítá se znovu z GRP všech řádků s odečtením překryvu.
-        {canEditPlan && <> Úchyt ⠿ přetáhne řádek (pořadí, jiná kampaň) nebo celou kampaň.</>}
+        {canEditPlan && <> Úchyt ⠿ přetáhne taktiku (pořadí, jiná propozice) nebo celou propozici.</>}
       </div>
       </>)}
     </div>
@@ -1388,7 +1378,7 @@ function UndoButton({
 function NewCampaignButton({ onCreate }: { onCreate: (name: string) => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  if (!open) return <button className="btn primary" onClick={() => setOpen(true)}>+ Přidat kampaň</button>;
+  if (!open) return <button className="btn primary" onClick={() => setOpen(true)}>+ Přidat propozici</button>;
   return (
     <form
       style={{ display: "flex", gap: 6 }}
@@ -1399,7 +1389,7 @@ function NewCampaignButton({ onCreate }: { onCreate: (name: string) => void }) {
         setName(""); setOpen(false);
       }}
     >
-      <input autoFocus placeholder="Název kampaně" value={name} onChange={(e) => setName(e.target.value)}
+      <input autoFocus placeholder="Název propozice" value={name} onChange={(e) => setName(e.target.value)}
         style={{ font: "inherit", fontSize: 12, padding: "5px 10px", border: "1px solid var(--brand)",
           borderRadius: 4, background: "var(--surface)", color: "var(--ink)", minWidth: 170 }} />
       <button className="btn primary" type="submit">Založit</button>

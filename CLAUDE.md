@@ -64,6 +64,9 @@ scripts/import-strategicky-plan.ts   import týdenního flowchartu BENU z Excelu
 rovnou do databáze; do produkce jen se souhlasem zadavatele.
 
 Datový model: `Klient → Plán (období, stav) → Blok → Linka sdělení → Taktika`.
+V rozhraní Plánování se bloku říká **propozice** a řádku **taktika** (zadavatel, listopad 2026);
+kódy sdělení jsou unikátní v celém plánu (`nextLineCode`). Konverze a CPA se v plánu
+nezadávají ani nenabízejí (sloupce `est_cr` zůstaly v DB).
 Kolmo na to **tematická oblast** (`theme`, patří klientovi): Brand, Longevity,
 Probiotika… Taktika se mezi oblasti dělí podílem (`tactic_theme.share`, součet 1),
 smíšené položky typu „TV spot se 4 produkty" rovnoměrně. Částky, kontakty i GRP
