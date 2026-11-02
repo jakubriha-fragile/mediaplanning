@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import {
   setPlannedBudget, setRowUnit, setTacticMedia, updateTactic, updateMessageLine,
   moveTactic, moveCampaign, createTactic, createMessageLine, createCampaign, deleteTactic, deleteCampaign, undoLast,
@@ -1401,29 +1402,35 @@ function NewCampaignButton({ onCreate }: { onCreate: (name: string) => void }) {
 function MultiSelect({
   label, options, selected, onChange,
 }: { label: string; options: string[]; selected: Set<string>; onChange: (s: Set<string>) => void }) {
-  const [open, setOpen] = useState(false);
+  // nabídka se kreslí do <body> (portál, position: fixed) — v liště nad tabulkou
+  // ji překrývaly ukotvené buňky tabulky a nešlo do ní kliknout (listopad 2026)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   return (
     <div style={{ position: "relative" }}>
-      <button className="btn" style={{ borderRadius: 999, borderColor: open ? "var(--brand)" : undefined }}
-        onClick={() => setOpen((o) => !o)}>
+      <button className="btn" style={{ borderRadius: 999, borderColor: pos ? "var(--brand)" : undefined }}
+        onClick={(e) => {
+          if (pos) { setPos(null); return; }
+          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          setPos({ top: r.bottom + 4, left: Math.min(r.left, window.innerWidth - 260) });
+        }}>
         {label}{" "}
         {selected.size
           ? <b style={{ background: "var(--brand)", color: "#fff", borderRadius: 999, fontSize: 9.5, padding: "0 5px", marginLeft: 4 }}>{selected.size}</b>
           : <span style={{ color: "var(--muted)", fontSize: 10.5 }}>vše</span>}
       </button>
-      {open && (
+      {pos && createPortal(
         <>
-          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 50 }} />
-          <div style={{ position: "absolute", zIndex: 60, top: "calc(100% + 4px)", left: 0, minWidth: 240,
+          <div onClick={() => setPos(null)} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
+          <div style={{ position: "fixed", zIndex: 91, top: pos.top, left: pos.left, minWidth: 240,
             background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 5,
-            boxShadow: "0 6px 20px rgba(0,0,0,.14)" }}>
+            boxShadow: "0 6px 20px rgba(0,0,0,.14)", color: "var(--ink)", fontFamily: "inherit" }}>
             <div style={{ display: "flex", gap: 10, padding: "7px 10px", borderBottom: "1px solid var(--line)" }}>
               <button className="btn" style={{ border: "none", padding: 0, fontSize: 11, textDecoration: "underline" }}
                 onClick={() => onChange(new Set(options))}>Vybrat vše</button>
               <button className="btn" style={{ border: "none", padding: 0, fontSize: 11, textDecoration: "underline" }}
                 onClick={() => onChange(new Set())}>Zrušit</button>
             </div>
-            <div style={{ maxHeight: 270, overflow: "auto", padding: 4 }}>
+            <div style={{ maxHeight: Math.max(160, Math.min(270, window.innerHeight - pos.top - 60)), overflow: "auto", padding: 4 }}>
               {options.map((o) => (
                 <label key={o} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 7px",
                   borderRadius: 3, cursor: "pointer", fontSize: 12 }}>
@@ -1438,7 +1445,8 @@ function MultiSelect({
               ))}
             </div>
           </div>
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );

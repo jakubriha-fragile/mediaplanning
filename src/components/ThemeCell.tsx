@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 
 export type ThemeOption = { id: string; name: string };
 export type ThemeShare = { themeId: string; share: number };
@@ -20,8 +21,10 @@ export function ThemeCell({
   onSave: (shares: ThemeShare[]) => void;
   onCreate: (name: string) => Promise<string | null>;
 }) {
-  // editor se kreslí s position: fixed — tabulka plánu je v rolovacím
-  // kontejneru, který by absolutně umístěný popover uřízl
+  // Editor se kreslí do <body> přes portál (position: fixed). Uvnitř tabulky ho
+  // překrývaly ukotvené (sticky) buňky, dědil zarovnání buňky a v hlavičce
+  // sdělení ležel uvnitř <label> — kliky na zaškrtávátka pak chodily jinam
+  // (zadavatel, listopad 2026).
   const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
   const name = (id: string) => themes.find((t) => t.id === id)?.name ?? "?";
   const sorted = [...value].sort((a, b) => b.share - a.share);
@@ -44,9 +47,10 @@ export function ThemeCell({
             left: Math.min(r.left, window.innerWidth - 300),
           });
         }}>{label}</button>
-      {open && (
+      {open && createPortal(
         <ThemeEditor value={value} themes={themes} pos={open} onClose={() => setOpen(null)}
-          onSave={(s) => { setOpen(null); onSave(s); }} onCreate={onCreate} />
+          onSave={(s) => { setOpen(null); onSave(s); }} onCreate={onCreate} />,
+        document.body,
       )}
     </div>
   );
@@ -87,7 +91,7 @@ function ThemeEditor({
 
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50 }} />
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 90 }} />
       <div className="themeeditor" role="dialog" aria-label="Tematické oblasti taktiky" style={{ top: pos.top, left: pos.left }}>
         <div className="share" style={{ marginBottom: 6 }}>Na co položka míří — zaškrtněte jednu nebo víc oblastí</div>
         {all.map((t) => {
