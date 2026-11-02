@@ -1,29 +1,50 @@
 import type { ChannelType, PlanUnit } from "@/db/schema";
-import { derive, combineReach, reachFromGrp } from "@/lib/crossmedia";
+import { media as mediaTable } from "@/db/schema";
+import { db } from "@/db";
+import { derive, combineReach, reachByType } from "@/lib/crossmedia";
 import { costKind, type CostKind } from "@/lib/costKind";
-import { monthsBetween, weeksIn, weeksOfPeriod } from "@/lib/period";
+import { monthsBetween } from "@/lib/period";
 import { canSeePlan, canSeeTactic, type Principal } from "@/lib/permissions";
 import { getPlan, loadPlan, crossContext, getThemes, sharesByTactic, type CrossContext } from "@/lib/queries";
 
 /**
  * Data pro Přehled — jedno načtení, všechny pohledy z něj.
  *
- * Zásah se nikdy nesčítá přes měsíce ani oblasti: kumulativní zásah, zásah
- * oblasti i scénář se počítají znovu z nasčítaných GRP. Součet zásahů by vyšel
+ * Zásah se nikdy nesčítá přes měsíce, média ani oblasti: kumulativní zásah,
+ * zásah typu média i oblasti se počítají znovu z GRP položek (reachByType —
+ * křivka, nebo zadaná frekvence, stejně jako v Plánu). Součet zásahů by vyšel
  * přes sto procent. Všechno je modelový odhad, ne měření.
+ *
+ * Přehled je po měsících a v absolutních číslech (osoby, Kč) — procenta
+ * a frekvence za měsíc jen v úvodní větě (zadavatel, listopad 2026).
  */
 
-import { UNASSIGNED, SCENARIO_CUT } from "@/lib/dashboardShared";
-export { UNASSIGNED, SCENARIO_CUT };
+import { UNASSIGNED } from "@/lib/dashboardShared";
+export { UNASSIGNED };
 
 export type MonthPoint = {
   month: string;
   cost: number;
+  /** útrata po propozicích (campaignId → Kč) */
+  byCampaign: Record<string, number>;
   tvReach: number;
+  /** zásah měsíce (podíl 0–1) */
   net: number;
+  /** zásah od začátku plánu do konce měsíce */
   cumNet: number;
-  /** průměrný počet kontaktů na zasaženou ženu ZA TÝDEN (měsíc ÷ počet týdnů v něm) */
+  /** průměrný počet kontaktů na zasaženou osobu ZA MĚSÍC */
   frequency: number;
+};
+
+export type TypeRow = {
+  /** typ média, nebo „__fee" pro agenturní práci */
+  key: string;
+  type: ChannelType | null;
+  cost: number;
+  byMonth: Record<string, number>;
+  /** zásah za období jen z tohoto typu (podíl 0–1); agenturní práce 0 */
+  reach: number;
+  media: Array<{ name: string; cost: number; byMonth: Record<string, number>; reach: number }>;
 };
 
 export type MatrixRow = {
@@ -32,23 +53,21 @@ export type MatrixRow = {
   byType: Partial<Record<ChannelType, number>>;
   cost: number;
   net: number;
-  /** průměr týdenních frekvencí v měsících, kdy oblast běží */
-  weeklyFrequency: number;
+  /** průměr měsíčních frekvencí v měsících, kdy oblast běží */
+  monthlyFrequency: number;
 };
 
 export type Dashboard = {
   months: string[];
   universe: number;
-  freqLimit: number;
   /** zásah TV je z naměřených dat TV nákupu, ne předpoklad */
   tvCalibrated: boolean;
-  /**
-   * Plán po týdnech: body po týdnech (pole `month` nese klíč týdne). Frekvence je
-   * tu skutečně týdenní — kontakty týdne ÷ zásah týdne, ne měsíc rozpočítaný do
-   * týdnů. null = plán po měsících.
-   */
-  weekPoints: MonthPoint[] | null;
   points: MonthPoint[];
+  /** propozice v pořadí plánu (jen viditelné) */
+  campaigns: Array<{ id: string; name: string; cost: number }>;
+  /** sdělení pro filtr */
+  lines: Array<{ id: string; code: string; message: string; campaignId: string }>;
+  byType: TypeRow[];
   total: {
     cost: number;
     /** rozdělení nákladů podle typu: média s doručením / média bez dat / agenturní práce */
@@ -59,9 +78,8 @@ export type Dashboard = {
     fee: number;
     net: number;
     people: number;
-    /** průměr týdenních frekvencí přes aktivní měsíce — „žena spot uvidí X× týdně" */
-    avgWeeklyFrequency: number;
-    costPerPerson: number;
+    /** průměr měsíčních frekvencí přes měsíce se zásahem — „žena reklamu uvidí X× za měsíc" */
+    avgMonthlyFrequency: number;
     /** průměrný měsíční přínos ostatních médií k TV (p.b.) */
     avgIncrement: number;
   };
@@ -70,19 +88,9 @@ export type Dashboard = {
   matrixTypes: ChannelType[];
   /** položky médií bez doručení, největší první */
   missing: Array<{ channel: string; channelType: ChannelType; cost: number; kind: CostKind }>;
-  /** model: co když se TV v přetížených měsících ubere o SCENARIO_CUT */
-  scenario: null | {
-    months: string[];
-    saving: number;
-    netBefore: number;
-    netAfter: number;
-    freqBefore: number;
-    freqAfter: number;
-  };
 };
 
 type Row = Awaited<ReturnType<typeof loadPlan>>["rows"][number];
-type Budget = Awaited<ReturnType<typeof loadPlan>>["budgets"][number];
 type Cell = {
   row: Row; month: string; kind: CostKind;
   /** hodnoty už vynásobené podílem vybrané oblasti (bez filtru = 1) */
@@ -92,45 +100,60 @@ type Cell = {
   shares: Array<{ themeId: string; share: number }>;
 };
 
-/** Kontakty na zasaženou ženu za týden. */
-const weekly = (grp: number, net: number, month: string) => (net > 0 ? grp / 100 / net / weeksIn(month) : 0);
-
-function netFromGrp(grpByType: Map<ChannelType, number>, ctx: CrossContext) {
-  const parts = [...grpByType.entries()].map(([channelType, grp]) => ({
-    channelType, reach: grp > 0 ? reachFromGrp(grp, ctx.curveOf(channelType, null)) : 0,
-  }));
-  return { ...combineReach(parts, ctx.dup), parts };
-}
-
-function sumGrp(cells: Cell[], weight: (c: Cell) => number = () => 1) {
-  const map = new Map<ChannelType, number>();
+/**
+ * Zásah buněk: GRP se sečtou po položkách, položky jdou přes reachByType
+ * (křivka, nebo zadaná frekvence) a nosiče se složí combineReach.
+ */
+function netOf(cells: Cell[], ctx: CrossContext, weight: (c: Cell) => number = () => 1) {
+  const byRow = new Map<string, { row: Row; grp: number }>();
   for (const c of cells) {
-    const w = weight(c);
-    if (c.grp > 0 && w > 0) map.set(c.row.channelType, (map.get(c.row.channelType) ?? 0) + c.grp * w);
+    const g = c.grp * weight(c);
+    if (!(g > 0)) continue;
+    const cur = byRow.get(c.row.tacticId) ?? { row: c.row, grp: 0 };
+    cur.grp += g;
+    byRow.set(c.row.tacticId, cur);
   }
-  return map;
+  const parts = reachByType([...byRow.values()].map(({ row, grp }) => ({
+    channelType: row.channelType, grp, curve: ctx.curveOf(row.channelType, null), freq: ctx.freqFor(row),
+  })), ctx.dup);
+  const grp = parts.reduce((a, p) => a + p.grp, 0);
+  return { ...combineReach(parts, ctx.dup), parts, grp };
 }
-const total = (m: Map<ChannelType, number>) => [...m.values()].reduce((a, b) => a + b, 0);
+
+const FEE = "__fee";
 
 export async function getDashboard(
   me: Principal,
   planId: string,
-  filter: { themeId?: string | null; channelType?: ChannelType | null } = {},
+  filter: { themeId?: string | null; channelType?: ChannelType | null; campaignId?: string | null; lineId?: string | null } = {},
 ): Promise<Dashboard | null> {
   const plan = await getPlan(planId);
   if (!plan || !canSeePlan(me, planId)) return null;
   const months = monthsBetween(plan.periodStart, plan.periodEnd);
   const ctx = await crossContext(plan.targetGroupId, plan.clientId);
   const loaded = await loadPlan(planId);
-  const rows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId }));
+  const visibleRows = loaded.rows.filter((r) => canSeeTactic(me, { planId, mediaType: r.mediaType, campaignId: r.campaignId, channelType: r.channelType, tacticId: r.tacticId }));
   const universe = ctx.universeOf(null);
   const shareMap = sharesByTactic(loaded.themeShares);
-  const themeList = await getThemes(plan.clientId);
+  const [themeList, mediaNames] = await Promise.all([
+    getThemes(plan.clientId),
+    db.select({ id: mediaTable.id, name: mediaTable.name }).from(mediaTable),
+  ]);
+  const mediumName = new Map(mediaNames.map((m) => [m.id, m.name]));
 
-  const byKey = new Map<string, Budget>();
-  for (const b of loaded.budgets) byKey.set(`${b.tacticId}|${b.month}`, b);
+  // propozice a sdělení pro filtr — z viditelných řádků, v pořadí plánu
+  const campaigns: Dashboard["campaigns"] = [];
+  const lines: Dashboard["lines"] = [];
+  for (const r of visibleRows) {
+    if (!campaigns.some((c) => c.id === r.campaignId)) campaigns.push({ id: r.campaignId, name: r.campaign, cost: 0 });
+    if (!lines.some((l) => l.id === r.messageLineId)) lines.push({ id: r.messageLineId, code: r.code, message: r.message, campaignId: r.campaignId });
+  }
+  const rows = visibleRows.filter((r) =>
+    (!filter.campaignId || r.campaignId === filter.campaignId) && (!filter.lineId || r.messageLineId === filter.lineId));
 
-  // všechny buňky plánu bez filtru — matice oblastí je potřebuje celé
+  const byKey = new Map(loaded.budgets.map((b) => [`${b.tacticId}|${b.month}`, b]));
+
+  // všechny buňky (bez filtru oblasti a média) — matice oblastí je potřebuje celé
   const all: Cell[] = [];
   for (const r of rows) {
     const shares = shareMap.get(r.tacticId)?.length ? shareMap.get(r.tacticId)! : [{ themeId: UNASSIGNED, share: 1 }];
@@ -162,98 +185,48 @@ export async function getDashboard(
 
   const monthOf = (m: string) => cells.filter((c) => c.month === m);
   const points: MonthPoint[] = months.map((m, i) => {
-    const g = sumGrp(monthOf(m));
-    const net = netFromGrp(g, ctx);
-    const cum = netFromGrp(sumGrp(cells.filter((c) => months.indexOf(c.month) <= i)), ctx);
+    const mine = monthOf(m);
+    const net = netOf(mine, ctx);
+    const cum = netOf(cells.filter((c) => months.indexOf(c.month) <= i), ctx);
+    const byCampaign: Record<string, number> = {};
+    for (const c of mine) byCampaign[c.row.campaignId] = (byCampaign[c.row.campaignId] ?? 0) + c.cost;
     return {
       month: m,
-      cost: monthOf(m).reduce((a, c) => a + c.cost, 0),
+      cost: mine.reduce((a, c) => a + c.cost, 0),
+      byCampaign,
       tvReach: net.parts.find((p) => p.channelType === "TV")?.reach ?? 0,
       net: net.net,
       cumNet: cum.net,
-      frequency: weekly(total(g), net.net, m),
+      frequency: net.net > 0 ? net.grp / 100 / net.net : 0,
     };
   });
+  for (const c of campaigns) c.cost = points.reduce((a, p) => a + (p.byCampaign[c.id] ?? 0), 0);
 
-  // ---------------------------------------------- plán po týdnech: body po týdnech
-  let weekPoints: MonthPoint[] | null = null;
-  if (plan.granularity === "week") {
-    const weeks = weeksOfPeriod(plan.periodStart, plan.periodEnd);
-    const wb = new Map(loaded.weeks.map((b) => [`${b.tacticId}|${b.week}`, b]));
-    const wcells: Cell[] = [];
-    for (const r of rows) {
-      const shares = shareMap.get(r.tacticId)?.length ? shareMap.get(r.tacticId)! : [{ themeId: UNASSIGNED, share: 1 }];
-      const kind = costKind(r.channel);
-      for (const w of weeks) {
-        const b = wb.get(`${r.tacticId}|${w.key}`);
-        if (!b) continue;
-        const price = ctx.priceFor(r, b.driver as PlanUnit, b.unitPrice);
-        const d = derive({
-          channelType: r.channelType, pricing: r.pricing, ctr: ctx.ctrFor(r), driver: b.driver as PlanUnit, driverValue: b.driverValue,
-          unitPrice: price.unitPrice, universe: ctx.universeOf(r.targetGroupId),
-          curve: ctx.curveOf(r.channelType, r.targetGroupId),
-        });
-        const cost = b.planned || d.budget;
-        if (!cost && !d.grp) continue;
-        wcells.push({ row: r, month: w.key, kind, cost, grp: d.grp, delivered: d.grp > 0 || d.clicks > 0, estimated: price.estimated && d.grp > 0, shares });
-      }
-    }
-    const wf = wcells
-      .filter((c) => !filter.channelType || c.row.channelType === filter.channelType)
-      .map((c) => {
-        if (!filter.themeId) return c;
-        const sh = c.shares.find((x) => x.themeId === filter.themeId)?.share ?? 0;
-        return { ...c, cost: c.cost * sh, grp: c.grp * sh };
-      })
-      .filter((c) => c.cost > 0 || c.grp > 0);
-    const keys = weeks.map((w) => w.key);
-    weekPoints = keys.map((k, i) => {
-      const mine = wf.filter((c) => c.month === k);
-      const g = sumGrp(mine);
-      const net = netFromGrp(g, ctx);
-      const cum = netFromGrp(sumGrp(wf.filter((c) => keys.indexOf(c.month) <= i)), ctx);
-      return {
-        month: k,
-        cost: mine.reduce((a, c) => a + c.cost, 0),
-        tvReach: net.parts.find((p) => p.channelType === "TV")?.reach ?? 0,
-        net: net.net,
-        cumNet: cum.net,
-        frequency: net.net > 0 ? total(g) / 100 / net.net : 0,
-      };
-    });
-  }
+  // ------------------------------------------- rozpad podle typu média (a média v něm)
+  const typeKeys = [...new Set(cells.map((c) => (c.kind === "fee" ? FEE : c.row.channelType)))];
+  const byType: TypeRow[] = typeKeys.map((key) => {
+    const mine = cells.filter((c) => (c.kind === "fee" ? FEE : c.row.channelType) === key);
+    const byMonth = (cs: Cell[]) => Object.fromEntries(months.map((m) => [m, cs.filter((c) => c.month === m).reduce((a, c) => a + c.cost, 0)]));
+    const names = [...new Set(mine.map((c) => (c.row.mediumId ? mediumName.get(c.row.mediumId) : null) ?? "bez média"))];
+    return {
+      key,
+      type: key === FEE ? null : (key as ChannelType),
+      cost: mine.reduce((a, c) => a + c.cost, 0),
+      byMonth: byMonth(mine),
+      reach: key === FEE ? 0 : netOf(mine, ctx).net,
+      media: names.map((name) => {
+        const ms = mine.filter((c) => ((c.row.mediumId ? mediumName.get(c.row.mediumId) : null) ?? "bez média") === name);
+        return { name, cost: ms.reduce((a, c) => a + c.cost, 0), byMonth: byMonth(ms), reach: key === FEE ? 0 : netOf(ms, ctx).net };
+      }).sort((a, b) => b.cost - a.cost),
+    };
+  }).sort((a, b) => (a.key === FEE ? 1 : b.key === FEE ? -1 : b.cost - a.cost));
 
-  const period = netFromGrp(sumGrp(cells), ctx);
+  const period = netOf(cells, ctx);
   const cost = cells.reduce((a, c) => a + c.cost, 0);
   const fee = cells.filter((c) => c.kind === "fee").reduce((a, c) => a + c.cost, 0);
   const delivered = cells.filter((c) => c.kind !== "fee" && c.delivered).reduce((a, c) => a + c.cost, 0);
-  const live = points.filter((p) => p.net > 0);
   const withTv = points.filter((p) => p.tvReach > 0);
-  const people = period.net * universe;
-
-  // ---------------------------------------------- scénář: méně TV v přetížení
-  const limit = plan.freqLimit;
-  const over = points.filter((p) => p.frequency > limit).map((p) => p.month);
-  let scenario: Dashboard["scenario"] = null;
-  if (over.length) {
-    const cut = (c: Cell) => (c.row.channelType === "TV" && over.includes(c.month) ? 1 - SCENARIO_CUT : 1);
-    const after = netFromGrp(sumGrp(cells, cut), ctx);
-    const freqIn = (w: (c: Cell) => number) => {
-      const fs = over.map((m) => {
-        const g = sumGrp(monthOf(m), w);
-        return weekly(total(g), netFromGrp(g, ctx).net, m);
-      });
-      return fs.reduce((a, b) => a + b, 0) / fs.length;
-    };
-    scenario = {
-      months: over,
-      saving: cells.filter((c) => c.row.channelType === "TV" && over.includes(c.month)).reduce((a, c) => a + c.cost, 0) * SCENARIO_CUT,
-      netBefore: period.net,
-      netAfter: after.net,
-      freqBefore: freqIn(() => 1),
-      freqAfter: freqIn(cut),
-    };
-  }
+  const liveF = points.filter((p) => p.net > 0);
 
   // ------------------------------------------- matice oblasti × média (bez filtru oblasti)
   const forMatrix = all.filter((c) => !filter.channelType || c.row.channelType === filter.channelType);
@@ -261,19 +234,19 @@ export async function getDashboard(
   const matrix: MatrixRow[] = themeIds.map((id) => {
     const w = (c: Cell) => c.shares.find((s) => s.themeId === id)?.share ?? 0;
     const mine = forMatrix.filter((c) => w(c) > 0);
-    const byType: MatrixRow["byType"] = {};
-    for (const c of mine) byType[c.row.channelType] = (byType[c.row.channelType] ?? 0) + c.cost * w(c);
+    const byT: MatrixRow["byType"] = {};
+    for (const c of mine) byT[c.row.channelType] = (byT[c.row.channelType] ?? 0) + c.cost * w(c);
     const freqs = months.map((m) => {
-      const g = sumGrp(mine.filter((c) => c.month === m), w);
-      return weekly(total(g), netFromGrp(g, ctx).net, m);
+      const n = netOf(mine.filter((c) => c.month === m), ctx, w);
+      return n.net > 0 ? n.grp / 100 / n.net : 0;
     }).filter((f) => f > 0);
     return {
       id,
       name: id === UNASSIGNED ? "Nezařazeno" : themeList.find((t) => t.id === id)?.name ?? "?",
-      byType,
+      byType: byT,
       cost: mine.reduce((a, c) => a + c.cost * w(c), 0),
-      net: netFromGrp(sumGrp(mine, w), ctx).net,
-      weeklyFrequency: freqs.length ? freqs.reduce((a, b) => a + b, 0) / freqs.length : 0,
+      net: netOf(mine, ctx, w).net,
+      monthlyFrequency: freqs.length ? freqs.reduce((a, b) => a + b, 0) / freqs.length : 0,
     };
   }).sort((a, b) => b.cost - a.cost);
 
@@ -291,10 +264,11 @@ export async function getDashboard(
   return {
     months,
     universe,
-    freqLimit: limit,
     tvCalibrated: ctx.calibrated("TV", null),
     points,
-    weekPoints,
+    campaigns,
+    lines,
+    byType,
     total: {
       cost,
       delivered,
@@ -302,13 +276,8 @@ export async function getDashboard(
       mediaNoData: cost - fee - delivered,
       fee,
       net: period.net,
-      people,
-      // po týdnech průměr skutečných týdnů, jinak měsíců rozpočítaných do týdnů
-      avgWeeklyFrequency: (() => {
-        const src = (weekPoints ?? points).filter((p) => p.net > 0);
-        return src.length ? src.reduce((a, p) => a + p.frequency, 0) / src.length : 0;
-      })(),
-      costPerPerson: people > 0 ? cost / people : 0,
+      people: period.net * universe,
+      avgMonthlyFrequency: liveF.length ? liveF.reduce((a, p) => a + p.frequency, 0) / liveF.length : 0,
       avgIncrement: withTv.length ? withTv.reduce((a, p) => a + Math.max(0, p.net - p.tvReach), 0) / withTv.length : 0,
     },
     costByType: [...typeMap.entries()].map(([type, c]) => ({ type, cost: c })).sort((a, b) => b.cost - a.cost),
@@ -316,6 +285,5 @@ export async function getDashboard(
     matrixTypes: [...new Set(forMatrix.map((c) => c.row.channelType))]
       .sort((a, b) => (typeMap.get(b) ?? 0) - (typeMap.get(a) ?? 0)),
     missing: [...missingMap.values()].sort((a, b) => b.cost - a.cost),
-    scenario,
   };
 }

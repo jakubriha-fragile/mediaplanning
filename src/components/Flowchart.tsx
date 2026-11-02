@@ -18,8 +18,6 @@ const AGENCY = "__agency";
 
 const daysIn = (m: string) => { const [y, mo] = m.split("-").map(Number); return new Date(Date.UTC(y, mo, 0)).getUTCDate(); };
 const kc = (v: number) => Math.round(v).toLocaleString("cs-CZ");
-// do úzkého týdne se vejdou 3–4 znaky: tisíce Kč, od milionu „2,7M“
-const tis = (v: number) => (!v ? "" : v >= 1e6 ? `${(v / 1e6).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })}M` : Math.round(v / 1000).toLocaleString("cs-CZ"));
 
 /**
  * Flowchart: co kdy běží a za kolik. Jen čtení — počítá se z rozpočtů plánu,
@@ -37,6 +35,8 @@ export function Flowchart({ rows, weeks, monthLabels, weekly, onOpen }: {
   onOpen: (id: string) => void;
 }) {
   const [by, setBy] = useState<"media" | "msg">("media");
+  /** čísla v pruzích: rozpočet v tisících Kč, nebo podíl na rozpočtu výběru */
+  const [unit, setUnit] = useState<"kc" | "pct">("kc");
 
   const valueOf = useMemo(() => {
     const cache = new Map<string, number[]>();
@@ -86,7 +86,16 @@ export function Flowchart({ rows, weeks, monthLabels, weekly, onOpen }: {
   // sytost: odmocnina, aby slabé týdny vedle TV nezmizely
   const shade = (v: number) => Math.round(25 + 75 * Math.sqrt(v / max));
 
-  const sumCells = (v: number[]) => v.map((x, i) => <td key={i} className={`fc-num ${isStart(i) ? "fc-ms" : ""}`} title={x ? `${weeks[i].label} (${weeks[i].title}) · ${kc(x)} Kč` : undefined}>{tis(x)}</td>);
+  const grand = live.reduce((s, r) => s + total(valueOf.get(r.id)!), 0) || 1;
+  // vždy rozpočet: tisíce Kč (zaokrouhleno), nebo % z rozpočtu výběru
+  const fmt = (v: number) => {
+    if (!v) return "";
+    if (unit === "kc") return Math.max(1, Math.round(v / 1000)).toLocaleString("cs-CZ");
+    const p = (v / grand) * 100;
+    return p < 0.1 ? "<0,1" : p.toLocaleString("cs-CZ", { maximumFractionDigits: p < 10 ? 1 : 0 });
+  };
+  const unitLabel = unit === "kc" ? "Rozpočet v tis. Kč" : "Rozpočet v % z celku";
+  const sumCells = (v: number[]) => v.map((x, i) => <td key={i} className={`fc-num ${isStart(i) ? "fc-ms" : ""}`} title={x ? `${weeks[i].label} (${weeks[i].title}) · rozpočet ${kc(x)} Kč` : undefined}>{fmt(x)}</td>);
 
   return (
     <div className="flowchart">
@@ -100,9 +109,14 @@ export function Flowchart({ rows, weeks, monthLabels, weekly, onOpen }: {
           {TYPE_ORDER.filter((t) => TYPE_COLOR[t] && live.some((r) => typeKey(r) === t)).map((t) => (
             <span key={t}><i style={{ background: TYPE_COLOR[t] }} />{TYPE_LABEL[t] ?? t}</span>
           ))}
-          <span className="share">sytější = víc Kč v týdnu · částka po najetí myší · klik otevře řádek v tabulce</span>
+          <span className="share">čísla = rozpočet v týdnu · sytější = víc peněz · klik otevře řádek v tabulce</span>
         </span>
         <span className="spacer" />
+        <span className="share">Rozpočet v</span>
+        <div className="seg" role="radiogroup" aria-label="Jednotka rozpočtu">
+          <button type="button" role="radio" aria-checked={unit === "kc"} className={unit === "kc" ? "on" : ""} onClick={() => setUnit("kc")}>tis. Kč</button>
+          <button type="button" role="radio" aria-checked={unit === "pct"} className={unit === "pct" ? "on" : ""} onClick={() => setUnit("pct")}>%</button>
+        </div>
         <button className="btn" onClick={() => window.print()}>Tisk / PDF</button>
       </div>
 
@@ -110,9 +124,9 @@ export function Flowchart({ rows, weeks, monthLabels, weekly, onOpen }: {
         <table className="fc">
           <thead>
             <tr>
-              <th className="fc-lab" />
+              <th className="fc-lab fc-unit">{unitLabel}</th>
               {monthSpans.map((m, i) => <th key={i} colSpan={m.n} className="fc-month fc-ms">{monthLabels[m.month] ?? m.month}</th>)}
-              <th className="fc-tot">Celkem Kč</th>
+              <th className="fc-tot">Rozpočet celkem</th>
             </tr>
             <tr>
               <th className="fc-lab share">týden</th>
@@ -127,7 +141,7 @@ export function Flowchart({ rows, weeks, monthLabels, weekly, onOpen }: {
                 <tr key={g.key} className="fc-group">
                   <td className="fc-lab">{g.label}</td>
                   {sumCells(gs)}
-                  <td className="fc-tot">{kc(total(gs))}</td>
+                  <td className="fc-tot">{unit === "kc" ? `${kc(total(gs))} Kč` : `${fmt(total(gs))} %`}</td>
                 </tr>,
                 ...g.rows.map((r) => {
                   const v = valueOf.get(r.id)!;
@@ -142,12 +156,14 @@ export function Flowchart({ rows, weeks, monthLabels, weekly, onOpen }: {
                       {v.map((x, i) => (
                         <td key={i} className={isStart(i) ? "fc-ms" : ""}>
                           {x > 0 && (
-                            <div className="fc-cell" title={`${r.name} · ${weeks[i].label} (${weeks[i].title}) · #${r.message} · ${kc(x)} Kč`}
-                              style={{ background: `color-mix(in srgb, ${colorOf(r)} ${shade(x)}%, transparent)` }} />
+                            <div className="fc-cell" title={`${r.name} · ${weeks[i].label} (${weeks[i].title}) · #${r.message} · rozpočet ${kc(x)} Kč`}
+                              style={{ background: `color-mix(in srgb, ${colorOf(r)} ${shade(x)}%, transparent)`, color: shade(x) > 65 ? "#fff" : "var(--ink)" }}>
+                              {fmt(x)}
+                            </div>
                           )}
                         </td>
                       ))}
-                      <td className="fc-tot">{kc(total(v))}</td>
+                      <td className="fc-tot">{unit === "kc" ? `${kc(total(v))} Kč` : `${fmt(total(v))} %`}</td>
                     </tr>
                   );
                 }),
@@ -162,9 +178,9 @@ export function Flowchart({ rows, weeks, monthLabels, weekly, onOpen }: {
               const s = sumOf(live);
               return (
                 <tr>
-                  <td className="fc-lab">Celkem <span className="share">(týdny v tis. Kč, M = mil.)</span></td>
+                  <td className="fc-lab">Celkem · {unitLabel}</td>
                   {sumCells(s)}
-                  <td className="fc-tot">{kc(total(s))}</td>
+                  <td className="fc-tot">{kc(total(s))} Kč</td>
                 </tr>
               );
             })()}

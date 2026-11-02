@@ -167,10 +167,12 @@ jednotlivým médiem a sto procenty.
 
 ### Přehled
 
-První stránka pro agenturu (klient ji nevidí), celá na jednu obrazovku: **jedna věta** se zásahem
-a týdenní frekvencí (vedle ní filtr oblasti a média), pod ní tři čísla — rozpočet, náklad na
-zasaženou osobu a počet přetížených měsíců — a pak graf zásahu a frekvence s doporučeními
-**Co s tím** (tři nejdůležitější, další na kliknutí). Matice **oblasti × média** je pod
+První stránka pro agenturu (klient ji nevidí). **Jedna věta** se zásahem v % a **frekvencí za
+měsíc** — jediné místo s procenty; jinde jsou absolutní čísla (osoby, Kč). Filtry: propozice,
+sdělení, oblast, médium. Vedle rozpočet. Pak graf **útraty po měsících skládaný podle propozic**
+s čárou zásahu v osobách (pravá osa) a **Co s tím**; pod ním tabulka **podle typu médií** (útrata
+po měsících, celkem a zásah typu za období, kliknutím rozpad na média). Náklad na zasaženou
+osobu, přetížené měsíce a hranice frekvence z Přehledu zmizely (zadavatel, listopad 2026). Matice **oblasti × média** je pod
 rozbalením a otevře se sama, když je vybraná oblast. Úplnost dat, předpoklady a slovníček jsou
 ve sbaleném panelu dole. Text o zásahu TV se řídí tím, jestli je křivka zkalibrovaná.
 

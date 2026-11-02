@@ -43,8 +43,9 @@ src/lib/actions.ts       VŠECHNY zápisy; každý projde assertCan()
 src/lib/queries.ts       čtení dat pro stránky
 src/lib/undo.ts          zásobník vrácení zpět (10 kroků na uživatele)
 src/app/kalkulacka/      Sainsburyho kalkulačka + editace koeficientů duplikace
-src/lib/dashboard.ts     data pro Přehled (/prehled): zásah a frekvence v čase, matice oblasti × média,
-                         filtry (?oblast, ?medium), modelový scénář „méně TV v přetížení"
+src/lib/dashboard.ts     data pro Přehled (/prehled): útrata po propozicích a zásah po měsících, rozpad podle
+                         typu média, matice oblasti × média, filtry (?propozice, ?sdeleni, ?oblast, ?medium).
+                         Zásah přes netOf → reachByType (zadaná frekvence i křivka, jako Plán)
 src/lib/costKind.ts      média / agenturní práce / smíšené — podle názvu položky
 src/lib/estimates.ts     odhad výsledků položky: kliky, konverze, CPA z doručení + CTR/konverze (položka, jinak platforma)
 src/lib/mix.ts           data pro Finální mix (/mix): média, měsíce, oblasti, modelový zásah
@@ -127,7 +128,7 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
    jde rovnou na K vyplnění). Plán klienta je samostatná komponenta `ClientPlan`,
    ne `PlanTable` s výjimkami; offline/online místo Paid/Owned/Earned (u BENU je vše
    Paid — agentura P/O/E chce vidět dál), zásah jen při `seesWholePlan`.
-   Frekvence je všude TÝDNÍ (`weeksIn`/`weeksOf` v period.ts). (`role === "CLIENT"` → `clientView` v `PlanTable`,
+   Frekvence: Přehled za měsíc, Plán za období, panel zásahu a klientský pohled týdně (`weeksIn`/`weeksOf`). (`role === "CLIENT"` → `clientView` v `PlanTable`,
    `ReachPanel`, `Results`). Nevidí agenturní sloupce (Jednotka, Cena), dopočty
    GRP v buňkách, odborný panel zásahu ani texty typu „před sdílením s klientem".
    Komentář agentury nesmí měnit ani na serveru (`setAccountNote`). Výhrada
@@ -145,11 +146,10 @@ oblasti = hodnoty taktiky × podíl; zásah oblasti se počítá z takto dělen�
 
 12. **Agenturní práce není „chybějící data".** `costKind()` ji pozná z názvu
    (ag. práce, fee, natáčení, ambasador…) a Přehled ji z pokrytí modelu vyřazuje.
-   Frekvence v Přehledu je **týdenní** (měsíční kontakty ÷ zásah ÷ dny/7 — plán je
-   po měsících, takže rovnoměrné rozložení). Hranice přehlcení je týdenní,
-   u plánu (`plan.freq_limit`, výchozí 5), ne v prohlížeči — doporučení
-   musí vidět všichni stejná. Doporučení „ubrat TV" je spočítané modelem
-   (SCENARIO_CUT), ne odhadnuté.
+   **Přehled (listopad 2026):** frekvence ZA MĚSÍC (kontakty měsíce ÷ zásah měsíce), jen
+   v úvodní větě spolu se zásahem v %; jinde absolutní čísla (osoby, Kč). Přehlcení,
+   hranice frekvence (`plan.freq_limit` v DB zůstal) a scénář „ubrat TV" z Přehledu
+   zadavatel vyřadil, stejně jako náklad na zasaženou osobu.
 
 13. **Ceník je jen odhad při čtení.** `rate_card` (klient × nosič, CPP/CPT) se použije
    v `crossContext.priceFor` jen u médií zadaných v Kč bez vlastní ceny — nikdy

@@ -304,3 +304,120 @@ export function ReachFrequency({
     </div>
   );
 }
+
+/**
+ * Útrata po měsících skládaná podle propozic + čára zásahu (osoby). Dvě osy
+ * výjimečně ano: zadavatel chce peníze a zásah v jednom grafu (listopad 2026).
+ * Levá osa Kč, pravá osa osoby — obě popsané, čára má vlastní barvu i legendu.
+ */
+export function SpendReach({
+  labels, series, values, reach, cum, formatKc, formatPeople, caption,
+}: {
+  labels: string[];
+  series: Series[];
+  /** po měsících: key propozice → Kč */
+  values: Array<Record<string, number>>;
+  /** zásah měsíce v osobách */
+  reach: number[];
+  /** zásah od začátku plánu v osobách (jen do nápovědy a tabulky) */
+  cum: number[];
+  formatKc: (v: number) => string;
+  formatPeople: (v: number) => string;
+  caption: string;
+}) {
+  const [ref, W] = useWidth<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const [table, setTable] = useState(false);
+  const H2 = 280, L = 64, R = 64, T = 12, B = 28;
+  const iw = W - L - R, ih = H2 - T - B;
+  const band = iw / Math.max(1, labels.length);
+  const bw = Math.min(44, band * 0.62);
+  const totals = values.map((v) => series.reduce((s, x) => s + (v[x.key] ?? 0), 0));
+  const kt = ticks(Math.max(1, ...totals));
+  const kMax = kt[kt.length - 1];
+  const pt = ticks(Math.max(1, ...reach), kt.length - 1);
+  const pMax = pt[pt.length - 1];
+  const yK = (v: number) => T + ih - (v / kMax) * ih;
+  const yP = (v: number) => T + ih - (v / pMax) * ih;
+  const cx = (i: number) => L + band * i + band / 2;
+
+  return (
+    <div className="db-chart" ref={ref}>
+      <svg width={W} height={H2} role="img" aria-label={caption} onMouseLeave={() => setHover(null)}>
+        {kt.map((t) => (
+          <g key={`k${t}`}>
+            <line x1={L} x2={W - R} y1={yK(t)} y2={yK(t)} className={t === 0 ? "db-base" : "db-grid"} />
+            <text x={L - 8} y={yK(t)} dy="0.32em" textAnchor="end">{formatKc(t)}</text>
+          </g>
+        ))}
+        {pt.map((t) => (
+          <text key={`p${t}`} x={W - R + 8} y={yP(t)} dy="0.32em" textAnchor="start" className="db-axis-r">{formatPeople(t)}</text>
+        ))}
+        {labels.map((lab, i) => {
+          let acc = 0;
+          const segs = series.map((s) => {
+            const v = values[i][s.key] ?? 0;
+            const y0 = yK(acc), y1 = yK(acc + v);
+            acc += v;
+            return { s, v, y0, y1 };
+          }).filter((x) => x.v > 0);
+          return (
+            <g key={i}>
+              {hover === i && <rect x={L + band * i} y={T} width={band} height={ih} className="db-hoverband" />}
+              {segs.map((g, j) => {
+                const isTop = j === segs.length - 1;
+                const h = Math.max(0, g.y0 - g.y1 - (isTop ? 0 : 2));
+                const yy = g.y1 + (isTop ? 0 : 2);
+                return isTop
+                  ? <path key={g.s.key} d={topRounded(cx(i) - bw / 2, yy, bw, h)} style={{ fill: g.s.color }} />
+                  : <rect key={g.s.key} x={cx(i) - bw / 2} y={yy} width={bw} height={h} style={{ fill: g.s.color }} />;
+              })}
+              <text x={cx(i)} y={H2 - 10} textAnchor="middle" className={hover === i ? "db-xlab on" : "db-xlab"}>{lab}</text>
+              <rect x={L + band * i} y={T} width={band} height={ih + B} fill="transparent" onMouseEnter={() => setHover(i)} />
+            </g>
+          );
+        })}
+        <g pointerEvents="none">
+          <polyline className="db-line db-line-reach" fill="none" points={reach.map((v, i) => `${cx(i)},${yP(v)}`).join(" ")} />
+          {reach.map((v, i) => <circle key={i} cx={cx(i)} cy={yP(v)} r={hover === i ? 5 : 3.5} className="db-dot db-dot-reach" />)}
+        </g>
+      </svg>
+
+      {hover !== null && (
+        <div className="db-tip" style={{ left: Math.min(W - 230, Math.max(0, cx(hover) + 16)), top: 8 }}>
+          <b>{labels[hover]}</b>
+          {[...series].reverse().map((s) => (values[hover][s.key] ?? 0) > 0 && (
+            <div key={s.key}><i className="db-sw" style={{ background: s.color }} />{s.label}<span>{formatKc(values[hover][s.key])} Kč</span></div>
+          ))}
+          <div className="db-tip-sum">Útrata celkem<span>{formatKc(totals[hover])} Kč</span></div>
+          <div><i className="db-sw db-sw-reach" />Zasáhne v měsíci<span>{formatPeople(reach[hover])}</span></div>
+          <div>Od začátku plánu<span>{formatPeople(cum[hover])}</span></div>
+        </div>
+      )}
+
+      <button className="db-tablebtn" onClick={() => setTable((t) => !t)} aria-expanded={table}>
+        {table ? "Skrýt tabulku" : "Zobrazit jako tabulku"}
+      </button>
+      {table && (
+        <div className="db-tablewrap">
+          <table className="db-table">
+            <thead>
+              <tr><th>Měsíc</th>{series.map((s) => <th key={s.key}>{s.label}</th>)}<th>Útrata celkem</th><th>Zasáhne v měsíci</th><th>Od začátku</th></tr>
+            </thead>
+            <tbody>
+              {labels.map((l, i) => (
+                <tr key={i}>
+                  <td>{l}</td>
+                  {series.map((s) => <td key={s.key}>{values[i][s.key] ? `${formatKc(values[i][s.key])} Kč` : "—"}</td>)}
+                  <td>{totals[i] ? `${formatKc(totals[i])} Kč` : "—"}</td>
+                  <td>{reach[i] ? formatPeople(reach[i]) : "—"}</td>
+                  <td>{cum[i] ? formatPeople(cum[i]) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

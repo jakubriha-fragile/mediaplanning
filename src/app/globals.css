@@ -1013,3 +1013,37 @@ table.plan tr.trow.opened td { border-bottom-color: transparent; }
 table.plan tr.rowdetail td:nth-child(2) { box-shadow: inset 3px 0 0 0 var(--brand); }
 .rd-head { display: flex; align-items: baseline; gap: 12px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
 .rd-head b { color: var(--ink); font-weight: 500; }
+
+/* Přehled: útrata po propozicích + zásah v osobách (listopad 2026) */
+.db-line-reach { stroke: var(--bad-pure); }
+.db-dot-reach { fill: var(--bad-pure); }
+.db-sw-reach { background: var(--bad-pure); height: 3px !important; border-radius: 2px; }
+.db-axis-r { fill: var(--bad); }
+.db-hero.db-hero2 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.db-hero.db-hero2 .db-lead { grid-column: auto; }
+.db-types td.db-num, .db-types th.db-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.db-types tr.db-sub td { color: var(--muted); font-size: 12px; }
+.db-types tr.db-sub td:first-child { padding-left: 24px; }
+.db-types tr.db-typerow { cursor: pointer; }
+.db-types tfoot td { font-weight: 500; border-top: 1px solid var(--line-strong); }
+
+/* Povinná pole, která chybí — musí být vidět na první pohled (zadavatel, listopad 2026):
+   oranžový podklad, silný rámeček a vykřičník; jakmile se vyplní, zmizí */
+table.plan select.need, table.plan .pricecell .cell.need, td.ctrcell input.estinput.need, .lf-warn select {
+  background: var(--attn-soft) !important; border: 2px solid var(--attn) !important; box-shadow: none;
+  color: var(--attn); font-weight: 500;
+}
+table.plan .pricecell .cell.need::placeholder, td.ctrcell input.estinput.need::placeholder { color: var(--attn); font-style: normal; }
+table.plan td:has(> select.need), table.plan td:has(.cell.need), table.plan td:has(input.need) { position: relative; }
+table.plan td:has(> select.need)::before, table.plan td:has(.pricecell .cell.need)::before, td.ctrcell:has(input.need)::before {
+  content: "!"; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--attn); color: #fff; font-size: 10px; font-weight: 700; line-height: 14px; text-align: center; z-index: 2;
+}
+.lf-warn > span::after { content: " — vyberte"; font-weight: 500; }
+/* flowchart: rozpočet čitelně přímo v pruzích */
+table.fc .fc-wk { min-width: 40px; }
+table.fc .fc-cell { height: 20px; font-size: 10px; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; overflow: hidden; white-space: nowrap; }
+table.fc .fc-num { font-size: 10.5px; }
+table.fc th.fc-unit { color: var(--brand-ink); font-weight: 500; }
+.db-hero.db-hero2 .db-lead { grid-template-columns: minmax(0, 1fr); }
+.db-hero.db-hero2 .db-lead .db-filters { grid-column: 1; grid-row: auto; margin-top: 10px; flex-wrap: wrap; }

@@ -15,6 +15,7 @@ import { estimate, type Estimate } from "@/lib/estimates";
 import { costKind } from "@/lib/costKind";
 import { ThemeCell, type ThemeOption, type ThemeShare } from "@/components/ThemeCell";
 import { Flowchart, type FlowWeek } from "@/components/Flowchart";
+import { CAMP_COLORS } from "@/lib/campColors";
 import { combineReach, isGrpPriced, priceHint, reachByType, UNIT_LABEL, type Curve } from "@/lib/crossmedia";
 import type { ChannelType, PlanUnit } from "@/db/schema";
 
@@ -85,10 +86,6 @@ const parse = (s: string) => Number(String(s).replace(/[^\d]/g, "")) || 0;
 /** GRP se zadávají i desetinně, proto vlastní parser s čárkou i tečkou. */
 const parseNum = (s: string) => Number(String(s).replace(/\s/g, "").replace(",", ".").replace(/[^\d.]/g, "")) || 0;
 
-const CAMP_COLORS = [
-  "var(--paid)", "var(--owned)", "var(--earned)", "#c2477e",
-  "#5f8b1f", "#8b5fd6", "#b8502a", "#2b7bbf",
-];
 const PHASES = ["Awareness", "Consideration", "Conversion"] as const;
 const CHANNEL_TYPES: ChannelType[] = ["TV", "Rádio", "OOH", "Print", "Kino", "Digital", "Vlastní", "PR"];
 /**
@@ -949,13 +946,13 @@ export function PlanTable({
                                 {!clientView && <td className="r" style={{ whiteSpace: "nowrap" }}>
                                   {buy === "fix" ? (
                                     <PriceCell value={r.fixImpressions ?? 0} unit={BUY_UNIT.fix} hint={priceHint(r.channelType, "fix")}
-                                      placeholder="" disabled={!rowEditable(r)}
+                                      placeholder="" disabled={!rowEditable(r)} need={c.media}
                                       onCommit={(v) => run(() => patchRow(r.id, { fixImpressions: v || null }), () => patchRow(r.id, { fixImpressions: r.fixImpressions }),
                                         () => setFixImpressions({ tacticId: r.id, value: v || null }))} />
                                   ) : (
                                     <PriceCell value={rowPrice(r)} unit={BUY_UNIT[buy]} hint={priceHint(r.channelType, r.pricing)}
                                       placeholder={defaultPriceOf(r) ? `${kc(defaultPriceOf(r)!)}` : months.some((m) => r.cells[m]?.estimated) ? "ceník" : ""}
-                                      disabled={!rowEditable(r)}
+                                      disabled={!rowEditable(r)} need={c.media}
                                       onCommit={(v) => run(() => {}, () => {}, () => setRowUnit({ tacticId: r.id, unitPrice: v }))} />
                                   )}
                                 </td>}
@@ -1340,18 +1337,18 @@ function BudgetCell({
 
 /** Jednotková cena — CPP u TV a rádia, jinak CPM. */
 function PriceCell({
-  value, unit, hint, placeholder, disabled, onCommit,
-}: { value: number; unit: string; hint: string; placeholder: string; disabled: boolean; onCommit: (v: number) => void }) {
+  value, unit, hint, placeholder, disabled, need = false, onCommit,
+}: { value: number; unit: string; hint: string; placeholder: string; disabled: boolean; need?: boolean; onCommit: (v: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? (value ? kc(value) : "");
   return (
     <span className="pricecell" title={`${unit} — ${hint}${!value && placeholder ? ". Šedě je výchozí hodnota, platí, dokud nezadáte vlastní." : ""}`}>
       <input
-        className={`cell num ${!value && !placeholder ? "need" : ""}`}
+        className={`cell num ${need && !value && !placeholder ? "need" : ""}`}
         inputMode="numeric"
         disabled={disabled}
         value={shown}
-        placeholder={placeholder}
+        placeholder={placeholder || (need ? "doplňte" : "")}
         onFocus={(e) => { setDraft(value ? String(value) : ""); requestAnimationFrame(() => e.target.select()); }}
         onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ""))}
         onBlur={() => { if (draft !== null) { onCommit(parseNum(draft)); setDraft(null); } }}
