@@ -22,6 +22,12 @@ const kcShort = (n: number) => (!n ? "0" : n >= 1e6 ? mil(n) : `${Math.round(n /
 const people = (n: number) => (!n ? "—" : n >= 1e6 ? `${(n / 1e6).toLocaleString("cs-CZ", { maximumFractionDigits: 2 })} mil. osob` : `${Math.round(n / 1000).toLocaleString("cs-CZ")} tis. osob`);
 const pct0 = (n: number) => Math.round(n * 100) + " %";
 const pp = (n: number) => `${n < 0 ? "−" : ""}${Math.abs(n * 100).toFixed(1).replace(".", ",")} p.b.`;
+/**
+ * Úvodní věta (zásah v %, frekvence za měsíc) a filtry pod ní. Zadavatel ji zatím
+ * nechce (listopad 2026), možná později — proto jen schovaná, ne smazaná.
+ */
+const SHOW_LEAD = false;
+
 const freq = (n: number) => (n ? n.toFixed(1).replace(".", ",") + "×" : "—");
 
 /** Pojem s vysvětlením za otazníkem — na stránce nezabírá místo. */
@@ -115,8 +121,8 @@ export function Overview({
   return (
     <div className="db">
       {/* první obrazovka: věta (jediné místo s procenty a frekvencí) + rozpočet */}
-      <section className="db-hero db-hero2">
-        <div className="db-card db-lead">
+      <section className="db-hero db-hero2" style={SHOW_LEAD ? undefined : { gridTemplateColumns: "minmax(0, 360px)" }}>
+        {SHOW_LEAD && <div className="db-card db-lead">
           <p>
             {subject} zasáhne <b>{pct0(total.net)}</b> {women ? "žen" : "lidí z cílové skupiny"}
             {" "}{tgName.replace(/^Ženy\s*/, "")}
@@ -154,7 +160,7 @@ export function Overview({
               <button className="linkbtn" onClick={() => router.push(`${path}?plan=${planId}`, { scroll: false })}>zrušit filtr</button>
             )}
           </div>
-        </div>
+        </div>}
         <div className="db-card db-kpi">
           <span className="db-label">Rozpočet včetně fee</span>
           <span className="db-big">{mil(total.cost)}<span className="cur">Kč</span></span>
